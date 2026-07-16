@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "terminalcraft:block/disk_drive" },
+    "facing=south": { "model": "terminalcraft:block/disk_drive", "y": 180 },
+    "facing=west":  { "model": "terminalcraft:block/disk_drive", "y": 270 },
+    "facing=east":  { "model": "terminalcraft:block/disk_drive", "y": 90 }
+  }
+}

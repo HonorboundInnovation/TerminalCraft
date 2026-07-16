@@ -1,0 +1,226 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+version = mod_version
+group = mod_group_id
+
+base { archivesName = mod_id }
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
+
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods { "${mod_id}" { source sourceSets.main } }
+        }
+        client { property 'forge.enabledGameTestNamespaces', mod_id }
+        server {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            args '--nogui'
+        }
+        gameTestServer { property 'forge.enabledGameTestNamespaces', mod_id }
+        data {
+            workingDirectory project.file('run-data')
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+def sophisticatedModsDir = providers.gradleProperty('terminalcraft.sophisticatedModsDir').orNull
+def storageDrawersModsDir = providers.gradleProperty('terminalcraft.storageDrawersModsDir').orNull
+def refinedStorageModsDir = providers.gradleProperty('terminalcraft.refinedStorageModsDir').orNull
+
+// Optional-mod GameTests link their public API types and are compiled only for the matching
+// focused profile. Production/minimal runtime remains free of test-class linkage to absent mods.
+sourceSets.main.java {
+    if (sophisticatedModsDir == null || sophisticatedModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/SophisticatedGenericItemCapabilityGameTests.java'
+    }
+    if (storageDrawersModsDir == null || storageDrawersModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/StorageDrawersCompatibilityGameTests.java'
+    }
+    if (refinedStorageModsDir == null || refinedStorageModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/RefinedStorageBridgeGameTests.java'
+    }
+}
+repositories {
+    maven { url = "https://cursemaven.com" }
+    maven { url = "https://api.modrinth.com/maven" }
+    if (sophisticatedModsDir != null && !sophisticatedModsDir.isBlank()) {
+        flatDir { dirs sophisticatedModsDir }
+    }
+    if (storageDrawersModsDir != null && !storageDrawersModsDir.isBlank()) {
+        flatDir { dirs storageDrawersModsDir }
+    }
+    if (refinedStorageModsDir != null && !refinedStorageModsDir.isBlank()) {
+        flatDir { dirs refinedStorageModsDir }
+    }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // Public compile-time APIs only; these mods remain optional and are never bundled.
+    compileOnly fg.deobf("curse.maven:sophisticated-core-618298:7870062")
+    compileOnly fg.deobf("curse.maven:sophisticated-storage-619320:7865058")
+    compileOnly fg.deobf("curse.maven:sophisticated-backpacks-422301:7853013")
+    compileOnly fg.deobf("curse.maven:storage-drawers-223852:6994481")
+    compileOnly fg.deobf("maven.modrinth:refined-storage:1.12.4")
+
+    // Optional local focused profile. No Sophisticated artifact is bundled or required by default.
+    if (sophisticatedModsDir != null && !sophisticatedModsDir.isBlank()) {
+        def requiredModules = ['sophisticatedcore', 'sophisticatedstorage', 'sophisticatedbackpacks']
+        requiredModules.each { module ->
+            def matches = fileTree(sophisticatedModsDir) { include "${module}-1.20.1-*.jar" }.files.toList().sort()
+            if (matches.size() != 1) {
+                throw new GradleException("Expected exactly one ${module}-1.20.1-*.jar in ${sophisticatedModsDir}, found ${matches.size()}")
+            }
+            def fileName = matches.first().name
+            def moduleVersion = fileName.substring(module.length() + 1, fileName.length() - 4)
+            runtimeOnly fg.deobf("terminalcraft.focused:${module}:${moduleVersion}")
+        }
+    }
+
+    // Optional focused Storage Drawers runtime; the instance remains read-only.
+    if (storageDrawersModsDir != null && !storageDrawersModsDir.isBlank()) {
+        def matches = fileTree(storageDrawersModsDir) {
+            include 'StorageDrawers-forge-1.20.1-*.jar'
+        }.files.toList().sort()
+        if (matches.size() != 1) {
+            throw new GradleException("Expected exactly one StorageDrawers-forge-1.20.1-*.jar in ${storageDrawersModsDir}, found ${matches.size()}")
+        }
+        def fileName = matches.first().name
+        def moduleVersion = fileName.substring('StorageDrawers-forge-'.length(), fileName.length() - 4)
+        runtimeOnly fg.deobf("terminalcraft.focused:StorageDrawers-forge:${moduleVersion}")
+    }
+    // Optional focused Refined Storage 1.12.4 runtime; never bundled or required by default.
+    if (refinedStorageModsDir != null && !refinedStorageModsDir.isBlank()) {
+        def matches = fileTree(refinedStorageModsDir) { include 'refinedstorage-1.12.4.jar' }.files.toList().sort()
+        if (matches.size() != 1) {
+            throw new GradleException("Expected exactly one refinedstorage-1.12.4.jar in ${refinedStorageModsDir}, found ${matches.size()}")
+        }
+        runtimeOnly fg.deobf("terminalcraft.focused:refinedstorage:1.12.4")
+    }
+
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
+            forge_version: forge_version, forge_version_range: forge_version_range,
+            loader_version_range: loader_version_range,
+            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, mod_version: mod_version,
+            mod_authors: mod_authors, mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                'Specification-Title': mod_id,
+                'Specification-Vendor': mod_authors,
+                'Specification-Version': '1',
+                'Implementation-Title': project.name,
+                'Implementation-Version': project.jar.archiveVersion,
+                'Implementation-Vendor': mod_authors,
+                'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+    finalizedBy 'reobfJar'
+}
+
+publishing {
+    publications { register('mavenJava', MavenPublication) { artifact jar } }
+    repositories { maven { url "file://${project.projectDir}/mcmodsrepo" } }
+}
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+def headlessTests = [
+        shellSelfTest: ['Run BashShell headless self-test', 'com.malice.terminalcraft.shell.BashShellSelfTest'],
+        shellCharacterizationTest: ['Run external BashShell compatibility characterization tests', 'com.malice.terminalcraft.shell.BashShellCharacterizationTest'],
+        shellArchitectureExtractionTest: ['Run composed host-service and shell command-module tests', 'com.malice.terminalcraft.shell.ShellArchitectureExtractionTest'],
+        bundledWireShellCommandTest: ['Run bundled-control cable shell bridge tests', 'com.malice.terminalcraft.shell.BundledWireShellCommandTest'],
+        serverShellCommandTest: ['Run server rack shell command tests', 'com.malice.terminalcraft.shell.ServerShellCommandTest'],
+        serverJobSchedulerTest: ['Run persistent bounded server job scheduler tests', 'com.malice.terminalcraft.server.ServerJobSchedulerTest'],
+        commandSubmissionGuardTest: ['Run authoritative command packet admission tests', 'com.malice.terminalcraft.network.CommandSubmissionGuardTest'],
+        shellSyncPolicyTest: ['Run authoritative shell synchronization budget tests', 'com.malice.terminalcraft.network.ShellSyncPolicyTest'],
+        networkEnvelopeTest: ['Run bounded versioned network envelope tests', 'com.malice.terminalcraft.network.NetworkEnvelopeTest'],
+        rednetAddressTest: ['Run stable RedNet address identity tests', 'com.malice.terminalcraft.network.RednetAddressTest'],
+        rednetInterfaceRouteTest: ['Run typed RedNet interface and route model tests', 'com.malice.terminalcraft.network.RednetInterfaceRouteTest'],
+        rednetProtocolTest: ['Run versioned RedNet protocol and service endpoint tests', 'com.malice.terminalcraft.network.RednetProtocolTest'],
+        rednetDeliveryRuntimeTest: ['Run bounded RedNet delivery acknowledgement and retry tests', 'com.malice.terminalcraft.network.RednetDeliveryRuntimeTest'],
+        rednetDuplicateFilterTest: ['Run bounded RedNet recipient duplicate-filter tests', 'com.malice.terminalcraft.network.RednetDuplicateFilterTest'],
+        rednetTrafficQuotaTest: ['Run RedNet logical-tick message and byte quota tests', 'com.malice.terminalcraft.network.RednetTrafficQuotaTest'],
+        rednetQueueBudgetTest: ['Run RedNet per-queue and scope-wide count/byte budget tests', 'com.malice.terminalcraft.network.RednetQueueBudgetTest'],
+        wiredSubnetModelTest: ['Run deterministic wired subnet and router-interface model tests', 'com.malice.terminalcraft.network.WiredSubnetModelTest'],
+        rednetHostDirectoryTest: ['Run RedNet host-name and directory tests', 'com.malice.terminalcraft.network.RednetHostDirectoryTest'],
+        rednetNetworkNameTest: ['Run RedNet logical network-name validation tests', 'com.malice.terminalcraft.network.RednetNetworkNameTest'],
+        rednetServiceDirectoryTest: ['Run RedNet named-service directory tests', 'com.malice.terminalcraft.network.RednetServiceDirectoryTest'],
+        rednetRuntimeScopeTest: ['Run RedNet logical-server and dimension isolation tests', 'com.malice.terminalcraft.network.RednetRuntimeScopeTest'],
+        rednetShellCommandTest: ['Run RedNet named-host shell command tests', 'com.malice.terminalcraft.shell.RednetShellCommandTest'],
+        persistenceVersionCharacterizationTest: ['Run persistence schema and legacy compatibility characterization tests', 'com.malice.terminalcraft.persistence.PersistenceVersionCharacterizationTest'],
+        persistenceHardeningTest: ['Run corrupt, oversized, and migration-aware persistence tests', 'com.malice.terminalcraft.persistence.PersistenceHardeningTest'],
+        standaloneItemLifecycleCharacterizationTest: ['Run pocket-terminal and floppy lifecycle characterization tests', 'com.malice.terminalcraft.item.StandaloneItemLifecycleCharacterizationTest'],
+        deviceIdentityCharacterizationTest: ['Run stable device identity persistence characterization tests', 'com.malice.terminalcraft.device.DeviceIdentityCharacterizationTest'],
+        principalIdentityTest: ['Run typed player/device/service/process identity tests', 'com.malice.terminalcraft.device.PrincipalIdentityTest'],
+        deviceAuthorizationTest: ['Run central device authorization decision tests', 'com.malice.terminalcraft.device.DeviceAuthorizationTest'],
+        deviceApiCharacterizationTest: ['Run unified device API model and lifecycle characterization tests', 'com.malice.terminalcraft.device.DeviceApiCharacterizationTest'],
+        deviceEventRuntimeTest: ['Run bounded device event subscription runtime tests', 'com.malice.terminalcraft.device.DeviceEventRuntimeTest'],
+        deviceInvocationBudgetTest: ['Run shared logical-tick device invocation budget tests', 'com.malice.terminalcraft.device.DeviceInvocationBudgetTest'],
+        terminalHostDeviceEndpointTest: ['Run read-only TerminalHost device adapter characterization tests', 'com.malice.terminalcraft.device.TerminalHostDeviceEndpointTest'],
+        deviceShellCommandTest: ['Run unified device shell command characterization tests', 'com.malice.terminalcraft.device.DeviceShellCommandTest'],
+        integratedStorageShellCommandTest: ['Run Sophisticated Storage and Storage Drawers shell program tests', 'com.malice.terminalcraft.device.IntegratedStorageShellCommandTest'],
+        monitorDeviceEndpointTest: ['Run monitor Device API adapter characterization tests', 'com.malice.terminalcraft.device.MonitorDeviceEndpointTest'],
+        textEditorBufferTest: ['Run GUI script editor buffer tests', 'com.malice.terminalcraft.client.TextEditorBufferTest'],
+        terminalBufferTest: ['Run ComputerCraft-compatible terminal buffer tests', 'com.malice.terminalcraft.device.TerminalBufferTest'],
+        peripheralDeviceEndpointTest: ['Run modem and disk-drive Device API adapter tests', 'com.malice.terminalcraft.device.PeripheralDeviceEndpointTest'],
+        genericCapabilityDeviceEndpointTest: ['Run generic Forge capability Device API adapter tests', 'com.malice.terminalcraft.device.GenericCapabilityDeviceEndpointTest'],
+        genericItemStorageTest: ['Run generic item storage query and pagination tests', 'com.malice.terminalcraft.device.GenericItemStorageTest'],
+        genericCraftingServiceTest: ['Run generic crafting service and job contract tests', 'com.malice.terminalcraft.device.GenericCraftingServiceTest'],
+        durableCraftingLedgerTest: ['Run durable native crafting correlation and crash-window tests', 'com.malice.terminalcraft.device.DurableCraftingLedgerTest'],
+        compositeDeviceEndpointTest: ['Run additive contextual device endpoint composition tests', 'com.malice.terminalcraft.device.CompositeDeviceEndpointTest'],
+        refinedStorageBridgeBlockEntityTest: ['Run Refined Storage bridge crafting-ledger NBT round-trip tests', 'com.malice.terminalcraft.blockentity.RefinedStorageBridgeBlockEntityTest'],
+        refinedStorageCraftingServiceTest: ['Run deterministic Refined Storage crafting adapter fault tests', 'com.malice.terminalcraft.integration.refinedstorage.RefinedStorageCraftingServiceTest'],
+        storageShellCommandTest: ['Run generic storage human and structured shell command tests', 'com.malice.terminalcraft.device.StorageShellCommandTest'],
+        crossStorageAcceptanceProgramTest: ['Run provider-neutral cross-storage acceptance program', 'com.malice.terminalcraft.device.CrossStorageAcceptanceProgramTest'],
+        exactItemTransferCoordinatorTest: ['Run exact item transfer conservation and replay tests', 'com.malice.terminalcraft.device.ExactItemTransferCoordinatorTest'],
+        exactFluidTransferCoordinatorTest: ['Run exact fluid transfer conservation and replay tests', 'com.malice.terminalcraft.device.ExactFluidTransferCoordinatorTest'],
+        forgeItemStackTransferPortTest: ['Run exact Forge ItemStack transfer port tests', 'com.malice.terminalcraft.device.ForgeItemStackTransferPortTest'],
+        forgeFluidStackTransferPortTest: ['Run exact Forge FluidStack transfer port tests', 'com.malice.terminalcraft.device.ForgeFluidStackTransferPortTest'],
+        exactItemTransferSavedDataTest: ['Run exact item transfer SavedData round-trip tests', 'com.malice.terminalcraft.device.ExactItemTransferSavedDataTest'],
+        exactFluidTransferSavedDataTest: ['Run exact fluid transfer SavedData round-trip tests', 'com.malice.terminalcraft.device.ExactFluidTransferSavedDataTest'],
+        adjacentForgeEndpointResolverTest: ['Run adjacent Forge endpoint identity and authority tests', 'com.malice.terminalcraft.device.AdjacentForgeEndpointResolverTest'],
+        exactItemTransferServiceTest: ['Run exact item transfer service authority and result-mapping tests', 'com.malice.terminalcraft.device.ExactItemTransferServiceTest'],
+        exactFluidTransferServiceTest: ['Run exact fluid transfer service authority and result-mapping tests', 'com.malice.terminalcraft.device.ExactFluidTransferServiceTest'],
+        exactFluidAccessContractTest: ['Run public exact fluid transfer and escrow access contract tests', 'com.malice.terminalcraft.device.ExactFluidAccessContractTest'],
+        optionalIntegrationsTest: ['Run optional integration registry absence-safety tests', 'com.malice.terminalcraft.integration.OptionalIntegrationsTest'],
+        terminalChunkTicketPolicyTest: ['Run bounded terminal chunk-ticket policy tests', 'com.malice.terminalcraft.world.TerminalChunkTicketPolicyTest']
+]
+
+headlessTests.each { taskName, configuration ->
+    tasks.register(taskName, JavaExec) {
+        group = 'verification'
+        description = configuration[0]
+        dependsOn testClasses
+        classpath = sourceSets.test.runtimeClasspath
+        mainClass = configuration[1]
+    }
+}
+
+check.dependsOn headlessTests.keySet()

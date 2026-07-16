@@ -1,0 +1,21 @@
+{
+  "textures": {
+    "face": "terminalcraft:block/router_blade_front",
+    "casing": "terminalcraft:block/network_router_casing",
+    "particle": "terminalcraft:block/network_router_casing"
+  },
+  "elements": [
+    {
+      "from": [1, 1, -0.75],
+      "to": [15, 7, 0.5],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#face" },
+        "south": { "texture": "#casing" },
+        "west": { "texture": "#casing" },
+        "east": { "texture": "#casing" },
+        "up": { "texture": "#casing" },
+        "down": { "texture": "#casing" }
+      }
+    }
+  ]
+}

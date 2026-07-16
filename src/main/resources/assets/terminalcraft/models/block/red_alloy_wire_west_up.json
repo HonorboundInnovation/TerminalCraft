@@ -1,0 +1,40 @@
+{
+  "textures": {
+    "particle": "terminalcraft:block/red_alloy_wire",
+    "wire": "terminalcraft:block/red_alloy_wire"
+  },
+  "elements": [
+    {
+      "from": [
+        14,
+        9,
+        7
+      ],
+      "to": [
+        16,
+        16,
+        9
+      ],
+      "faces": {
+        "down": {
+          "texture": "#wire"
+        },
+        "up": {
+          "texture": "#wire"
+        },
+        "north": {
+          "texture": "#wire"
+        },
+        "south": {
+          "texture": "#wire"
+        },
+        "west": {
+          "texture": "#wire"
+        },
+        "east": {
+          "texture": "#wire"
+        }
+      }
+    }
+  ]
+}

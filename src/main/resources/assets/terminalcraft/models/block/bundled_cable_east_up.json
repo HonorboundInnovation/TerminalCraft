@@ -1,0 +1,40 @@
+{
+  "textures": {
+    "particle": "terminalcraft:block/bundled_cable",
+    "wire": "terminalcraft:block/bundled_cable"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        11,
+        5
+      ],
+      "to": [
+        4,
+        16,
+        11
+      ],
+      "faces": {
+        "down": {
+          "texture": "#wire"
+        },
+        "up": {
+          "texture": "#wire"
+        },
+        "north": {
+          "texture": "#wire"
+        },
+        "south": {
+          "texture": "#wire"
+        },
+        "west": {
+          "texture": "#wire"
+        },
+        "east": {
+          "texture": "#wire"
+        }
+      }
+    }
+  ]
+}

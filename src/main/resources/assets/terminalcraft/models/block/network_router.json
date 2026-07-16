@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "particle": "terminalcraft:block/network_router_casing",
+    "down": "terminalcraft:block/network_router_casing",
+    "up": "terminalcraft:block/network_router_casing",
+    "north": "terminalcraft:block/network_router_face",
+    "south": "terminalcraft:block/network_router_face",
+    "west": "terminalcraft:block/network_router_face",
+    "east": "terminalcraft:block/network_router_face"
+  }
+}

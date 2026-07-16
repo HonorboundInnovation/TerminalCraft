@@ -1,0 +1,25 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "particle": "terminalcraft:block/disk_drive_front",
+    "front": "terminalcraft:block/disk_drive_front",
+    "back": "terminalcraft:block/disk_drive_back",
+    "side": "terminalcraft:block/disk_drive_side",
+    "top": "terminalcraft:block/disk_drive_top",
+    "bottom": "terminalcraft:block/disk_drive_back"
+  },
+  "elements": [
+    {
+      "from": [0, 0, 0],
+      "to": [16, 16, 16],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#front", "cullface": "north" },
+        "east":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "east" },
+        "south": { "uv": [0, 0, 16, 16], "texture": "#back", "cullface": "south" },
+        "west":  { "uv": [0, 0, 16, 16], "texture": "#side", "cullface": "west" },
+        "up":    { "uv": [0, 0, 16, 16], "texture": "#top", "cullface": "up" },
+        "down":  { "uv": [0, 0, 16, 16], "texture": "#bottom", "cullface": "down" }
+      }
+    }
+  ]
+}

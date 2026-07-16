@@ -1,0 +1,43 @@
+# Build and runtime output
+.gradle/
+build/
+run/
+run-data/
+logs/
+
+# IDE files
+bin/
+out/
+eclipse/
+.settings/
+.metadata/
+.idea/
+*.launch
+*.classpath
+*.project
+*.iml
+*.ipr
+*.iws
+
+# Local harness and project records
+.vegvisir/
+completion-evidence/
+tools/
+src/generated/
+
+# Documentation and handoff files excluded from the public source repository
+*.md
+README.txt
+changelog.txt
+handoff-cont.md
+
+# Local environment and diagnostics
+.env
+.env.*
+local.properties
+*.log
+hs_err_pid*
+
+# OS files
+.DS_Store
+Thumbs.db

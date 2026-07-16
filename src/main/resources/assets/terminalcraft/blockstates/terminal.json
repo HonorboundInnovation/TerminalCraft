@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "terminalcraft:block/terminal" },
+    "facing=south": { "model": "terminalcraft:block/terminal", "y": 180 },
+    "facing=west":  { "model": "terminalcraft:block/terminal", "y": 270 },
+    "facing=east":  { "model": "terminalcraft:block/terminal", "y": 90 }
+  }
+}

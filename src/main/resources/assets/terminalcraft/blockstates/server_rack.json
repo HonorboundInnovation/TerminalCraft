@@ -1,0 +1,195 @@
+{
+  "multipart": [
+    {
+      "when": {
+        "facing": "north"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "lower_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_server"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "lower_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_router"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "upper_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_server"
+      }
+    },
+    {
+      "when": {
+        "facing": "north",
+        "upper_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_router"
+      }
+    },
+    {
+      "when": {
+        "facing": "east"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "lower_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_server",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "lower_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_router",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "upper_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_server",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "east",
+        "upper_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_router",
+        "y": 90
+      }
+    },
+    {
+      "when": {
+        "facing": "south"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "lower_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_server",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "lower_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_router",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "upper_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_server",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "south",
+        "upper_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_router",
+        "y": 180
+      }
+    },
+    {
+      "when": {
+        "facing": "west"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "lower_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_server",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "lower_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_lower_router",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "upper_module": "server"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_server",
+        "y": 270
+      }
+    },
+    {
+      "when": {
+        "facing": "west",
+        "upper_module": "router"
+      },
+      "apply": {
+        "model": "terminalcraft:block/server_rack_upper_router",
+        "y": 270
+      }
+    }
+  ]
+}

@@ -1,0 +1,268 @@
+{
+  "multipart": [
+    {
+      "when": {
+        "face": "down"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_down_core"
+      }
+    },
+    {
+      "when": {
+        "face": "down",
+        "north": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_down_north"
+      }
+    },
+    {
+      "when": {
+        "face": "down",
+        "south": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_down_south"
+      }
+    },
+    {
+      "when": {
+        "face": "down",
+        "west": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_down_west"
+      }
+    },
+    {
+      "when": {
+        "face": "down",
+        "east": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_down_east"
+      }
+    },
+    {
+      "when": {
+        "face": "up"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_up_core"
+      }
+    },
+    {
+      "when": {
+        "face": "up",
+        "north": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_up_north"
+      }
+    },
+    {
+      "when": {
+        "face": "up",
+        "south": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_up_south"
+      }
+    },
+    {
+      "when": {
+        "face": "up",
+        "west": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_up_west"
+      }
+    },
+    {
+      "when": {
+        "face": "up",
+        "east": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_up_east"
+      }
+    },
+    {
+      "when": {
+        "face": "north"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_north_core"
+      }
+    },
+    {
+      "when": {
+        "face": "north",
+        "down": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_north_down"
+      }
+    },
+    {
+      "when": {
+        "face": "north",
+        "up": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_north_up"
+      }
+    },
+    {
+      "when": {
+        "face": "north",
+        "west": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_north_west"
+      }
+    },
+    {
+      "when": {
+        "face": "north",
+        "east": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_north_east"
+      }
+    },
+    {
+      "when": {
+        "face": "south"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_south_core"
+      }
+    },
+    {
+      "when": {
+        "face": "south",
+        "down": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_south_down"
+      }
+    },
+    {
+      "when": {
+        "face": "south",
+        "up": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_south_up"
+      }
+    },
+    {
+      "when": {
+        "face": "south",
+        "west": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_south_west"
+      }
+    },
+    {
+      "when": {
+        "face": "south",
+        "east": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_south_east"
+      }
+    },
+    {
+      "when": {
+        "face": "west"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_west_core"
+      }
+    },
+    {
+      "when": {
+        "face": "west",
+        "down": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_west_down"
+      }
+    },
+    {
+      "when": {
+        "face": "west",
+        "up": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_west_up"
+      }
+    },
+    {
+      "when": {
+        "face": "west",
+        "north": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_west_north"
+      }
+    },
+    {
+      "when": {
+        "face": "west",
+        "south": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_west_south"
+      }
+    },
+    {
+      "when": {
+        "face": "east"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_east_core"
+      }
+    },
+    {
+      "when": {
+        "face": "east",
+        "down": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_east_down"
+      }
+    },
+    {
+      "when": {
+        "face": "east",
+        "up": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_east_up"
+      }
+    },
+    {
+      "when": {
+        "face": "east",
+        "north": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_east_north"
+      }
+    },
+    {
+      "when": {
+        "face": "east",
+        "south": "true"
+      },
+      "apply": {
+        "model": "terminalcraft:block/bundled_cable_east_south"
+      }
+    }
+  ]
+}

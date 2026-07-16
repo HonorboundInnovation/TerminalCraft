@@ -1,0 +1,14 @@
+{
+  "replace": false,
+  "values": [
+    "terminalcraft:terminal",
+    "terminalcraft:turtle",
+    "terminalcraft:monitor",
+    "terminalcraft:modem",
+    "terminalcraft:disk_drive",
+    "terminalcraft:network_cable",
+    "terminalcraft:network_router",
+    "terminalcraft:bundled_cable",
+    "terminalcraft:server_rack"
+  ]
+}

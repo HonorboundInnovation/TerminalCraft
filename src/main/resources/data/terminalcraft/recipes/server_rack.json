@@ -1,0 +1,12 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["ITI", "CRC", "INI"],
+  "key": {
+    "I": { "item": "minecraft:iron_ingot" },
+    "T": { "item": "terminalcraft:terminal" },
+    "C": { "item": "minecraft:comparator" },
+    "R": { "item": "minecraft:redstone_block" },
+    "N": { "item": "terminalcraft:network_router" }
+  },
+  "result": { "item": "terminalcraft:server_rack" }
+}

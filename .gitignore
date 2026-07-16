@@ -25,8 +25,9 @@ completion-evidence/
 tools/
 src/generated/
 
-# Documentation and handoff files excluded from the public source repository
+# Keep internal planning documents private; publish only the project README
 *.md
+!README.md
 README.txt
 changelog.txt
 handoff-cont.md

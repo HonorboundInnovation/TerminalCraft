@@ -1148,6 +1148,63 @@ public final class WiredNetworkTopologyGameTests {
         helper.assertTrue(unloaded.nodes() < afterColdRoute.nodes()
                         && !WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
                 "chunk unload must remove indexed nodes without consulting unloaded world state: " + unloaded);
+
+        WiredNetworkTopology.loadChunk(helper.getLevel(), helper.getLevel().getChunkAt(absoluteFirst));
+        WiredNetworkTopology.IndexDiagnostics reloaded =
+                WiredNetworkTopology.indexDiagnostics(helper.getLevel());
+        helper.assertTrue(reloaded.nodes() >= afterColdRoute.nodes()
+                        && WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "chunk load must repopulate cable-only topology and repair boundary snapshots: " + reloaded);
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 120)
+    public static void rapidPartitionMergeNeverUsesStaleRoutes(GameTestHelper helper) {
+        BlockPos firstPos = new BlockPos(1, 2, 2);
+        BlockPos bridgePos = new BlockPos(2, 2, 2);
+        BlockPos secondPos = new BlockPos(3, 2, 2);
+        helper.setBlock(firstPos, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(bridgePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(secondPos, ModRegistries.MODEM_BLOCK.get());
+        ModemBlockEntity first = (ModemBlockEntity) helper.getBlockEntity(firstPos);
+        ModemBlockEntity second = (ModemBlockEntity) helper.getBlockEntity(secondPos);
+        first.setWireless(false);
+        second.setWireless(false);
+        first.openChannel(144);
+        second.openChannel(144);
+        helper.assertTrue(second.setHostname("rapid-target"), "target hostname must register");
+
+        BlockPos absoluteFirst = helper.absolutePos(firstPos);
+        BlockPos absoluteSecond = helper.absolutePos(secondPos);
+        long previousRevision = WiredNetworkTopology.cacheDiagnostics(helper.getLevel()).revision();
+        for (int cycle = 0; cycle < 8; cycle++) {
+            helper.destroyBlock(bridgePos);
+            WiredNetworkTopology.CacheDiagnostics partitioned =
+                    WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+            helper.assertTrue(partitioned.revision() > previousRevision
+                            && !WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond)
+                            && !first.transmitTo("rapid-target", 144, 145, "blocked-" + cycle),
+                    "partition cycle " + cycle + " must reject stale reachability immediately");
+
+            helper.setBlock(bridgePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+            WiredNetworkTopology.CacheDiagnostics merged =
+                    WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+            helper.assertTrue(merged.revision() > partitioned.revision()
+                            && WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond)
+                            && first.transmitTo("rapid-target", 144, 145, "merged-" + cycle),
+                    "merge cycle " + cycle + " must restore a fresh route immediately");
+            previousRevision = merged.revision();
+        }
+
+        java.util.List<String> received = second.receiveMessages(16);
+        helper.assertTrue(received.size() == 8,
+                "only one payload from each merged state may enter the recipient queue: " + received);
+        for (int cycle = 0; cycle < 8; cycle++) {
+            int expected = cycle;
+            helper.assertTrue(received.stream().filter(line -> line.contains("msg=merged-" + expected)).count() == 1
+                            && received.stream().noneMatch(line -> line.contains("msg=blocked-" + expected)),
+                    "partition/merge cycle " + cycle + " must preserve exact delivery isolation");
+        }
         helper.succeed();
     }
 

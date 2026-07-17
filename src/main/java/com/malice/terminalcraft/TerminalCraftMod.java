@@ -71,14 +71,14 @@ public final class TerminalCraftMod {
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onBlockBroken(final net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
-            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(level, event.getPos());
+            com.malice.terminalcraft.network.WiredNetworkTopology.remove(level, event.getPos());
         }
     }
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onChunkLoaded(final net.minecraftforge.event.level.ChunkEvent.Load event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
-            com.malice.terminalcraft.network.WiredNetworkTopology.invalidateChunk(level, event.getChunk().getPos());
+            com.malice.terminalcraft.network.WiredNetworkTopology.loadChunk(level, event.getChunk());
         }
     }
 

@@ -2,12 +2,16 @@ package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.WiredNetworkNode;
 import com.malice.terminalcraft.block.NetworkCableBlock;
+import com.malice.terminalcraft.block.ModemBlock;
 import com.malice.terminalcraft.blockentity.ModemBlockEntity;
 import com.malice.terminalcraft.blockentity.NetworkRouterBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkAccess;
+import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.core.SectionPos;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -169,6 +173,7 @@ public final class WiredNetworkTopology {
         boolean truncated() { return truncated; }
 
         synchronized void refresh(ServerLevel level, BlockPos changed) {
+            if (snapshotNode(level, changed) == null && !hasIndexedNodeNear(changed)) return;
             Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
             // Surface-cable external corners are local but may extend beyond a face neighbor.
             for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++) {
@@ -188,6 +193,7 @@ public final class WiredNetworkTopology {
         }
 
         synchronized void remove(ServerLevel level, BlockPos removed) {
+            if (!nodes.containsKey(removed) && !hasIndexedNodeNear(removed)) return;
             Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
             next.remove(removed);
             // Refresh only the bounded corner-sensitive neighborhood. The removed node stays absent
@@ -207,6 +213,58 @@ public final class WiredNetworkTopology {
             }
             nodes = Map.copyOf(next);
             revisions++;
+        }
+
+        synchronized void loadChunk(ServerLevel level, ChunkAccess chunk) {
+            Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
+            net.minecraft.world.level.ChunkPos chunkPos = chunk.getPos();
+            next.keySet().removeIf(pos -> (pos.getX() >> 4) == chunkPos.x
+                    && (pos.getZ() >> 4) == chunkPos.z);
+
+            Set<BlockPos> candidates = new HashSet<>();
+            LevelChunkSection[] sections = chunk.getSections();
+            for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+                LevelChunkSection section = sections[sectionIndex];
+                if (section == null || section.hasOnlyAir()
+                        || !section.maybeHas(state -> state.getBlock() instanceof WiredNetworkNode
+                        || state.getBlock() instanceof ModemBlock)) continue;
+                int baseY = SectionPos.sectionToBlockCoord(chunk.getSectionYFromSectionIndex(sectionIndex));
+                for (int localY = 0; localY < 16; localY++) {
+                    for (int localX = 0; localX < 16; localX++) {
+                        for (int localZ = 0; localZ < 16; localZ++) {
+                            BlockState state = section.getBlockState(localX, localY, localZ);
+                            if (!(state.getBlock() instanceof WiredNetworkNode)
+                                    && !(state.getBlock() instanceof ModemBlock)) continue;
+                            BlockPos found = new BlockPos(chunkPos.getMinBlockX() + localX,
+                                    baseY + localY, chunkPos.getMinBlockZ() + localZ);
+                            for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) {
+                                for (int z = -2; z <= 2; z++) candidates.add(found.offset(x, y, z).immutable());
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (BlockPos candidate : candidates) {
+                IndexedNode snapshot = snapshotNode(level, candidate);
+                if (snapshot == null) {
+                    next.remove(candidate);
+                } else if (next.containsKey(candidate) || next.size() < MAX_INDEXED_NODES) {
+                    next.put(candidate, snapshot);
+                } else {
+                    truncated = true;
+                }
+                refreshedPositions++;
+            }
+            nodes = Map.copyOf(next);
+            revisions++;
+        }
+
+        private boolean hasIndexedNodeNear(BlockPos center) {
+            for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++) {
+                if (nodes.containsKey(center.offset(x, y, z))) return true;
+            }
+            return false;
         }
 
         synchronized void removeChunk(net.minecraft.world.level.ChunkPos chunk) {
@@ -307,7 +365,14 @@ public final class WiredNetworkTopology {
         cache(level).invalidate();
     }
 
-    /** Chunk-load boundary invalidation; block-entity onLoad hooks populate the node index. */
+    /** Populates cable-only and block-entity topology when a loaded chunk becomes authoritative. */
+    public static void loadChunk(ServerLevel level, ChunkAccess chunk) {
+        if (level == null || chunk == null) return;
+        index(level).loadChunk(level, chunk);
+        cache(level).invalidate();
+    }
+
+    /** Compatibility hook for callers that only need to discard route snapshots. */
     public static void invalidateChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunk) {
         if (level == null || chunk == null) return;
         cache(level).invalidate();

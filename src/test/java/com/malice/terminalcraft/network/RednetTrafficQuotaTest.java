@@ -32,11 +32,31 @@ public final class RednetTrafficQuotaTest {
                 "malformed admission input must fail closed without throwing");
 
         RednetTrafficQuota bounded = new RednetTrafficQuota();
-        for (int i = 0; i < RednetTrafficQuota.MAX_TRACKED_SENDERS + 8; i++) {
-            check(bounded.admit(new UUID(0, i + 1L), "x", 0), "distinct sender must be admitted");
+        for (int i = 0; i < RednetTrafficQuota.MAX_TRACKED_SENDERS; i++) {
+            check(bounded.admit(new UUID(0, i + 1L), "x", 30), "tracked sender must be admitted");
         }
-        check(bounded.trackedSenders() == RednetTrafficQuota.MAX_TRACKED_SENDERS,
-                "tracked sender state must remain bounded");
+        check(!bounded.admit(new UUID(1, 1), "x", 30)
+                        && bounded.trackedSenders() == RednetTrafficQuota.MAX_TRACKED_SENDERS,
+                "sender rotation must not evict active quota state or bypass the scope ceiling");
+        check(!bounded.admit(sender, "x", 29),
+                "logical-time rollback must not reset current congestion accounting");
+        check(bounded.admit(sender, "x", 31) && bounded.trackedSenders() == 1,
+                "a newer logical tick must reset bounded scope and sender state");
+
+        RednetTrafficQuota scopeBytes = new RednetTrafficQuota();
+        String maximumPayload = "x".repeat(NetworkEnvelope.MAX_PAYLOAD_LENGTH);
+        int sendersAtByteLimit = RednetTrafficQuota.MAX_BYTES_PER_SCOPE_PER_TICK
+                / NetworkEnvelope.MAX_PAYLOAD_LENGTH;
+        for (int i = 0; i < sendersAtByteLimit; i++) {
+            check(scopeBytes.admit(new UUID(2, i + 1L), maximumPayload, 40),
+                    "scope byte traffic within the aggregate ceiling must pass");
+        }
+        check(!scopeBytes.admit(new UUID(3, 1), "x", 40)
+                        && scopeBytes.trackedSenders() == sendersAtByteLimit,
+                "aggregate byte congestion must reject identity rotation before sender-table capacity");
+        check(scopeBytes.admit(new UUID(3, 1), "x", 41),
+                "aggregate byte accounting must reset on the next monotonic logical tick");
+
         bounded.remove(other);
         bounded.clear();
         check(bounded.trackedSenders() == 0, "clear must discard transient quota state");

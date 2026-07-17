@@ -37,7 +37,9 @@ Scripts support variables, exit status, pipes, redirection, command chaining, an
 
 ## Complete documentation
 
-Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual, including:
+Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual. For production-style examples, failure-aware automation, exact transfers, RedNet operations, events, and jobs, see the **[Advanced Script Cookbook](docs/ADVANCED_SCRIPT_COOKBOOK.md)**.
+
+The full guide includes:
 
 - every major block, item, and crafting recipe;
 - the virtual filesystem and complete shell language subset;

@@ -592,7 +592,7 @@ Scripts execute in the same shell environment in the current implementation. Tre
 
 ## 9. Useful script library
 
-The repository includes ready-to-copy files under [`examples/scripts`](../examples/scripts). These host files are examples, not automatically installed into a computer's VFS: enter them through `edit`, or place equivalent text on a mounted floppy using in-game tools. They only use syntax supported by TerminalCraft.
+The repository includes ready-to-copy files under [`examples/scripts`](../examples/scripts). These host files are examples, not automatically installed into a computer's VFS: enter them through `edit`, or place equivalent text on a mounted floppy using in-game tools. They only use syntax supported by TerminalCraft. Advanced operational examples are indexed and explained in the [Advanced Script Cookbook](ADVANCED_SCRIPT_COOKBOOK.md), with source files under [`examples/scripts/advanced`](../examples/scripts/advanced).
 
 ### 9.1 Workstation bootstrap
 

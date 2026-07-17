@@ -35,6 +35,18 @@ mount  umount  disk  server/jobs  auth/authorization
 
 Scripts support variables, exit status, pipes, redirection, command chaining, and bounded `if`, `for`, and `while` control flow.
 
+## Complete documentation
+
+Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual, including:
+
+- every major block, item, and crafting recipe;
+- the virtual filesystem and complete shell language subset;
+- scripting limits and differences from GNU Bash;
+- turtles, monitors, disks, redstone, bundled cable, and RedNet;
+- devices, storage, exact transfers, events, jobs, and authorization;
+- optional integrations, server configuration, and troubleshooting;
+- a library of practical, source-controlled [sample scripts](examples/scripts).
+
 ## Requirements
 
 | Component | Version |

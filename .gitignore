@@ -25,9 +25,11 @@ completion-evidence/
 tools/
 src/generated/
 
-# Keep internal planning documents private; publish only the project README
+# Keep internal planning documents private; publish only public documentation
 *.md
 !README.md
+!docs/
+!docs/**/*.md
 README.txt
 changelog.txt
 handoff-cont.md

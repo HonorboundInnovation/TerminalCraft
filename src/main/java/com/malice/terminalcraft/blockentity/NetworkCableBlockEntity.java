@@ -63,6 +63,24 @@ public final class NetworkCableBlockEntity extends BlockEntity {
     }
 
     @Override
+    public void onLoad() {
+        super.onLoad();
+        invalidateTopology();
+    }
+
+    @Override
+    public void setRemoved() {
+        invalidateTopology();
+        super.setRemoved();
+    }
+
+    private void invalidateTopology() {
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
+    }
+
+    @Override
     public CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
         saveAdditional(tag);

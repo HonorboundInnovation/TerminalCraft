@@ -62,6 +62,34 @@ public final class TerminalCraftMod {
     }
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
+    public void onBlockPlaced(final net.minecraftforge.event.level.BlockEvent.EntityPlaceEvent event) {
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(level, event.getPos());
+        }
+    }
+
+    @net.minecraftforge.eventbus.api.SubscribeEvent
+    public void onBlockBroken(final net.minecraftforge.event.level.BlockEvent.BreakEvent event) {
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(level, event.getPos());
+        }
+    }
+
+    @net.minecraftforge.eventbus.api.SubscribeEvent
+    public void onChunkLoaded(final net.minecraftforge.event.level.ChunkEvent.Load event) {
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidateChunk(level, event.getChunk().getPos());
+        }
+    }
+
+    @net.minecraftforge.eventbus.api.SubscribeEvent
+    public void onChunkUnloaded(final net.minecraftforge.event.level.ChunkEvent.Unload event) {
+        if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidateChunk(level, event.getChunk().getPos());
+        }
+    }
+
+    @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerTick(final net.minecraftforge.event.TickEvent.ServerTickEvent event) {
         if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
             com.malice.terminalcraft.world.TerminalChunkLoader.reconcile(event.getServer());
@@ -72,6 +100,7 @@ public final class TerminalCraftMod {
     public void onServerStopped(final net.minecraftforge.event.server.ServerStoppedEvent event) {
         com.malice.terminalcraft.device.ServerDeviceManager.clear(event.getServer());
         com.malice.terminalcraft.network.RednetNetwork.clear(event.getServer());
+        com.malice.terminalcraft.network.WiredNetworkTopology.clear(event.getServer());
         com.malice.terminalcraft.world.TerminalChunkLoader.clear(event.getServer());
         LOGGER.info("TerminalCraft device registry cleared");
     }

@@ -75,6 +75,9 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         this.wireless = wireless;
         if (level != null && !level.isClientSide) {
             RednetNetwork.rebind(level, modemId, worldPosition, getOpenChannels(), wireless, range);
+            if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+            }
         }
         setChanged();
     }
@@ -103,16 +106,21 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
 
     /** Sets a persistent logical wired network name; blank input restores legacy automatic mode. */
     public boolean setNetworkName(String requested) {
-        if (requested == null || requested.isBlank()) {
-            networkName = "";
+        String canonical = requested == null || requested.isBlank()
+                ? "" : RednetNetworkName.normalize(requested).orElse(null);
+        if (canonical == null) return false;
+        if (!canonical.equals(networkName)) {
+            networkName = canonical;
             setChanged();
-            return true;
+            invalidateWiredTopology();
         }
-        String canonical = RednetNetworkName.normalize(requested).orElse("");
-        if (canonical.isEmpty()) return false;
-        networkName = canonical;
-        setChanged();
         return true;
+    }
+
+    private void invalidateWiredTopology() {
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
     }
 
     /** Registers a unique, dimension-local RedNet host name. */
@@ -402,6 +410,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
             RednetNetwork.unregisterHost(level, modemId);
             RednetNetwork.unregisterServices(level, modemId);
         }
+        invalidateWiredTopology();
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }
@@ -411,6 +420,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         super.onLoad();
         if (level != null && !level.isClientSide) {
             reregister();
+            invalidateWiredTopology();
         }
     }
 

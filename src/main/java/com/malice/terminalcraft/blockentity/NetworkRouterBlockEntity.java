@@ -63,6 +63,9 @@ public class NetworkRouterBlockEntity extends BlockEntity {
 
     private void setChangedAndSync() {
         setChanged();
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
         if (level != null) {
             BlockState state = getBlockState();
             level.sendBlockUpdated(worldPosition, state, state, 3);
@@ -102,6 +105,22 @@ public class NetworkRouterBlockEntity extends BlockEntity {
                 }
             }
         }
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
+    }
+
+    @Override
+    public void setRemoved() {
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
+        super.setRemoved();
     }
 
     @Override

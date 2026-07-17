@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.WeakHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -99,6 +101,43 @@ public final class WiredNetworkTopology {
         }
     }
 
+    /** Bounded cache diagnostics for tests and administrator tooling. */
+    public record CacheDiagnostics(long revision, long computations, long hits, int entries) {}
+
+    private record RouteKey(BlockPos source, BlockPos destination) {
+        private RouteKey { source = source.immutable(); destination = destination.immutable(); }
+    }
+
+    private static final class RouteCache {
+        private static final int MAX_ENTRIES = 1024;
+        private final LinkedHashMap<RouteKey, Route> routes = new LinkedHashMap<>(16, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<RouteKey, Route> eldest) {
+                return size() > MAX_ENTRIES;
+            }
+        };
+        private long revision;
+        private long computations;
+        private long hits;
+
+        synchronized Route get(RouteKey key) {
+            Route route = routes.get(key);
+            if (route != null) hits++;
+            return route;
+        }
+        synchronized Route put(RouteKey key, Route route) {
+            computations++;
+            routes.put(key, route);
+            return route;
+        }
+        synchronized void invalidate() { revision++; routes.clear(); }
+        synchronized CacheDiagnostics diagnostics() {
+            return new CacheDiagnostics(revision, computations, hits, routes.size());
+        }
+    }
+
+    private static final Map<ServerLevel, RouteCache> ROUTE_CACHES =
+            java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
     private record Step(BlockPos pos, int routerHops) {}
     private record SegmentScan(Set<BlockPos> nodes, Set<BlockPos> modems, BlockPos anchor, boolean truncated) {}
     private record SegmentPolicy(boolean valid, boolean truncated) {}
@@ -164,6 +203,34 @@ public final class WiredNetworkTopology {
 
     private WiredNetworkTopology() {}
 
+    /** Invalidates bounded route snapshots after a local topology or configuration mutation. */
+    public static void invalidate(ServerLevel level, BlockPos changedPosition) {
+        if (level == null || changedPosition == null) return;
+        cache(level).invalidate();
+    }
+
+    /** Chunk load/unload invalidation; no route query scans unloaded chunks to discover changes. */
+    public static void invalidateChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunk) {
+        if (level == null || chunk == null) return;
+        cache(level).invalidate();
+    }
+
+    /** Releases every route snapshot owned by one stopped logical server. */
+    public static void clear(net.minecraft.server.MinecraftServer server) {
+        if (server == null) return;
+        synchronized (ROUTE_CACHES) {
+            ROUTE_CACHES.keySet().removeIf(level -> level.getServer() == server);
+        }
+    }
+
+    public static CacheDiagnostics cacheDiagnostics(ServerLevel level) {
+        return level == null ? new CacheDiagnostics(0, 0, 0, 0) : cache(level).diagnostics();
+    }
+
+    private static RouteCache cache(ServerLevel level) {
+        return ROUTE_CACHES.computeIfAbsent(level, ignored -> new RouteCache());
+    }
+
     /** Compatibility wrapper for callers that only need physical reachability. */
     public static boolean connected(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
         Route route = route(level, firstModem, secondModem);
@@ -175,8 +242,17 @@ public final class WiredNetworkTopology {
      * group of router nodes costs one hop; ordinary cable/backplane traversal costs zero hops.
      */
     public static Route route(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
-        if (level == null || firstModem == null || secondModem == null || firstModem.equals(secondModem)
-                || !isWiredModem(level, firstModem) || !isWiredModem(level, secondModem)) {
+        if (level == null || firstModem == null || secondModem == null || firstModem.equals(secondModem)) {
+            return Route.unreachable(0, false);
+        }
+        RouteKey key = new RouteKey(firstModem, secondModem);
+        Route cached = cache(level).get(key);
+        if (cached != null) return cached;
+        return cache(level).put(key, computeRoute(level, firstModem, secondModem));
+    }
+
+    private static Route computeRoute(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
+        if (!isWiredModem(level, firstModem) || !isWiredModem(level, secondModem)) {
             return Route.unreachable(0, false);
         }
         LogicalPolicy policy = new LogicalPolicy(level);

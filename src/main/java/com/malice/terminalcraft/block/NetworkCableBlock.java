@@ -75,7 +75,12 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     @SuppressWarnings("deprecation")
     public BlockState updateShape(BlockState state, Direction direction, BlockState neighborState,
                                   LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
-        if (level instanceof Level realLevel && !realLevel.isClientSide) realLevel.scheduleTick(pos, this, 1);
+        if (level instanceof Level realLevel && !realLevel.isClientSide) {
+            realLevel.scheduleTick(pos, this, 1);
+            if (realLevel instanceof ServerLevel serverLevel) {
+                com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, pos);
+            }
+        }
         return renderState(level, pos, state.getValue(FACE));
     }
 
@@ -267,6 +272,9 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
 
     private static void notifyTopology(Level level, BlockPos pos) {
         if (level.isClientSide) return;
+        if (level instanceof ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, pos);
+        }
         level.updateNeighborsAt(pos, ModRegistries.NETWORK_CABLE_BLOCK.get());
         for (Direction direction : Direction.values()) level.updateNeighborsAt(pos.relative(direction),
                 ModRegistries.NETWORK_CABLE_BLOCK.get());

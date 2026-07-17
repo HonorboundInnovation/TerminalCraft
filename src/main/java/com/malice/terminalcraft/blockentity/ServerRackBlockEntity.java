@@ -102,6 +102,13 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     private void modulesChanged() {
         syncModuleState();
         markShellChanged();
+        invalidateWiredTopology();
+    }
+
+    private void invalidateWiredTopology() {
+        if (level instanceof ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+        }
     }
 
     private void syncModuleState() {
@@ -298,8 +305,10 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     @Override public void onLoad() {
         super.onLoad();
         syncModuleState();
+        invalidateWiredTopology();
     }
     @Override public void setRemoved() {
+        invalidateWiredTopology();
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }

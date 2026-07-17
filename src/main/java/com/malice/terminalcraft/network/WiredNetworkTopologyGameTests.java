@@ -1041,4 +1041,78 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void routeCacheInvalidatesAcrossTopologyLifecycle(GameTestHelper helper) {
+        BlockPos first = new BlockPos(1, 2, 2);
+        BlockPos cable = new BlockPos(2, 2, 2);
+        BlockPos routerPos = new BlockPos(3, 2, 2);
+        BlockPos second = new BlockPos(4, 2, 2);
+        helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
+        helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
+        ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
+        ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
+
+        BlockPos absoluteFirst = helper.absolutePos(first);
+        BlockPos absoluteSecond = helper.absolutePos(second);
+        WiredNetworkTopology.CacheDiagnostics before =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "the initial route must be computed from live topology");
+        WiredNetworkTopology.CacheDiagnostics computed =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        helper.assertTrue(computed.computations() == before.computations() + 1
+                        && computed.entries() >= 1,
+                "the first route query must create one bounded snapshot: " + computed);
+
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "an unchanged route must remain reachable");
+        WiredNetworkTopology.CacheDiagnostics reused =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        helper.assertTrue(reused.computations() == computed.computations()
+                        && reused.hits() == computed.hits() + 1,
+                "steady-state routing must reuse the snapshot without another topology scan: " + reused);
+
+        NetworkRouterBlockEntity router = (NetworkRouterBlockEntity) helper.getBlockEntity(routerPos);
+        router.setInterfaceEnabled(Direction.WEST, false);
+        WiredNetworkTopology.CacheDiagnostics configured =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        helper.assertTrue(configured.revision() > reused.revision() && configured.entries() == 0
+                        && !WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "router configuration must invalidate cached reachability immediately");
+        router.setInterfaceEnabled(Direction.WEST, true);
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "re-enabling the router face must recompute and restore the route");
+
+        helper.destroyBlock(cable);
+        helper.assertTrue(!WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "block break must invalidate and recompute an unreachable route");
+        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "block replacement must invalidate and restore the route");
+
+        helper.setBlock(routerPos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        WiredNetworkTopology.Route cableRoute = WiredNetworkTopology.route(
+                helper.getLevel(), absoluteFirst, absoluteSecond);
+        helper.assertTrue(cableRoute.reachable() && cableRoute.routerHops() == 0,
+                "in-place router replacement must reclassify the route as a zero-hop cable segment");
+        helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
+        WiredNetworkTopology.Route restoredRouterRoute = WiredNetworkTopology.route(
+                helper.getLevel(), absoluteFirst, absoluteSecond);
+        helper.assertTrue(restoredRouterRoute.reachable() && restoredRouterRoute.routerHops() == 1,
+                "in-place cable replacement must restore router-hop classification");
+
+        WiredNetworkTopology.CacheDiagnostics lifecycle =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        WiredNetworkTopology.invalidateChunk(helper.getLevel(),
+                new net.minecraft.world.level.ChunkPos(helper.absolutePos(cable)));
+        WiredNetworkTopology.CacheDiagnostics chunkInvalidated =
+                WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
+        helper.assertTrue(chunkInvalidated.revision() > lifecycle.revision()
+                        && chunkInvalidated.entries() == 0,
+                "chunk load/unload invalidation must discard snapshots before later route queries");
+        helper.succeed();
+    }
+
 }

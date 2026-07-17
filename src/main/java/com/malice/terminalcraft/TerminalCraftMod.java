@@ -85,7 +85,7 @@ public final class TerminalCraftMod {
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onChunkUnloaded(final net.minecraftforge.event.level.ChunkEvent.Unload event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
-            com.malice.terminalcraft.network.WiredNetworkTopology.invalidateChunk(level, event.getChunk().getPos());
+            com.malice.terminalcraft.network.WiredNetworkTopology.unloadChunk(level, event.getChunk().getPos());
         }
     }
 

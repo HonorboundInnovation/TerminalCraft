@@ -308,7 +308,9 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
         invalidateWiredTopology();
     }
     @Override public void setRemoved() {
-        invalidateWiredTopology();
+        if (level instanceof ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.remove(serverLevel, worldPosition);
+        }
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }

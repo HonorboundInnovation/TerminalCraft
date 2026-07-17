@@ -118,7 +118,7 @@ public class NetworkRouterBlockEntity extends BlockEntity {
     @Override
     public void setRemoved() {
         if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
-            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
+            com.malice.terminalcraft.network.WiredNetworkTopology.remove(serverLevel, worldPosition);
         }
         super.setRemoved();
     }

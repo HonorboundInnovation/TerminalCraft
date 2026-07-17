@@ -322,4 +322,15 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     }
 
     private record Node(BlockPos pos, Direction face) { private Node { pos = pos.immutable(); } }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean moving) {
+        super.onRemove(state, level, pos, newState, moving);
+        if (state.getBlock() != newState.getBlock()
+                && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, pos);
+        }
+    }
+
 }

@@ -171,5 +171,9 @@ public class ServerRackBlock extends BaseEntityBlock implements WiredNetworkNode
             }
         }
         super.onRemove(state, level, pos, newState, moving);
+        if (state.getBlock() != newState.getBlock()
+                && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, pos);
+        }
     }
 }

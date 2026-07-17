@@ -1115,4 +1115,40 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void indexedColdRouteDoesNotRefreshWorldSnapshots(GameTestHelper helper) {
+        BlockPos first = new BlockPos(1, 2, 2);
+        BlockPos cable = new BlockPos(2, 2, 2);
+        BlockPos second = new BlockPos(3, 2, 2);
+        helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
+        ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
+        ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
+
+        WiredNetworkTopology.IndexDiagnostics indexed =
+                WiredNetworkTopology.indexDiagnostics(helper.getLevel());
+        helper.assertTrue(indexed.nodes() >= 3 && !indexed.truncated(),
+                "placement and block-entity lifecycle must populate the bounded loaded index: " + indexed);
+        BlockPos absoluteFirst = helper.absolutePos(first);
+        BlockPos absoluteSecond = helper.absolutePos(second);
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "a cold route must resolve from the loaded topology index");
+        WiredNetworkTopology.IndexDiagnostics afterColdRoute =
+                WiredNetworkTopology.indexDiagnostics(helper.getLevel());
+        helper.assertTrue(afterColdRoute.refreshedPositions() == indexed.refreshedPositions()
+                        && afterColdRoute.revisions() == indexed.revisions(),
+                "cold route lookup must not read or refresh world topology: " + afterColdRoute);
+
+        WiredNetworkTopology.unloadChunk(helper.getLevel(),
+                new net.minecraft.world.level.ChunkPos(absoluteFirst));
+        WiredNetworkTopology.IndexDiagnostics unloaded =
+                WiredNetworkTopology.indexDiagnostics(helper.getLevel());
+        helper.assertTrue(unloaded.nodes() < afterColdRoute.nodes()
+                        && !WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
+                "chunk unload must remove indexed nodes without consulting unloaded world state: " + unloaded);
+        helper.succeed();
+    }
+
 }

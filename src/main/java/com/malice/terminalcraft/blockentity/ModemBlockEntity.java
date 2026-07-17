@@ -410,7 +410,9 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
             RednetNetwork.unregisterHost(level, modemId);
             RednetNetwork.unregisterServices(level, modemId);
         }
-        invalidateWiredTopology();
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.remove(serverLevel, worldPosition);
+        }
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }

@@ -70,7 +70,9 @@ public final class NetworkCableBlockEntity extends BlockEntity {
 
     @Override
     public void setRemoved() {
-        invalidateTopology();
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            com.malice.terminalcraft.network.WiredNetworkTopology.remove(serverLevel, worldPosition);
+        }
         super.setRemoved();
     }
 

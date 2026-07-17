@@ -24,6 +24,7 @@ import java.util.Set;
 /** Bounded on-demand topology, physical-subnet, and minimum-router-hop traversal for wired RedNet. */
 public final class WiredNetworkTopology {
     public static final int MAX_VISITED_NODES = 4096;
+    public static final int MAX_INDEXED_NODES = 16_384;
 
     public record Component(int nodeCount, int modemCount, boolean truncated) {}
 
@@ -138,6 +139,95 @@ public final class WiredNetworkTopology {
     private static final Map<ServerLevel, RouteCache> ROUTE_CACHES =
             java.util.Collections.synchronizedMap(new WeakHashMap<>());
 
+    private enum IndexedKind { SEGMENT, ROUTER, MODEM }
+
+    private record IndexedRouterFace(boolean enabled, String networkName) {
+        private IndexedRouterFace {
+            networkName = networkName == null ? "" : networkName;
+        }
+    }
+
+    /** Immutable loaded-world snapshot used by route computation without any world reads. */
+    private record IndexedNode(IndexedKind kind, Set<BlockPos> neighbors, String modemNetwork,
+                               Map<Direction, IndexedRouterFace> routerFaces) {
+        private IndexedNode {
+            neighbors = neighbors.stream().map(BlockPos::immutable).collect(
+                    java.util.stream.Collectors.toUnmodifiableSet());
+            modemNetwork = modemNetwork == null ? "" : modemNetwork;
+            routerFaces = Map.copyOf(routerFaces);
+        }
+    }
+
+    /** Copy-on-write index: mutation hooks read the world; route lookups consume only this snapshot. */
+    private static final class LoadedTopologyIndex {
+        private volatile Map<BlockPos, IndexedNode> nodes = Map.of();
+        private long revisions;
+        private long refreshedPositions;
+        private boolean truncated;
+
+        Map<BlockPos, IndexedNode> snapshot() { return nodes; }
+        boolean truncated() { return truncated; }
+
+        synchronized void refresh(ServerLevel level, BlockPos changed) {
+            Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
+            // Surface-cable external corners are local but may extend beyond a face neighbor.
+            for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++) {
+                BlockPos candidate = changed.offset(x, y, z).immutable();
+                IndexedNode snapshot = snapshotNode(level, candidate);
+                if (snapshot == null) {
+                    next.remove(candidate);
+                } else if (next.containsKey(candidate) || next.size() < MAX_INDEXED_NODES) {
+                    next.put(candidate, snapshot);
+                } else {
+                    truncated = true;
+                }
+                refreshedPositions++;
+            }
+            nodes = Map.copyOf(next);
+            revisions++;
+        }
+
+        synchronized void remove(ServerLevel level, BlockPos removed) {
+            Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
+            next.remove(removed);
+            // Refresh only the bounded corner-sensitive neighborhood. The removed node stays absent
+            // even when setRemoved runs before vanilla swaps the old block state out of the level.
+            for (int x = -2; x <= 2; x++) for (int y = -2; y <= 2; y++) for (int z = -2; z <= 2; z++) {
+                BlockPos candidate = removed.offset(x, y, z).immutable();
+                if (candidate.equals(removed)) continue;
+                IndexedNode snapshot = snapshotNode(level, candidate);
+                if (snapshot == null) {
+                    next.remove(candidate);
+                } else if (next.containsKey(candidate) || next.size() < MAX_INDEXED_NODES) {
+                    next.put(candidate, snapshot);
+                } else {
+                    truncated = true;
+                }
+                refreshedPositions++;
+            }
+            nodes = Map.copyOf(next);
+            revisions++;
+        }
+
+        synchronized void removeChunk(net.minecraft.world.level.ChunkPos chunk) {
+            Map<BlockPos, IndexedNode> next = new HashMap<>(nodes);
+            next.keySet().removeIf(pos -> (pos.getX() >> 4) == chunk.x && (pos.getZ() >> 4) == chunk.z);
+            nodes = Map.copyOf(next);
+            revisions++;
+        }
+
+        synchronized IndexDiagnostics diagnostics() {
+            long edges = nodes.values().stream().mapToLong(node -> node.neighbors().size()).sum();
+            return new IndexDiagnostics(revisions, refreshedPositions, nodes.size(), edges, truncated);
+        }
+    }
+
+    public record IndexDiagnostics(long revisions, long refreshedPositions, int nodes, long directedEdges,
+                                   boolean truncated) {}
+
+    private static final Map<ServerLevel, LoadedTopologyIndex> TOPOLOGY_INDEXES =
+            java.util.Collections.synchronizedMap(new WeakHashMap<>());
+
     private record Step(BlockPos pos, int routerHops) {}
     private record SegmentScan(Set<BlockPos> nodes, Set<BlockPos> modems, BlockPos anchor, boolean truncated) {}
     private record SegmentPolicy(boolean valid, boolean truncated) {}
@@ -203,23 +293,41 @@ public final class WiredNetworkTopology {
 
     private WiredNetworkTopology() {}
 
-    /** Invalidates bounded route snapshots after a local topology or configuration mutation. */
+    /** Refreshes a bounded local index region after a topology or configuration mutation. */
     public static void invalidate(ServerLevel level, BlockPos changedPosition) {
         if (level == null || changedPosition == null) return;
+        index(level).refresh(level, changedPosition);
         cache(level).invalidate();
     }
 
-    /** Chunk load/unload invalidation; no route query scans unloaded chunks to discover changes. */
+    /** Removes a node before its block entity becomes unavailable, then repairs nearby snapshots. */
+    public static void remove(ServerLevel level, BlockPos removedPosition) {
+        if (level == null || removedPosition == null) return;
+        index(level).remove(level, removedPosition);
+        cache(level).invalidate();
+    }
+
+    /** Chunk-load boundary invalidation; block-entity onLoad hooks populate the node index. */
     public static void invalidateChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunk) {
         if (level == null || chunk == null) return;
         cache(level).invalidate();
     }
 
-    /** Releases every route snapshot owned by one stopped logical server. */
+    /** Removes all indexed nodes in an unloading chunk without querying the unloading world. */
+    public static void unloadChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunk) {
+        if (level == null || chunk == null) return;
+        index(level).removeChunk(chunk);
+        cache(level).invalidate();
+    }
+
+    /** Releases every route snapshot and loaded topology index owned by one stopped logical server. */
     public static void clear(net.minecraft.server.MinecraftServer server) {
         if (server == null) return;
         synchronized (ROUTE_CACHES) {
             ROUTE_CACHES.keySet().removeIf(level -> level.getServer() == server);
+        }
+        synchronized (TOPOLOGY_INDEXES) {
+            TOPOLOGY_INDEXES.keySet().removeIf(level -> level.getServer() == server);
         }
     }
 
@@ -229,6 +337,14 @@ public final class WiredNetworkTopology {
 
     private static RouteCache cache(ServerLevel level) {
         return ROUTE_CACHES.computeIfAbsent(level, ignored -> new RouteCache());
+    }
+
+    private static LoadedTopologyIndex index(ServerLevel level) {
+        return TOPOLOGY_INDEXES.computeIfAbsent(level, ignored -> new LoadedTopologyIndex());
+    }
+
+    public static IndexDiagnostics indexDiagnostics(ServerLevel level) {
+        return level == null ? new IndexDiagnostics(0, 0, 0, 0, false) : index(level).diagnostics();
     }
 
     /** Compatibility wrapper for callers that only need physical reachability. */
@@ -252,11 +368,14 @@ public final class WiredNetworkTopology {
     }
 
     private static Route computeRoute(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
-        if (!isWiredModem(level, firstModem) || !isWiredModem(level, secondModem)) {
+        LoadedTopologyIndex topology = index(level);
+        Map<BlockPos, IndexedNode> nodes = topology.snapshot();
+        if (topology.truncated()) return Route.unreachable(0, true);
+        if (!isIndexedWiredModem(nodes, firstModem) || !isIndexedWiredModem(nodes, secondModem)) {
             return Route.unreachable(0, false);
         }
-        LogicalPolicy policy = new LogicalPolicy(level);
-        Set<BlockPos> targets = adjacentNetworkNodes(level, secondModem).stream()
+        IndexedLogicalPolicy policy = new IndexedLogicalPolicy(nodes);
+        Set<BlockPos> targets = indexedAdjacentNetworkNodes(nodes, secondModem).stream()
                 .filter(node -> policy.allowsNode(node) && policy.allowsModemAttachment(secondModem, node))
                 .collect(java.util.stream.Collectors.toSet());
         if (targets.isEmpty()) return Route.unreachable(0, policy.anyTruncated());
@@ -265,9 +384,9 @@ public final class WiredNetworkTopology {
         Map<BlockPos, Integer> best = new HashMap<>();
         Map<BlockPos, BlockPos> predecessor = new HashMap<>();
         Set<BlockPos> settled = new HashSet<>();
-        for (BlockPos start : adjacentNetworkNodes(level, firstModem)) {
+        for (BlockPos start : indexedAdjacentNetworkNodes(nodes, firstModem)) {
             if (!policy.allowsNode(start) || !policy.allowsModemAttachment(firstModem, start)) continue;
-            int hops = isRoutingNode(level, start) ? 1 : 0;
+            int hops = isIndexedRoutingNode(nodes, start) ? 1 : 0;
             if (hops <= NetworkEnvelope.MAX_HOPS) {
                 best.put(start, hops);
                 pending.addLast(new Step(start, hops));
@@ -279,15 +398,15 @@ public final class WiredNetworkTopology {
             if (step.routerHops() != best.getOrDefault(step.pos(), Integer.MAX_VALUE)
                     || !settled.add(step.pos())) continue;
             if (targets.contains(step.pos())) {
-                List<RouterPass> passes = describeRouterPasses(level, firstModem, secondModem,
+                List<RouterPass> passes = describeIndexedRouterPasses(nodes, firstModem, secondModem,
                         step.pos(), predecessor);
                 return new Route(true, step.routerHops(), settled.size(), false, passes);
             }
 
-            boolean currentRouter = isRoutingNode(level, step.pos());
-            for (BlockPos next : forwardingNeighbors(level, step.pos())) {
-                if (!policy.allowsNode(next) || !allowsEdge(level, step.pos(), next)) continue;
-                boolean nextRouter = isRoutingNode(level, next);
+            boolean currentRouter = isIndexedRoutingNode(nodes, step.pos());
+            for (BlockPos next : indexedForwardingNeighbors(nodes, step.pos())) {
+                if (!policy.allowsNode(next) || !indexedAllowsEdge(nodes, step.pos(), next)) continue;
+                boolean nextRouter = isIndexedRoutingNode(nodes, next);
                 int nextHops = step.routerHops() + (!currentRouter && nextRouter ? 1 : 0);
                 if (nextHops > NetworkEnvelope.MAX_HOPS
                         || nextHops >= best.getOrDefault(next, Integer.MAX_VALUE)) continue;
@@ -302,10 +421,11 @@ public final class WiredNetworkTopology {
         return Route.unreachable(settled.size(), !pending.isEmpty() || policy.anyTruncated());
     }
 
-    /** Reconstructs immutable router ingress/egress transitions from the selected minimum-hop path. */
-    private static List<RouterPass> describeRouterPasses(ServerLevel level, BlockPos firstModem,
-                                                          BlockPos secondModem, BlockPos target,
-                                                          Map<BlockPos, BlockPos> predecessor) {
+    /** Reconstructs router passes entirely from the immutable indexed predecessor path. */
+    private static List<RouterPass> describeIndexedRouterPasses(Map<BlockPos, IndexedNode> nodes,
+                                                                 BlockPos firstModem,
+                                                                 BlockPos secondModem, BlockPos target,
+                                                                 Map<BlockPos, BlockPos> predecessor) {
         List<BlockPos> reversed = new ArrayList<>();
         BlockPos current = target;
         while (current != null) {
@@ -313,32 +433,87 @@ public final class WiredNetworkTopology {
             current = predecessor.get(current);
         }
         java.util.Collections.reverse(reversed);
-
         List<BlockPos> path = new ArrayList<>(reversed.size() + 2);
         path.add(firstModem.immutable());
         path.addAll(reversed);
         path.add(secondModem.immutable());
 
         List<RouterPass> passes = new ArrayList<>();
-        int index = 1;
-        while (index < path.size() - 1) {
-            if (!isRoutingNode(level, path.get(index))) {
-                index++;
-                continue;
-            }
-            int start = index;
-            while (index + 1 < path.size() - 1 && isRoutingNode(level, path.get(index + 1))) index++;
-            int end = index;
+        int cursor = 1;
+        while (cursor < path.size() - 1) {
+            if (!isIndexedRoutingNode(nodes, path.get(cursor))) { cursor++; continue; }
+            int start = cursor;
+            while (cursor + 1 < path.size() - 1 && isIndexedRoutingNode(nodes, path.get(cursor + 1))) cursor++;
+            int finish = cursor;
             Direction ingress = directionFromTo(path.get(start), path.get(start - 1));
-            Direction egress = directionFromTo(path.get(end), path.get(end + 1));
+            Direction egress = directionFromTo(path.get(finish), path.get(finish + 1));
             if (ingress == null || egress == null) {
-                throw new IllegalStateException("selected router path contains a non-adjacent transition");
+                throw new IllegalStateException("selected indexed router path contains a non-adjacent transition");
             }
-            passes.add(new RouterPass(path.get(start), ingress, path.get(end), egress,
-                    path.subList(start, end + 1)));
-            index++;
+            passes.add(new RouterPass(path.get(start), ingress, path.get(finish), egress,
+                    path.subList(start, finish + 1)));
+            cursor++;
         }
         return List.copyOf(passes);
+    }
+
+    /** Per-route logical policy over indexed segment data; never reads world state. */
+    private static final class IndexedLogicalPolicy {
+        private final Map<BlockPos, IndexedNode> nodes;
+        private final Map<BlockPos, SegmentPolicy> byNode = new HashMap<>();
+
+        private IndexedLogicalPolicy(Map<BlockPos, IndexedNode> nodes) { this.nodes = nodes; }
+
+        boolean allowsNode(BlockPos pos) {
+            return !isIndexedSegmentNode(nodes, pos) || segment(pos).valid();
+        }
+
+        boolean anyTruncated() { return byNode.values().stream().anyMatch(SegmentPolicy::truncated); }
+
+        boolean allowsModemAttachment(BlockPos modemPos, BlockPos nodePos) {
+            if (isIndexedSegmentNode(nodes, nodePos)) return segment(nodePos).valid();
+            IndexedNode node = nodes.get(nodePos);
+            IndexedNode modem = nodes.get(modemPos);
+            if (node == null || modem == null || node.kind() != IndexedKind.ROUTER) return false;
+            Direction face = directionFromTo(nodePos, modemPos);
+            IndexedRouterFace routerFace = face == null ? null : node.routerFaces().get(face);
+            return routerFace != null && routerFace.enabled()
+                    && compatible(modem.modemNetwork(), routerFace.networkName());
+        }
+
+        private SegmentPolicy segment(BlockPos start) {
+            SegmentPolicy cached = byNode.get(start);
+            if (cached != null) return cached;
+            ArrayDeque<BlockPos> pending = new ArrayDeque<>();
+            Set<BlockPos> visited = new HashSet<>();
+            Set<String> explicitNetworks = new HashSet<>();
+            pending.add(start);
+            while (!pending.isEmpty() && visited.size() < MAX_VISITED_NODES) {
+                BlockPos current = pending.removeFirst();
+                if (!visited.add(current)) continue;
+                IndexedNode currentNode = nodes.get(current);
+                if (currentNode == null) continue;
+                for (BlockPos adjacent : currentNode.neighbors()) {
+                    IndexedNode neighbor = nodes.get(adjacent);
+                    if (neighbor == null) continue;
+                    if (neighbor.kind() == IndexedKind.SEGMENT) {
+                        if (!visited.contains(adjacent)) pending.addLast(adjacent);
+                    } else if (neighbor.kind() == IndexedKind.MODEM) {
+                        if (!neighbor.modemNetwork().isEmpty()) explicitNetworks.add(neighbor.modemNetwork());
+                    } else {
+                        Direction face = directionFromTo(adjacent, current);
+                        IndexedRouterFace routerFace = face == null ? null : neighbor.routerFaces().get(face);
+                        if (routerFace != null && routerFace.enabled() && !routerFace.networkName().isEmpty()) {
+                            explicitNetworks.add(routerFace.networkName());
+                        }
+                    }
+                }
+            }
+            SegmentPolicy policy = new SegmentPolicy(pending.isEmpty() && explicitNetworks.size() <= 1,
+                    !pending.isEmpty());
+            for (BlockPos node : visited) byNode.put(node, policy);
+            return policy;
+        }
     }
 
     /** Resolves the physical subnet containing a non-router forwarding node. */
@@ -577,6 +752,81 @@ public final class WiredNetworkTopology {
             return NetworkCableBlock.networkNeighbors(level, second).contains(first);
         }
         return directionFromTo(first, second) != null;
+    }
+
+    private static IndexedNode snapshotNode(ServerLevel level, BlockPos pos) {
+        if (!level.hasChunkAt(pos)) return null;
+        if (isWiredModem(level, pos)) {
+            return new IndexedNode(IndexedKind.MODEM, physicalNeighbors(level, pos),
+                    modemNetwork(level, pos), Map.of());
+        }
+        if (!isForwardingNode(level, pos)) return null;
+        IndexedKind kind = isRoutingNode(level, pos) ? IndexedKind.ROUTER : IndexedKind.SEGMENT;
+        Map<Direction, IndexedRouterFace> faces = new java.util.EnumMap<>(Direction.class);
+        if (kind == IndexedKind.ROUTER) {
+            if (level.getBlockEntity(pos) instanceof NetworkRouterBlockEntity router) {
+                for (Direction direction : Direction.values()) {
+                    faces.put(direction, new IndexedRouterFace(router.isInterfaceEnabled(direction),
+                            router.getInterfaceNetwork(direction)));
+                }
+            } else {
+                for (Direction direction : Direction.values()) {
+                    faces.put(direction, new IndexedRouterFace(true, ""));
+                }
+            }
+        }
+        return new IndexedNode(kind, physicalNeighbors(level, pos), "", faces);
+    }
+
+    private static boolean isIndexedWiredModem(Map<BlockPos, IndexedNode> nodes, BlockPos pos) {
+        IndexedNode node = nodes.get(pos);
+        return node != null && node.kind() == IndexedKind.MODEM;
+    }
+
+    private static boolean isIndexedRoutingNode(Map<BlockPos, IndexedNode> nodes, BlockPos pos) {
+        IndexedNode node = nodes.get(pos);
+        return node != null && node.kind() == IndexedKind.ROUTER;
+    }
+
+    private static boolean isIndexedSegmentNode(Map<BlockPos, IndexedNode> nodes, BlockPos pos) {
+        IndexedNode node = nodes.get(pos);
+        return node != null && node.kind() == IndexedKind.SEGMENT;
+    }
+
+    private static Set<BlockPos> indexedAdjacentNetworkNodes(Map<BlockPos, IndexedNode> nodes, BlockPos modem) {
+        IndexedNode endpoint = nodes.get(modem);
+        if (endpoint == null || endpoint.kind() != IndexedKind.MODEM) return Set.of();
+        return endpoint.neighbors().stream().filter(pos -> {
+            IndexedNode node = nodes.get(pos);
+            return node != null && node.kind() != IndexedKind.MODEM;
+        }).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static Set<BlockPos> indexedForwardingNeighbors(Map<BlockPos, IndexedNode> nodes, BlockPos pos) {
+        IndexedNode node = nodes.get(pos);
+        if (node == null) return Set.of();
+        return node.neighbors().stream().filter(next -> {
+            IndexedNode neighbor = nodes.get(next);
+            return neighbor != null && neighbor.kind() != IndexedKind.MODEM;
+        }).collect(java.util.stream.Collectors.toSet());
+    }
+
+    private static boolean indexedAllowsEdge(Map<BlockPos, IndexedNode> nodes, BlockPos from, BlockPos to) {
+        IndexedNode source = nodes.get(from);
+        IndexedNode destination = nodes.get(to);
+        if (source == null || destination == null || !source.neighbors().contains(to)
+                || !destination.neighbors().contains(from)) return false;
+        Direction direction = directionFromTo(from, to);
+        if (direction == null) return true;
+        if (source.kind() == IndexedKind.ROUTER) {
+            IndexedRouterFace face = source.routerFaces().get(direction);
+            if (face == null || !face.enabled()) return false;
+        }
+        if (destination.kind() == IndexedKind.ROUTER) {
+            IndexedRouterFace face = destination.routerFaces().get(direction.getOpposite());
+            if (face == null || !face.enabled()) return false;
+        }
+        return true;
     }
 
     private static boolean isWiredModem(ServerLevel level, BlockPos pos) {

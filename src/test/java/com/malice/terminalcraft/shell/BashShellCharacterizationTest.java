@@ -53,42 +53,42 @@ public final class BashShellCharacterizationTest {
     }
 
     private static void assertMonitorDemoPrograms(BashShell shell) {
-        FakeMonitorHost host = new FakeMonitorHost();
+        FakeMonitorHost host = new FakeMonitorHost(120, 40);
         shell.setHost(host);
 
-        assertResult(shell.executeForResult("source ~/programs/monitor_wall_horizontal.sh"), 0,
-                List.of("Horizontal wall pattern rendered (expected size: 80x20)."),
-                "horizontal monitor-wall program");
-        assertEquals("A".repeat(40) + "B".repeat(40), host.lines.get(2),
-                "horizontal program crosses column-40 tile boundary");
-
-        assertResult(shell.executeForResult("source ~/programs/monitor_wall_vertical.sh"), 0,
-                List.of("Vertical wall pattern rendered (expected size: 40x40)."),
-                "vertical monitor-wall program");
-        assertEquals("TOP TILE row 19 -- last top row", host.lines.get(19),
-                "vertical program final upper-tile row");
-        assertEquals("BOTTOM row 20 -- first bottom row", host.lines.get(20),
-                "vertical program first lower-tile row");
-
+        assertResult(shell.executeForResult("monitor size any"), 0,
+                List.of("columns=120 rows=40 tiles=3x2"),
+                "monitor geometry detection");
         assertResult(shell.executeForResult("source ~/programs/monitor_demo.sh"), 0,
-                List.of("2x2 wall pattern rendered (expected size: 80x40).",
-                        "Check that text crosses both seams without mirroring or clipping."),
-                "default 2x2 monitor-wall program");
-        assertEquals("L".repeat(40) + "R".repeat(40), host.lines.get(1),
-                "2x2 program upper horizontal split");
-        assertEquals("l".repeat(40) + "r".repeat(40), host.lines.get(21),
-                "2x2 program lower horizontal split");
+                List.of("Detected 3x2 monitor wall (120x40 characters).",
+                        "Each physical tile should show one uniquely labeled bordered segment."),
+                "adaptive monitor-wall program");
+        assertEquals(40, host.lines.size(), "adaptive program uses every detected row");
+        assertEquals("+" + "-".repeat(38) + "+"
+                        + "+" + "-".repeat(38) + "+"
+                        + "+" + "-".repeat(38) + "+",
+                host.lines.get(0), "adaptive program draws three top-row tile borders");
+        assertEquals(true, host.lines.get(3).startsWith("|" + "A".repeat(38) + "|"),
+                "first tile gets its own diagnostic symbol");
+        assertEquals(true, host.lines.get(3).contains("|" + "B".repeat(38) + "|"),
+                "second tile gets a distinct diagnostic symbol");
+        assertEquals(true, host.lines.get(23).contains("|" + "D".repeat(38) + "|"),
+                "second tile row is detected rather than assumed");
 
         shell.getVfs().writeFile("/home/player/programs/monitor_demo.sh", "echo player-version\n");
-        shell.getVfs().rm("/home/player/programs/monitor_wall_grid.sh");
+        shell.getVfs().writeFile("/home/player/programs/monitor_wall_grid.sh",
+                "#!/bin/bash\n# Full 2x2 wall test: legacy stock program\n");
         BashShell restored = new BashShell();
         restored.load(shell.save());
         assertEquals("echo player-version\n",
                 restored.getVfs().readFile("/home/player/programs/monitor_demo.sh"),
                 "terminal migration preserves edited bundled program");
         assertEquals(true, restored.getVfs().readFile(
-                        "/home/player/programs/monitor_wall_grid.sh") != null,
-                "terminal migration installs missing monitor program");
+                        "/home/player/programs/monitor_wall_grid.sh").contains("monitor demo any"),
+                "terminal migration upgrades recognizable fixed-grid program");
+        assertEquals(true, restored.getVfs().readFile(
+                        "/home/player/programs/monitor_wall_auto.sh") != null,
+                "terminal migration installs adaptive monitor program");
     }
 
     private static void assertResult(ShellCommandResult actual, int exitCode,
@@ -106,6 +106,13 @@ public final class BashShellCharacterizationTest {
 
     private static final class FakeMonitorHost implements TerminalHost {
         private final List<String> lines = new ArrayList<>();
+        private final int columns;
+        private final int rows;
+
+        private FakeMonitorHost(int columns, int rows) {
+            this.columns = columns;
+            this.rows = rows;
+        }
 
         @Override public boolean monitorWrite(String side, String text) {
             return monitorSetLine(side, lines.size(), text);
@@ -115,7 +122,7 @@ public final class BashShellCharacterizationTest {
             return true;
         }
         @Override public boolean monitorSetLine(String side, int row, String text) {
-            if (row < 0 || row >= 40 || text.length() > 80) return false;
+            if (row < 0 || row >= rows || text.length() > columns) return false;
             while (lines.size() <= row) lines.add("");
             lines.set(row, text);
             return true;
@@ -123,6 +130,8 @@ public final class BashShellCharacterizationTest {
         @Override public boolean monitorSetTitle(String side, String title) { return true; }
         @Override public boolean monitorSetPalette(String side, int foreground, int background) { return true; }
         @Override public List<String> monitorLines(String side) { return List.copyOf(lines); }
+        @Override public int monitorColumns(String side) { return columns; }
+        @Override public int monitorRows(String side) { return rows; }
         @Override public int getRedstoneInput(String side) { return 0; }
         @Override public int getRedstoneOutput(String side) { return 0; }
         @Override public boolean setRedstoneOutput(String side, int power) { return false; }

@@ -94,51 +94,21 @@ public class VirtualFileSystem {
      */
     void installMachinePrograms() {
         mkdirs("/home/player/programs");
-        writeRawIfMissing("/home/player/programs/monitor_demo.sh",
+        String adaptive =
                 "#!/bin/bash\n" +
-                "# General 2x2 monitor-wall smoke test (80 columns x 40 rows).\n" +
-                "source ~/programs/monitor_wall_grid.sh\n");
-        writeRawIfMissing("/home/player/programs/monitor_wall_horizontal.sh",
-                "#!/bin/bash\n" +
-                "# Best viewed on a 2x1 wall. The | at column 40 is the tile boundary.\n" +
-                "monitor clear any\n" +
-                "monitor title any Horizontal Wall Test\n" +
-                "monitor color any 0x66ff99 0x050a05\n" +
-                "monitor set any 0 '1234567890123456789012345678901234567890|234567890123456789012345678901234567890'\n" +
-                "monitor set any 1 'LEFT TILE: columns 00-39                 RIGHT TILE: columns 40-79'\n" +
-                "monitor set any 2 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'\n" +
-                "monitor set any 4 'PASS: A fills only the left tile; B fills only the right tile.'\n" +
-                "echo 'Horizontal wall pattern rendered (expected size: 80x20).'\n");
-        writeRawIfMissing("/home/player/programs/monitor_wall_vertical.sh",
-                "#!/bin/bash\n" +
-                "# Best viewed on a 1x2 wall. Rows 19/20 straddle the tile boundary.\n" +
-                "monitor clear any\n" +
-                "monitor title any Vertical Wall Test\n" +
-                "monitor color any 0x66ccff 0x03070a\n" +
-                "monitor set any 0  'TOP TILE row 00'\n" +
-                "monitor set any 18 'TOP TILE row 18'\n" +
-                "monitor set any 19 'TOP TILE row 19 -- last top row'\n" +
-                "monitor set any 20 'BOTTOM row 20 -- first bottom row'\n" +
-                "monitor set any 21 'BOTTOM TILE row 21'\n" +
-                "monitor set any 38 'BOTTOM TILE row 38'\n" +
-                "monitor set any 39 'BOTTOM TILE row 39 -- final row'\n" +
-                "echo 'Vertical wall pattern rendered (expected size: 40x40).'\n");
-        writeRawIfMissing("/home/player/programs/monitor_wall_grid.sh",
-                "#!/bin/bash\n" +
-                "# Full 2x2 wall test: horizontal split at column 40, vertical split after row 19.\n" +
-                "monitor clear any\n" +
-                "monitor title any 2x2 Monitor Wall Test\n" +
-                "monitor color any 0xffcc66 0x080604\n" +
-                "monitor set any 0  'TOP-LEFT TILE                           TOP-RIGHT TILE'\n" +
-                "monitor set any 1  'LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR'\n" +
-                "monitor set any 18 'TOP WALL row 18'\n" +
-                "monitor set any 19 'TOP WALL row 19 -- horizontal seam below'\n" +
-                "monitor set any 20 'BOTTOM-LEFT TILE                        BOTTOM-RIGHT TILE'\n" +
-                "monitor set any 21 'llllllllllllllllllllllllllllllllllllllllrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr'\n" +
-                "monitor set any 38 'BOTTOM WALL row 38'\n" +
-                "monitor set any 39 'BOTTOM WALL row 39 -- final canvas row'\n" +
-                "echo '2x2 wall pattern rendered (expected size: 80x40).'\n" +
-                "echo 'Check that text crosses both seams without mirroring or clipping.'\n");
+                "# Detects and tests any rectangular monitor wall from 1x1 through 8x6.\n" +
+                "monitor demo any\n";
+        writeRawIfMissing("/home/player/programs/monitor_wall_auto.sh", adaptive);
+
+        // Upgrade only recognizable stock versions. Player-created replacements are preserved.
+        installOrUpgradeBundledProgram("/home/player/programs/monitor_demo.sh", adaptive,
+                "# General 2x2 monitor-wall smoke test");
+        installOrUpgradeBundledProgram("/home/player/programs/monitor_wall_horizontal.sh", adaptive,
+                "# Best viewed on a 2x1 wall");
+        installOrUpgradeBundledProgram("/home/player/programs/monitor_wall_vertical.sh", adaptive,
+                "# Best viewed on a 1x2 wall");
+        installOrUpgradeBundledProgram("/home/player/programs/monitor_wall_grid.sh", adaptive,
+                "# Full 2x2 wall test");
     }
 
     /** Wipe all nodes (used for portable media construction). */
@@ -429,6 +399,14 @@ public class VirtualFileSystem {
 
     private void writeRawIfMissing(String path, String content) {
         nodes.putIfAbsent(normalize(path), Node.file(content));
+    }
+
+    private void installOrUpgradeBundledProgram(String path, String content, String legacyMarker) {
+        String normalized = normalize(path);
+        Node existing = nodes.get(normalized);
+        if (existing == null || (!existing.directory && existing.content.contains(legacyMarker))) {
+            nodes.put(normalized, Node.file(content));
+        }
     }
 
     public CompoundTag save() {

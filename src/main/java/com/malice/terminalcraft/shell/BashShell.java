@@ -2512,10 +2512,41 @@ public class BashShell implements ShellCommandModule.Context {
             println("monitor title [side] <title>");
             println("monitor color [side] <foreground> <background>  # #RRGGBB or decimal");
             println("monitor read [side]");
+            println("monitor size [side]          # detect connected wall geometry");
+            println("monitor demo [side]          # adaptive test for any rectangular wall");
             lastExitCode = 0;
             return;
         }
         String op = args.get(0).toLowerCase(Locale.ROOT);
+        if ("size".equals(op) || "dimensions".equals(op) || "geometry".equals(op)) {
+            String side = args.size() > 1 ? args.get(1) : "any";
+            if (args.size() > 2 || !isSideToken(side.toLowerCase(Locale.ROOT))) {
+                println("monitor: usage: monitor size [side]");
+                lastExitCode = 1;
+                return;
+            }
+            int columns = host.monitorColumns(side);
+            int rows = host.monitorRows(side);
+            if (columns <= 0 || rows <= 0) {
+                println("monitor: no monitor on side '" + side + "'");
+                lastExitCode = 1;
+                return;
+            }
+            println("columns=" + columns + " rows=" + rows + " tiles="
+                    + (columns / 40) + "x" + (rows / 20));
+            lastExitCode = 0;
+            return;
+        }
+        if ("demo".equals(op) || "test".equals(op)) {
+            String side = args.size() > 1 ? args.get(1) : "any";
+            if (args.size() > 2 || !isSideToken(side.toLowerCase(Locale.ROOT))) {
+                println("monitor: usage: monitor demo [side]");
+                lastExitCode = 1;
+                return;
+            }
+            renderAdaptiveMonitorDemo(side);
+            return;
+        }
         if ("clear".equals(op)) {
             String side = args.size() > 1 ? args.get(1) : "any";
             if (!host.monitorClear(side)) {
@@ -2607,6 +2638,60 @@ public class BashShell implements ShellCommandModule.Context {
             lastExitCode = 1;
             return;
         }
+        lastExitCode = 0;
+    }
+
+    /** Draws one labeled 40x20 test cell per physical tile using the detected wall geometry. */
+    private void renderAdaptiveMonitorDemo(String side) {
+        int columns = host.monitorColumns(side);
+        int rows = host.monitorRows(side);
+        if (columns <= 0 || rows <= 0 || columns % 40 != 0 || rows % 20 != 0) {
+            println("monitor: no valid rectangular monitor wall on side '" + side + "'");
+            lastExitCode = 1;
+            return;
+        }
+        int tilesWide = columns / 40;
+        int tilesHigh = rows / 20;
+        if (!host.monitorClear(side)
+                || !host.monitorSetTitle(side, "Monitor Wall " + tilesWide + "x" + tilesHigh)
+                || !host.monitorSetPalette(side, 0x66ff99, 0x050a05)) {
+            println("monitor: failed to initialize wall demo");
+            lastExitCode = 1;
+            return;
+        }
+        String symbols = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        for (int row = 0; row < rows; row++) {
+            int tileRow = row / 20;
+            int localRow = row % 20;
+            StringBuilder line = new StringBuilder(columns);
+            for (int tileColumn = 0; tileColumn < tilesWide; tileColumn++) {
+                int tileIndex = tileRow * tilesWide + tileColumn;
+                char symbol = symbols.charAt(tileIndex % symbols.length());
+                String interior;
+                if (localRow == 0 || localRow == 19) {
+                    line.append('+').append("-".repeat(38)).append('+');
+                    continue;
+                } else if (localRow == 1) {
+                    interior = " TILE " + (tileColumn + 1) + "," + (tileRow + 1)
+                            + " OF " + tilesWide + "x" + tilesHigh + " [" + symbol + "]";
+                } else if (localRow == 2) {
+                    interior = " COL " + (tileColumn * 40) + "-" + (tileColumn * 40 + 39)
+                            + " ROW " + (tileRow * 20) + "-" + (tileRow * 20 + 19);
+                } else {
+                    interior = String.valueOf(symbol).repeat(38);
+                }
+                if (interior.length() > 38) interior = interior.substring(0, 38);
+                line.append('|').append(interior).append(" ".repeat(38 - interior.length())).append('|');
+            }
+            if (!host.monitorSetLine(side, row, line.toString())) {
+                println("monitor: wall changed or rejected row " + row);
+                lastExitCode = 1;
+                return;
+            }
+        }
+        println("Detected " + tilesWide + "x" + tilesHigh + " monitor wall ("
+                + columns + "x" + rows + " characters).");
+        println("Each physical tile should show one uniquely labeled bordered segment.");
         lastExitCode = 0;
     }
 

@@ -387,6 +387,18 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     }
 
     @Override
+    public int monitorColumns(String side) {
+        MonitorBlockEntity monitor = findMonitor(side);
+        return monitor == null ? 0 : new MonitorGroupDevice(monitor).maxLineLength();
+    }
+
+    @Override
+    public int monitorRows(String side) {
+        MonitorBlockEntity monitor = findMonitor(side);
+        return monitor == null ? 0 : new MonitorGroupDevice(monitor).maxLines();
+    }
+
+    @Override
     public boolean hasModem() {
         return findModem(null) != null;
     }

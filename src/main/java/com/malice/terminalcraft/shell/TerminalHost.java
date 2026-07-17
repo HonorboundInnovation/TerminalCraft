@@ -47,6 +47,10 @@ public interface TerminalHost {
     default boolean monitorSetTitle(String side, String title) { return false; }
     default boolean monitorSetPalette(String side, int foreground, int background) { return false; }
     default List<String> monitorLines(String side) { return List.of(); }
+    /** Logical text width of the complete connected monitor wall, or 0 when unavailable. */
+    default int monitorColumns(String side) { return 0; }
+    /** Logical text height of the complete connected monitor wall, or 0 when unavailable. */
+    default int monitorRows(String side) { return 0; }
 
     default boolean modemOpen(int channel) { return false; }
     default boolean modemClose(int channel) { return false; }

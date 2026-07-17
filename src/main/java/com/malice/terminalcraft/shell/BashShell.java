@@ -2862,6 +2862,7 @@ public class BashShell implements ShellCommandModule.Context {
         if (tag.contains("Vfs", Tag.TAG_COMPOUND)) {
             vfs.load(tag.getCompound("Vfs"));
         }
+        vfs.installMachinePrograms();
         diskMounted = tag.contains("DiskMounted") && tag.getBoolean("DiskMounted");
         if (!diskMounted && vfs.isDirectory(DISK_MOUNT)) {
             diskMounted = true;

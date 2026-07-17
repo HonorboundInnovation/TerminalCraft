@@ -2,6 +2,7 @@ package com.malice.terminalcraft.shell;
 
 import net.minecraft.nbt.CompoundTag;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -23,6 +24,8 @@ public final class BashShellCharacterizationTest {
 
         ShellCommandResult alias = shell.executeForResult("printenv USER");
         assertResult(alias, 0, List.of("player"), "builtin alias");
+
+        assertMonitorDemoPrograms(shell);
 
         ShellCommandResult sophisticatedHelp = shell.executeForResult("sophisticated help");
         assertEquals(0, sophisticatedHelp.exitCode(), "Sophisticated program registered");
@@ -49,6 +52,45 @@ public final class BashShellCharacterizationTest {
         System.out.println("BashShell characterization tests: OK");
     }
 
+    private static void assertMonitorDemoPrograms(BashShell shell) {
+        FakeMonitorHost host = new FakeMonitorHost();
+        shell.setHost(host);
+
+        assertResult(shell.executeForResult("source ~/programs/monitor_wall_horizontal.sh"), 0,
+                List.of("Horizontal wall pattern rendered (expected size: 80x20)."),
+                "horizontal monitor-wall program");
+        assertEquals("A".repeat(40) + "B".repeat(40), host.lines.get(2),
+                "horizontal program crosses column-40 tile boundary");
+
+        assertResult(shell.executeForResult("source ~/programs/monitor_wall_vertical.sh"), 0,
+                List.of("Vertical wall pattern rendered (expected size: 40x40)."),
+                "vertical monitor-wall program");
+        assertEquals("TOP TILE row 19 -- last top row", host.lines.get(19),
+                "vertical program final upper-tile row");
+        assertEquals("BOTTOM row 20 -- first bottom row", host.lines.get(20),
+                "vertical program first lower-tile row");
+
+        assertResult(shell.executeForResult("source ~/programs/monitor_demo.sh"), 0,
+                List.of("2x2 wall pattern rendered (expected size: 80x40).",
+                        "Check that text crosses both seams without mirroring or clipping."),
+                "default 2x2 monitor-wall program");
+        assertEquals("L".repeat(40) + "R".repeat(40), host.lines.get(1),
+                "2x2 program upper horizontal split");
+        assertEquals("l".repeat(40) + "r".repeat(40), host.lines.get(21),
+                "2x2 program lower horizontal split");
+
+        shell.getVfs().writeFile("/home/player/programs/monitor_demo.sh", "echo player-version\n");
+        shell.getVfs().rm("/home/player/programs/monitor_wall_grid.sh");
+        BashShell restored = new BashShell();
+        restored.load(shell.save());
+        assertEquals("echo player-version\n",
+                restored.getVfs().readFile("/home/player/programs/monitor_demo.sh"),
+                "terminal migration preserves edited bundled program");
+        assertEquals(true, restored.getVfs().readFile(
+                        "/home/player/programs/monitor_wall_grid.sh") != null,
+                "terminal migration installs missing monitor program");
+    }
+
     private static void assertResult(ShellCommandResult actual, int exitCode,
                                      List<String> output, String message) {
         assertEquals(exitCode, actual.exitCode(), message + " exit code");
@@ -61,4 +103,34 @@ public final class BashShellCharacterizationTest {
             throw new AssertionError(message + ": expected=" + expected + ", actual=" + actual);
         }
     }
+
+    private static final class FakeMonitorHost implements TerminalHost {
+        private final List<String> lines = new ArrayList<>();
+
+        @Override public boolean monitorWrite(String side, String text) {
+            return monitorSetLine(side, lines.size(), text);
+        }
+        @Override public boolean monitorClear(String side) {
+            lines.clear();
+            return true;
+        }
+        @Override public boolean monitorSetLine(String side, int row, String text) {
+            if (row < 0 || row >= 40 || text.length() > 80) return false;
+            while (lines.size() <= row) lines.add("");
+            lines.set(row, text);
+            return true;
+        }
+        @Override public boolean monitorSetTitle(String side, String title) { return true; }
+        @Override public boolean monitorSetPalette(String side, int foreground, int background) { return true; }
+        @Override public List<String> monitorLines(String side) { return List.copyOf(lines); }
+        @Override public int getRedstoneInput(String side) { return 0; }
+        @Override public int getRedstoneOutput(String side) { return 0; }
+        @Override public boolean setRedstoneOutput(String side, int power) { return false; }
+        @Override public List<String> redstoneSides() { return List.of(); }
+        @Override public List<String> listPeripherals() { return List.of("right:monitor"); }
+        @Override public String getLabel() { return "monitor-demo-test"; }
+        @Override public void setLabel(String label) {}
+        @Override public CompoundTag readDiskMedia() { return null; }
+    }
+
 }

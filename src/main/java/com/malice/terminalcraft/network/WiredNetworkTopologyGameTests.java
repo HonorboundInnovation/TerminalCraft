@@ -957,6 +957,87 @@ public final class WiredNetworkTopologyGameTests {
                 helper.getLevel(), helper.absolutePos(eastCable)).orElseThrow();
         helper.assertTrue(subnet.modemCount() == 0,
                 "wireless modems must not contribute to wired subnet endpoint counts");
+        helper.assertTrue(WiredNetworkTopology.modemSubnets(helper.getLevel(),
+                        helper.absolutePos(secondPos)).isEmpty(),
+                "wireless modems must not expose wired subnet attachments through diagnostics");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void disabledRouterLinkSplitsRoutesGroupsAndDiagnostics(GameTestHelper helper) {
+        BlockPos first = new BlockPos(1, 2, 2);
+        BlockPos westCable = new BlockPos(2, 2, 2);
+        BlockPos westRouter = new BlockPos(3, 2, 2);
+        BlockPos eastRouter = new BlockPos(4, 2, 2);
+        BlockPos eastCable = new BlockPos(5, 2, 2);
+        BlockPos second = new BlockPos(6, 2, 2);
+        helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(westCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(westRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
+        helper.setBlock(eastRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
+        helper.setBlock(eastCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
+        ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
+        ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
+        NetworkRouterBlockEntity router = (NetworkRouterBlockEntity) helper.getBlockEntity(westRouter);
+
+        helper.assertTrue(router.setInterfaceEnabled(Direction.EAST, false),
+                "router-to-router interface must support administrative shutdown");
+        helper.assertTrue(!WiredNetworkTopology.connected(helper.getLevel(), helper.absolutePos(first),
+                        helper.absolutePos(second)),
+                "a disabled internal router link must partition the forwarding path");
+        WiredNetworkTopology.RouterView splitView = WiredNetworkTopology.routerInterfaces(
+                helper.getLevel(), helper.absolutePos(westRouter));
+        WiredNetworkTopology.Component splitComponent = WiredNetworkTopology.inspect(
+                helper.getLevel(), helper.absolutePos(westRouter));
+        helper.assertTrue(splitView.routerNodeCount() == 1 && splitView.interfaces().size() == 1,
+                "active router-group diagnostics must stop at a disabled inter-router face: " + splitView);
+        helper.assertTrue(splitComponent.nodeCount() == 2 && splitComponent.modemCount() == 1,
+                "component diagnostics must report only the enabled side of a partition: " + splitComponent);
+
+        router.setInterfaceEnabled(Direction.EAST, true);
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), helper.absolutePos(first),
+                        helper.absolutePos(second)),
+                "re-enabling the internal link must merge the route immediately");
+        helper.assertTrue(WiredNetworkTopology.routerInterfaces(helper.getLevel(),
+                        helper.absolutePos(westRouter)).routerNodeCount() == 2,
+                "router-group diagnostics must merge again after re-enabling the link");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void multipartFaceRemovalInvalidatesOnlyAffectedPath(GameTestHelper helper) {
+        BlockPos cable = new BlockPos(3, 2, 3);
+        BlockPos first = cable.east();
+        BlockPos second = cable.above();
+        helper.setBlock(cable.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(cable.west(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP));
+        ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
+        ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
+        helper.assertTrue(NetworkCableBlock.addFace(helper.getLevel(), helper.absolutePos(cable), Direction.EAST),
+                "test setup must add a supported second cable face");
+        helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), helper.absolutePos(first),
+                        helper.absolutePos(second)),
+                "multipart faces in one space must bridge their respective planes");
+
+        helper.assertTrue(NetworkCableBlock.removeFace(helper.getLevel(), helper.absolutePos(cable),
+                        Direction.EAST, false),
+                "one multipart face must be removable without deleting the remaining cable");
+        helper.assertTrue(!WiredNetworkTopology.connected(helper.getLevel(), helper.absolutePos(first),
+                        helper.absolutePos(second)),
+                "removing one face must invalidate the path that depended on that face immediately");
+        helper.assertTrue(NetworkCableBlock.hasFace(helper.getLevel(), helper.absolutePos(cable), Direction.UP)
+                        && !NetworkCableBlock.hasFace(helper.getLevel(), helper.absolutePos(cable), Direction.EAST),
+                "the unrelated face must remain present after targeted removal");
+
+        helper.assertTrue(NetworkCableBlock.removeFace(helper.getLevel(), helper.absolutePos(cable),
+                        Direction.UP, false)
+                        && helper.getBlockState(cable).isAir(),
+                "removing the final face must remove the cable block");
         helper.succeed();
     }
 

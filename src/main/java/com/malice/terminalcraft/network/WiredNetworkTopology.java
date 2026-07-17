@@ -273,7 +273,7 @@ public final class WiredNetworkTopology {
 
     /** Lists the distinct physical subnets directly available to a modem. */
     public static List<Subnet> modemSubnets(ServerLevel level, BlockPos modemPos) {
-        if (level == null || modemPos == null) return List.of();
+        if (level == null || modemPos == null || !isWiredModem(level, modemPos)) return List.of();
         Map<SubnetId, Subnet> found = new HashMap<>();
         Set<BlockPos> classified = new HashSet<>();
         for (Direction direction : Direction.values()) {
@@ -299,7 +299,8 @@ public final class WiredNetworkTopology {
             if (!routers.add(current)) continue;
             for (Direction direction : Direction.values()) {
                 BlockPos next = current.relative(direction);
-                if (isRoutingNode(level, next) && !routers.contains(next)) pending.addLast(next.immutable());
+                if (isRoutingNode(level, next) && allowsEdge(level, current, next)
+                        && !routers.contains(next)) pending.addLast(next.immutable());
             }
         }
 
@@ -346,7 +347,8 @@ public final class WiredNetworkTopology {
             if (!routers.add(current)) continue;
             for (Direction direction : Direction.values()) {
                 BlockPos next = current.relative(direction);
-                if (isRoutingNode(level, next) && !routers.contains(next)) pending.addLast(next.immutable());
+                if (isRoutingNode(level, next) && allowsEdge(level, current, next)
+                        && !routers.contains(next)) pending.addLast(next.immutable());
             }
         }
         boolean truncated = !pending.isEmpty();
@@ -388,6 +390,7 @@ public final class WiredNetworkTopology {
             BlockPos current = pending.removeFirst();
             if (!visited.add(current)) continue;
             for (BlockPos next : physicalNeighbors(level, current)) {
+                if (!allowsEdge(level, current, next)) continue;
                 if (isForwardingNode(level, next)) {
                     if (!visited.contains(next)) pending.addLast(next.immutable());
                 } else if (isWiredModem(level, next)) {

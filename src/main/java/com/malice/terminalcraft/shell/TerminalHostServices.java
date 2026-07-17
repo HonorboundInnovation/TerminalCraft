@@ -86,6 +86,8 @@ public record TerminalHostServices(
                     @Override public boolean setNetworkName(String networkName) { return host.modemSetNetworkName(networkName); }
                     @Override public List<String> hosts(int maximum) { return host.modemHosts(maximum); }
                     @Override public List<String> interfaces() { return host.modemInterfaces(); }
+                    @Override public List<String> topologyDiagnostics() { return host.modemTopologyDiagnostics(); }
+                    @Override public List<String> packetDiagnostics() { return host.modemPacketDiagnostics(); }
                     @Override public List<String> route(String destination) { return host.modemRoute(destination); }
                     @Override public List<String> ping(String destination) { return host.modemPing(destination); }
                     @Override public List<String> neighbors(int maximum) { return host.modemNeighbors(maximum); }
@@ -172,6 +174,8 @@ public record TerminalHostServices(
         boolean setNetworkName(String networkName);
         List<String> hosts(int maximum);
         List<String> interfaces();
+        List<String> topologyDiagnostics();
+        List<String> packetDiagnostics();
         List<String> route(String destination);
         List<String> ping(String destination);
         List<String> neighbors(int maximum);

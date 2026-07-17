@@ -43,6 +43,15 @@ public final class RednetNetwork {
     public record RejectionDiagnostics(long malformed, long rateLimited,
                                        long applicationQueueFull, long controlQueueFull) {}
 
+    /** Bounded, non-identifying packet-runtime snapshot for players and operators. */
+    public record RuntimeDiagnostics(int subscriptions, int registeredHosts, int registeredServices,
+                                     int applicationQueues, int applicationMessages,
+                                     int controlQueues, int controlMessages,
+                                     int queuedEntries, int queuedBytes, int trackedQueues,
+                                     long quotaGameTime, int submittedMessages, int submittedBytes,
+                                     int trackedSenders, RednetDeliveryRuntime.Diagnostics deliveries,
+                                     RejectionDiagnostics rejections) {}
+
     private static final class RejectionCounter {
         private long malformed;
         private long rateLimited;
@@ -899,6 +908,75 @@ public final class RednetNetwork {
         if (level == null || level.isClientSide) return new RejectionDiagnostics(0, 0, 0, 0);
         RejectionCounter counter = REJECTIONS.get(scope(level));
         return counter == null ? new RejectionDiagnostics(0, 0, 0, 0) : counter.snapshot();
+    }
+
+
+    /** Returns aggregate runtime health without exposing payloads, endpoint UUIDs, or credentials. */
+    public static RuntimeDiagnostics runtimeDiagnostics(Level level) {
+        RednetDeliveryRuntime.Diagnostics emptyDeliveries =
+                new RednetDeliveryRuntime.Diagnostics(0, 0, 0, 0, 0, 0, 0);
+        RejectionDiagnostics emptyRejections = new RejectionDiagnostics(0, 0, 0, 0);
+        if (level == null || level.isClientSide) {
+            return new RuntimeDiagnostics(0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                    level == null ? -1 : level.getGameTime(), 0, 0, 0,
+                    emptyDeliveries, emptyRejections);
+        }
+        RednetRuntimeScope runtimeScope = scope(level);
+        List<Subscription> subscriptions = SUBS.get(runtimeScope);
+        int subscriptionCount = subscriptions == null ? 0 : queueSize(SUBS, runtimeScope);
+        RednetHostDirectory hosts = HOSTS.get(runtimeScope);
+        int hostCount = hosts == null ? 0 : hosts.names(RednetHostDirectory.MAX_HOSTS).size();
+        RednetServiceDirectory services = SERVICES.get(runtimeScope);
+        int serviceCount = services == null ? 0
+                : services.services(RednetServiceDirectory.MAX_SERVICES).size();
+
+        int applicationQueues = 0;
+        int applicationMessages = 0;
+        for (RednetRuntimeScope.Endpoint endpoint : QUEUES.keySet()) {
+            if (!endpoint.scope().equals(runtimeScope)) continue;
+            int size = queueSize(QUEUES, endpoint);
+            if (size == 0) continue;
+            applicationQueues++;
+            applicationMessages += size;
+        }
+        int controlQueues = 0;
+        int controlMessages = 0;
+        for (RednetRuntimeScope.Endpoint endpoint : ACK_CONTROLS.keySet()) {
+            if (!endpoint.scope().equals(runtimeScope)) continue;
+            int size = queueSize(ACK_CONTROLS, endpoint);
+            if (size == 0) continue;
+            controlQueues++;
+            controlMessages += size;
+        }
+
+        RednetQueueBudget budget = QUEUE_BUDGETS.get(runtimeScope);
+        RednetQueueBudget.Usage queueUsage = budget == null
+                ? new RednetQueueBudget.Usage(0, 0) : budget.scopeUsage();
+        int trackedQueues = budget == null ? 0 : budget.trackedQueues();
+        RednetTrafficQuota quota = TRAFFIC_QUOTAS.get(runtimeScope);
+        RednetTrafficQuota.ScopeUsage quotaUsage = quota == null
+                ? new RednetTrafficQuota.ScopeUsage(level.getGameTime(), 0, 0, 0)
+                : quota.scopeUsage(level.getGameTime());
+        RednetDeliveryRuntime deliveryRuntime = DELIVERIES.get(runtimeScope);
+        RednetDeliveryRuntime.Diagnostics deliveryDiagnostics = deliveryRuntime == null
+                ? emptyDeliveries : deliveryRuntime.diagnostics();
+        RejectionCounter rejectionCounter = REJECTIONS.get(runtimeScope);
+        RejectionDiagnostics rejectionDiagnostics = rejectionCounter == null
+                ? emptyRejections : rejectionCounter.snapshot();
+        return new RuntimeDiagnostics(subscriptionCount, hostCount, serviceCount,
+                applicationQueues, applicationMessages, controlQueues, controlMessages,
+                queueUsage.entries(), queueUsage.bytes(), trackedQueues,
+                quotaUsage.gameTime(), quotaUsage.messages(), quotaUsage.bytes(), quotaUsage.trackedSenders(),
+                deliveryDiagnostics, rejectionDiagnostics);
+    }
+
+    private static <K, T> int queueSize(Map<K, List<T>> queues, K key) {
+        int[] size = {0};
+        queues.computeIfPresent(key, (ignored, queue) -> {
+            size[0] = queue.size();
+            return queue;
+        });
+        return size[0];
     }
 
     private static void reject(RednetRuntimeScope runtimeScope, RejectionKind kind) {

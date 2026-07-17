@@ -63,6 +63,12 @@ public final class RednetTrafficQuota {
         return usage.size();
     }
 
+    /** Non-identifying aggregate snapshot for operator diagnostics. */
+    public synchronized ScopeUsage scopeUsage(long gameTime) {
+        if (scopeGameTime != gameTime) return new ScopeUsage(gameTime, 0, 0, 0);
+        return new ScopeUsage(scopeGameTime, scopeMessages, scopeBytes, usage.size());
+    }
+
     public synchronized void remove(UUID senderId) {
         if (senderId != null) usage.remove(senderId);
     }
@@ -75,4 +81,6 @@ public final class RednetTrafficQuota {
     }
 
     public record Usage(long gameTime, int messages, int bytes) {}
+
+    public record ScopeUsage(long gameTime, int messages, int bytes, int trackedSenders) {}
 }

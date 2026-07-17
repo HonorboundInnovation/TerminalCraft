@@ -97,6 +97,28 @@ public final class RednetDeliveryRuntime {
         return deliveries.values().stream().limit(limit).toList();
     }
 
+    /** Non-identifying state totals for bounded operator diagnostics. */
+    public synchronized Diagnostics diagnostics() {
+        int pending = 0;
+        int attempting = 0;
+        int accepted = 0;
+        int acknowledged = 0;
+        int rejected = 0;
+        int timedOut = 0;
+        for (Delivery delivery : deliveries.values()) {
+            switch (delivery.state()) {
+                case PENDING -> pending++;
+                case ATTEMPTING -> attempting++;
+                case ACCEPTED -> accepted++;
+                case ACKNOWLEDGED -> acknowledged++;
+                case REJECTED -> rejected++;
+                case TIMED_OUT -> timedOut++;
+            }
+        }
+        return new Diagnostics(deliveries.size(), pending, attempting, accepted,
+                acknowledged, rejected, timedOut);
+    }
+
     private Delivery runAttempt(UUID id, long now, Attempt callback) {
         NetworkEnvelope envelope;
         Delivery claimed;
@@ -159,6 +181,9 @@ public final class RednetDeliveryRuntime {
     public interface Attempt { boolean accept(NetworkEnvelope envelope); }
 
     public enum State { PENDING, ATTEMPTING, ACCEPTED, ACKNOWLEDGED, REJECTED, TIMED_OUT }
+
+    public record Diagnostics(int retained, int pending, int attempting, int accepted,
+                              int acknowledged, int rejected, int timedOut) {}
 
     public record Delivery(UUID messageId, NetworkEnvelope envelope, State state, int attempts,
                            int maxRetries, long timeoutTicks, long submittedAt, long deadline,

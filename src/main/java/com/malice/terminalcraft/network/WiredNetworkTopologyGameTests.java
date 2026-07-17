@@ -1208,4 +1208,63 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void shellExposesBoundedTopologyAndPacketDiagnostics(GameTestHelper helper) {
+        BlockPos terminalPos = new BlockPos(1, 2, 2);
+        BlockPos senderPos = new BlockPos(2, 2, 2);
+        BlockPos cablePos = new BlockPos(3, 2, 2);
+        BlockPos receiverPos = new BlockPos(4, 2, 2);
+        helper.setBlock(terminalPos, ModRegistries.TERMINAL_BLOCK.get());
+        helper.setBlock(senderPos, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(cablePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        helper.setBlock(receiverPos, ModRegistries.MODEM_BLOCK.get());
+        TerminalBlockEntity terminal = (TerminalBlockEntity) helper.getBlockEntity(terminalPos);
+        ModemBlockEntity sender = (ModemBlockEntity) helper.getBlockEntity(senderPos);
+        ModemBlockEntity receiver = (ModemBlockEntity) helper.getBlockEntity(receiverPos);
+        sender.setWireless(false);
+        receiver.setWireless(false);
+        sender.openChannel(150);
+        receiver.openChannel(151);
+        receiver.setHostname("diagnostic-target");
+
+        helper.assertTrue(sender.transmitTo("diagnostic-target", 151, 150, "queued-diagnostic"),
+                "diagnostic setup must enqueue one real application packet");
+        helper.assertTrue(!RednetNetwork.transmitTo(helper.getLevel(), sender.getModemId(),
+                        helper.absolutePos(senderPos), null, 151, 150, "malformed", false, 0),
+                "diagnostic setup must record one non-disclosing malformed rejection");
+
+        ShellCommandResult topology = terminal.getShell().executeForResult("modem topology");
+        helper.assertTrue(topology.exitCode() == 0
+                        && topology.outputLines().stream().anyMatch(line ->
+                        line.equals("topology transport=wired attachments=1"))
+                        && topology.outputLines().stream().anyMatch(line ->
+                        line.startsWith("subnet=1 ") && line.contains(" nodes=1 ")
+                                && line.contains(" modems=2 ") && line.endsWith("truncated=false"))
+                        && topology.outputLines().stream().anyMatch(line ->
+                        line.startsWith("cache revision=") && line.contains(" entries="))
+                        && topology.outputLines().stream().anyMatch(line ->
+                        line.startsWith("index revision=") && line.contains(" nodes=")
+                                && line.contains(" edges=") && line.endsWith("truncated=false")),
+                "shell topology diagnostics must expose bounded live subnet, cache, and index state: "
+                        + topology.outputLines());
+
+        ShellCommandResult packets = terminal.getShell().executeForResult("modem diagnostics");
+        helper.assertTrue(packets.exitCode() == 0 && packets.outputLines().size() == 5
+                        && packets.outputLines().get(0).startsWith("runtime subscriptions=")
+                        && packets.outputLines().get(0).contains(" hosts=")
+                        && packets.outputLines().get(0).contains(" services=")
+                        && packets.outputLines().get(0).contains(" local_pending=0")
+                        && packets.outputLines().get(1).startsWith("queues application=")
+                        && packets.outputLines().get(1).contains(" aggregate=")
+                        && packets.outputLines().get(2).startsWith("traffic tick=")
+                        && packets.outputLines().get(3).startsWith("deliveries retained=")
+                        && packets.outputLines().get(4).matches(".*malformed=[1-9][0-9]*.*"),
+                "shell packet diagnostics must expose aggregate queues, quota, delivery, and rejection state: "
+                        + packets.outputLines());
+        helper.assertTrue(receiver.pendingCount() == 1,
+                "diagnostic reads must not consume or reveal the queued application payload");
+        helper.succeed();
+    }
+
 }

@@ -32,6 +32,8 @@ final class ModemCommandModule implements ShellCommandModule {
             context.printLine("modem hostname [name|clear]");
             context.printLine("modem network [name|clear]");
             context.printLine("modem interfaces");
+            context.printLine("modem topology");
+            context.printLine("modem diagnostics");
             context.printLine("modem route <host>");
             context.printLine("modem ping <host>");
             context.printLine("modem probe <host> <port> <replyChannel> <message>");
@@ -150,6 +152,30 @@ final class ModemCommandModule implements ShellCommandModule {
             List<String> interfaces = modem.interfaces();
             if (interfaces.isEmpty()) context.printLine("(none)");
             else interfaces.forEach(context::printLine);
+            context.setExitCode(0);
+            return;
+        }
+        if ("topology".equals(op) || "topo".equals(op)) {
+            if (args.size() != 1) {
+                context.printLine("modem: usage: modem topology");
+                context.setExitCode(1);
+                return;
+            }
+            List<String> diagnostics = modem.topologyDiagnostics();
+            if (diagnostics.isEmpty()) context.printLine("(none)");
+            else diagnostics.forEach(context::printLine);
+            context.setExitCode(0);
+            return;
+        }
+        if ("diagnostics".equals(op) || "diag".equals(op) || "status".equals(op)) {
+            if (args.size() != 1) {
+                context.printLine("modem: usage: modem diagnostics");
+                context.setExitCode(1);
+                return;
+            }
+            List<String> diagnostics = modem.packetDiagnostics();
+            if (diagnostics.isEmpty()) context.printLine("(none)");
+            else diagnostics.forEach(context::printLine);
             context.setExitCode(0);
             return;
         }
@@ -459,7 +485,7 @@ final class ModemCommandModule implements ShellCommandModule {
             context.setExitCode(0);
             return;
         }
-        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|interfaces|neighbors|route|ping|probe|delivery|hosts|service|services|call|send|sendto|recv ...");
+        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|interfaces|topology|diagnostics|neighbors|route|ping|probe|delivery|hosts|service|services|call|send|sendto|recv ...");
         context.setExitCode(1);
     }
 

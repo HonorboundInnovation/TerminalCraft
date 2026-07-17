@@ -59,6 +59,8 @@ public interface TerminalHost {
     default boolean modemSetNetworkName(String networkName) { return false; }
     default List<String> modemHosts(int maximum) { return List.of(); }
     default List<String> modemInterfaces() { return List.of(); }
+    default List<String> modemTopologyDiagnostics() { return List.of(); }
+    default List<String> modemPacketDiagnostics() { return List.of(); }
     default List<String> modemRoute(String destination) { return List.of(); }
     default List<String> modemPing(String destination) { return List.of(); }
     default List<String> modemNeighbors(int maximum) { return List.of(); }

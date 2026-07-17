@@ -76,6 +76,12 @@ public final class RednetDeliveryRuntimeTest {
         check(runtime.delivery(rejectedId).orElseThrow().state()
                         == RednetDeliveryRuntime.State.REJECTED,
                 "exhausted rejected attempts must become terminal");
+        RednetDeliveryRuntime.Diagnostics diagnostics = runtime.diagnostics();
+        check(diagnostics.retained() == 3 && diagnostics.pending() == 0
+                        && diagnostics.attempting() == 0 && diagnostics.accepted() == 0
+                        && diagnostics.acknowledged() == 1 && diagnostics.rejected() == 1
+                        && diagnostics.timedOut() == 1,
+                "aggregate diagnostics must classify every retained delivery without exposing envelopes");
 
         expectFailure(() -> runtime.submit(request(UUID.randomUUID()), -1, 1, 0, envelope -> true));
         expectFailure(() -> runtime.submit(request(UUID.randomUUID()), 0, 0, 0, envelope -> true));

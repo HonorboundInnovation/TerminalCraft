@@ -310,6 +310,18 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     }
 
     @Override
+    public List<String> modemTopologyDiagnostics() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.topologyDiagnostics();
+    }
+
+    @Override
+    public List<String> modemPacketDiagnostics() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.packetDiagnostics();
+    }
+
+    @Override
     public List<String> modemRoute(String destination) {
         ModemBlockEntity modem = findModem(null);
         return modem == null ? List.of() : modem.routeDiagnostics(destination);

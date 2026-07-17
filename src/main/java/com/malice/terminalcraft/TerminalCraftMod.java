@@ -78,7 +78,17 @@ public final class TerminalCraftMod {
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onChunkLoaded(final net.minecraftforge.event.level.ChunkEvent.Load event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
-            com.malice.terminalcraft.network.WiredNetworkTopology.loadChunk(level, event.getChunk());
+            net.minecraft.world.level.ChunkPos position = event.getChunk().getPos();
+            // Chunk-load callbacks can run while the full-chunk future is still completing. Defer
+            // topology discovery and use getChunkNow so diagnostics never recursively request the
+            // same chunk from inside its own completion path.
+            level.getServer().execute(() -> {
+                net.minecraft.world.level.chunk.LevelChunk loaded =
+                        level.getChunkSource().getChunkNow(position.x, position.z);
+                if (loaded != null) {
+                    com.malice.terminalcraft.network.WiredNetworkTopology.loadChunk(level, loaded);
+                }
+            });
         }
     }
 

@@ -202,6 +202,73 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         }).orElseGet(List::of);
     }
 
+    /** Aggregate packet-runtime diagnostics that never expose payloads or endpoint identities. */
+    public List<String> packetDiagnostics() {
+        if (level == null || level.isClientSide) return List.of();
+        RednetNetwork.RuntimeDiagnostics runtime = RednetNetwork.runtimeDiagnostics(level);
+        RednetDeliveryRuntime.Diagnostics deliveries = runtime.deliveries();
+        RednetNetwork.RejectionDiagnostics rejections = runtime.rejections();
+        return List.of(
+                "runtime subscriptions=" + runtime.subscriptions()
+                        + " hosts=" + runtime.registeredHosts()
+                        + " services=" + runtime.registeredServices()
+                        + " local_pending=" + pendingCount(),
+                "queues application=" + runtime.applicationQueues() + "/" + runtime.applicationMessages()
+                        + " control=" + runtime.controlQueues() + "/" + runtime.controlMessages()
+                        + " aggregate=" + runtime.queuedEntries() + "/" + runtime.queuedBytes()
+                        + " tracked=" + runtime.trackedQueues(),
+                "traffic tick=" + runtime.quotaGameTime()
+                        + " messages=" + runtime.submittedMessages()
+                        + " bytes=" + runtime.submittedBytes()
+                        + " senders=" + runtime.trackedSenders(),
+                "deliveries retained=" + deliveries.retained()
+                        + " pending=" + deliveries.pending()
+                        + " attempting=" + deliveries.attempting()
+                        + " accepted=" + deliveries.accepted()
+                        + " acknowledged=" + deliveries.acknowledged()
+                        + " rejected=" + deliveries.rejected()
+                        + " timed_out=" + deliveries.timedOut(),
+                "rejections malformed=" + rejections.malformed()
+                        + " rate_limited=" + rejections.rateLimited()
+                        + " application_full=" + rejections.applicationQueueFull()
+                        + " control_full=" + rejections.controlQueueFull());
+    }
+
+    /** Loaded physical-topology, route-cache, and index diagnostics for this modem's dimension. */
+    public List<String> topologyDiagnostics() {
+        if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel)) return List.of();
+        com.malice.terminalcraft.network.WiredNetworkTopology.CacheDiagnostics cache =
+                com.malice.terminalcraft.network.WiredNetworkTopology.cacheDiagnostics(serverLevel);
+        com.malice.terminalcraft.network.WiredNetworkTopology.IndexDiagnostics index =
+                com.malice.terminalcraft.network.WiredNetworkTopology.indexDiagnostics(serverLevel);
+        List<String> lines = new ArrayList<>();
+        if (wireless) {
+            lines.add("topology transport=wireless physical=not_applicable");
+        } else {
+            List<com.malice.terminalcraft.network.WiredNetworkTopology.Subnet> subnets =
+                    com.malice.terminalcraft.network.WiredNetworkTopology.modemSubnets(serverLevel, worldPosition);
+            lines.add("topology transport=wired attachments=" + subnets.size());
+            for (int i = 0; i < subnets.size(); i++) {
+                com.malice.terminalcraft.network.WiredNetworkTopology.Subnet subnet = subnets.get(i);
+                lines.add("subnet=" + (i + 1)
+                        + " id=" + subnet.id().displayName()
+                        + " nodes=" + subnet.nodeCount()
+                        + " modems=" + subnet.modemCount()
+                        + " truncated=" + subnet.truncated());
+            }
+        }
+        lines.add("cache revision=" + cache.revision()
+                + " entries=" + cache.entries()
+                + " computations=" + cache.computations()
+                + " hits=" + cache.hits());
+        lines.add("index revision=" + index.revisions()
+                + " nodes=" + index.nodes()
+                + " edges=" + index.directedEdges()
+                + " refreshed=" + index.refreshedPositions()
+                + " truncated=" + index.truncated());
+        return List.copyOf(lines);
+    }
+
     private static String position(BlockPos position) {
         return position.getX() + "," + position.getY() + "," + position.getZ();
     }

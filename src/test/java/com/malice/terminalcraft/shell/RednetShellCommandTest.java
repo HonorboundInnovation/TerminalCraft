@@ -30,6 +30,23 @@ public final class RednetShellCommandTest {
         assertResult(shell.executeForResult("modem interfaces"), 0,
                 List.of("address=rednet:test transport=wired dimension=minecraft:overworld position=1,2,3 ports=80,81"),
                 "interface diagnostics");
+        assertResult(shell.executeForResult("modem topology"), 0,
+                List.of("topology transport=wired attachments=1",
+                        "subnet=1 id=minecraft:overworld@2,2,3 nodes=3 modems=2 truncated=false",
+                        "cache revision=4 entries=2 computations=7 hits=9",
+                        "index revision=6 nodes=5 edges=8 refreshed=125 truncated=false"),
+                "physical topology diagnostics");
+        assertResult(shell.executeForResult("modem diagnostics"), 0,
+                List.of("runtime subscriptions=3 hosts=2 services=1 local_pending=4",
+                        "queues application=1/4 control=1/1 aggregate=5/640 tracked=2",
+                        "traffic tick=120 messages=8 bytes=256 senders=2",
+                        "deliveries retained=3 pending=0 attempting=0 accepted=1 acknowledged=1 rejected=0 timed_out=1",
+                        "rejections malformed=1 rate_limited=2 application_full=3 control_full=4"),
+                "aggregate packet diagnostics");
+        assertResult(shell.executeForResult("modem topology extra"), 1,
+                List.of("modem: usage: modem topology"), "topology argument validation");
+        assertResult(shell.executeForResult("modem diagnostics extra"), 1,
+                List.of("modem: usage: modem diagnostics"), "diagnostics argument validation");
         assertResult(shell.executeForResult("modem hosts"), 0,
                 List.of("factory-01", "warehouse"), "sorted host listing");
         assertResult(shell.executeForResult("modem neighbors 1"), 0,
@@ -137,6 +154,19 @@ public final class RednetShellCommandTest {
         @Override public List<String> modemHosts(int maximum) { return List.of("factory-01", "warehouse"); }
         @Override public List<String> modemInterfaces() {
             return List.of("address=rednet:test transport=wired dimension=minecraft:overworld position=1,2,3 ports=80,81");
+        }
+        @Override public List<String> modemTopologyDiagnostics() {
+            return List.of("topology transport=wired attachments=1",
+                    "subnet=1 id=minecraft:overworld@2,2,3 nodes=3 modems=2 truncated=false",
+                    "cache revision=4 entries=2 computations=7 hits=9",
+                    "index revision=6 nodes=5 edges=8 refreshed=125 truncated=false");
+        }
+        @Override public List<String> modemPacketDiagnostics() {
+            return List.of("runtime subscriptions=3 hosts=2 services=1 local_pending=4",
+                    "queues application=1/4 control=1/1 aggregate=5/640 tracked=2",
+                    "traffic tick=120 messages=8 bytes=256 senders=2",
+                    "deliveries retained=3 pending=0 attempting=0 accepted=1 acknowledged=1 rejected=0 timed_out=1",
+                    "rejections malformed=1 rate_limited=2 application_full=3 control_full=4");
         }
         @Override public List<String> modemPing(String destination) {
             return "warehouse".equals(destination)

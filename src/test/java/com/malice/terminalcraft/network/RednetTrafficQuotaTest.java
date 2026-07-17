@@ -42,6 +42,12 @@ public final class RednetTrafficQuotaTest {
                 "logical-time rollback must not reset current congestion accounting");
         check(bounded.admit(sender, "x", 31) && bounded.trackedSenders() == 1,
                 "a newer logical tick must reset bounded scope and sender state");
+        RednetTrafficQuota.ScopeUsage visibleUsage = bounded.scopeUsage(31);
+        check(visibleUsage.gameTime() == 31 && visibleUsage.messages() == 1
+                        && visibleUsage.bytes() == 1 && visibleUsage.trackedSenders() == 1,
+                "aggregate diagnostics must report the current tick without sender identities");
+        check(bounded.scopeUsage(32).equals(new RednetTrafficQuota.ScopeUsage(32, 0, 0, 0)),
+                "diagnostic reads for a different tick must not expose stale quota usage");
 
         RednetTrafficQuota scopeBytes = new RednetTrafficQuota();
         String maximumPayload = "x".repeat(NetworkEnvelope.MAX_PAYLOAD_LENGTH);

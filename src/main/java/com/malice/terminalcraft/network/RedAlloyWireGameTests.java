@@ -2,6 +2,7 @@ package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.block.TerminalBlock;
+import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
 import com.malice.terminalcraft.blockentity.TerminalBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -275,6 +276,33 @@ public final class RedAlloyWireGameTests {
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
         helper.assertTrue(power(helper, wire) == 15,
                 "wire must query a directional source from the source's face toward the receiver");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void persistedMultipartFacesSanitizeUnsupportedParts(GameTestHelper helper) {
+        BlockPos space = new BlockPos(3, 2, 2);
+        BlockPos floorSupport = space.below();
+        BlockPos wallSupport = space.west();
+        helper.setBlock(floorSupport, Blocks.STONE);
+        helper.setBlock(wallSupport, Blocks.STONE);
+        helper.setBlock(space, wire(Direction.UP));
+        helper.assertTrue(RedAlloyWireBlock.addFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "test fixture must contain two persisted multipart faces");
+
+        RedAlloyWireBlockEntity wire =
+                (RedAlloyWireBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(space));
+        net.minecraft.nbt.CompoundTag persisted = wire.saveWithoutMetadata();
+        helper.destroyBlock(wallSupport);
+        wire.load(persisted);
+        wire.onLoad();
+
+        helper.assertTrue(RedAlloyWireBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.UP),
+                "reload sanitation must preserve the still-supported face");
+        helper.assertTrue(!RedAlloyWireBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "reload sanitation must remove a face whose support disappeared while unloaded");
+        helper.assertTrue(helper.getBlockState(space).getValue(RedAlloyWireBlock.POWER) == 0,
+                "reload sanitation must recompute stale persisted power");
         helper.succeed();
     }
 

@@ -418,7 +418,7 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         if (!level.getBlockState(pos).equals(rendered)) level.setBlock(pos, rendered, Block.UPDATE_CLIENTS);
     }
 
-    private static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
+    public static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
         BlockPos support = pos.relative(face.getOpposite());
         return level.getBlockState(support).isFaceSturdy(level, support, face);
     }

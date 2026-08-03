@@ -109,6 +109,24 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
     }
 
     @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level == null || level.isClientSide) return;
+
+        // A chunk can be saved after support disappears while it is unloaded.
+        // Reuse the normal face-removal path so corrupt/stale multipart state
+        // cannot resurrect an unsupported face or retain stale power on reload.
+        for (Direction face : Set.copyOf(faces)) {
+            if (!RedAlloyWireBlock.canFaceSurvive(level, worldPosition, face)) {
+                RedAlloyWireBlock.removeFace(level, worldPosition, face, true);
+            }
+        }
+        if (level.getBlockEntity(worldPosition) == this && !faces.isEmpty()) {
+            RedAlloyWireBlock.recomputeAt(level, worldPosition);
+        }
+    }
+
+    @Override
     public CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
         saveAdditional(tag);

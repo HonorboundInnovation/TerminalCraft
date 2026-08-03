@@ -77,6 +77,7 @@ dependencies {
     compileOnly fg.deobf("curse.maven:sophisticated-backpacks-422301:7853013")
     compileOnly fg.deobf("curse.maven:storage-drawers-223852:6994481")
     compileOnly fg.deobf("maven.modrinth:refined-storage:1.12.4")
+    compileOnly fg.deobf("curse.maven:create-328085:7178761")
 
     // Optional local focused profile. No Sophisticated artifact is bundled or required by default.
     if (sophisticatedModsDir != null && !sophisticatedModsDir.isBlank()) {
@@ -151,11 +152,18 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 
+tasks.withType(JavaExec).configureEach {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
 def headlessTests = [
         shellSelfTest: ['Run BashShell headless self-test', 'com.malice.terminalcraft.shell.BashShellSelfTest'],
         shellCharacterizationTest: ['Run external BashShell compatibility characterization tests', 'com.malice.terminalcraft.shell.BashShellCharacterizationTest'],
         shellArchitectureExtractionTest: ['Run composed host-service and shell command-module tests', 'com.malice.terminalcraft.shell.ShellArchitectureExtractionTest'],
         bundledWireShellCommandTest: ['Run bundled-control cable shell bridge tests', 'com.malice.terminalcraft.shell.BundledWireShellCommandTest'],
+        wireInteractionSupportTest: ['Run wire wrench-interaction compatibility tests', 'com.malice.terminalcraft.block.WireInteractionSupportTest'],
         serverShellCommandTest: ['Run server rack shell command tests', 'com.malice.terminalcraft.shell.ServerShellCommandTest'],
         serverJobSchedulerTest: ['Run persistent bounded server job scheduler tests', 'com.malice.terminalcraft.server.ServerJobSchedulerTest'],
         commandSubmissionGuardTest: ['Run authoritative command packet admission tests', 'com.malice.terminalcraft.network.CommandSubmissionGuardTest'],
@@ -210,6 +218,7 @@ def headlessTests = [
         exactFluidTransferServiceTest: ['Run exact fluid transfer service authority and result-mapping tests', 'com.malice.terminalcraft.device.ExactFluidTransferServiceTest'],
         exactFluidAccessContractTest: ['Run public exact fluid transfer and escrow access contract tests', 'com.malice.terminalcraft.device.ExactFluidAccessContractTest'],
         optionalIntegrationsTest: ['Run optional integration registry absence-safety tests', 'com.malice.terminalcraft.integration.OptionalIntegrationsTest'],
+        monitorRemoteRequestTest: ['Run bounded remote-monitor protocol tests', 'com.malice.terminalcraft.network.MonitorRemoteRequestTest'],
         terminalChunkTicketPolicyTest: ['Run bounded terminal chunk-ticket policy tests', 'com.malice.terminalcraft.world.TerminalChunkTicketPolicyTest']
 ]
 

@@ -19,8 +19,7 @@ public final class ForgeFluidStackTransferPortTest {
     private ForgeFluidStackTransferPortTest() {}
 
     public static void main(String[] args) {
-        net.minecraft.SharedConstants.tryDetectVersion();
-        net.minecraft.server.Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
         drainPreservesTagAndReturnsCopy();
         fillPreservesTagAndReturnsExactRemainder();
         coordinatorRollsBackExactTaggedFluid();

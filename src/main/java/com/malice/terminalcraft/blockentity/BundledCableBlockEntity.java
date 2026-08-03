@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
@@ -163,7 +164,9 @@ public class BundledCableBlockEntity extends BlockEntity {
         super.load(tag);
         faces.clear();
         int mask = tag.getInt("FaceMask");
-        for (Direction face : Direction.values()) if ((mask & 1 << face.ordinal()) != 0) faces.add(face);
+        for (Direction face : Direction.values()) {
+            if ((mask & 1 << face.ordinal()) != 0 && !faces.contains(face.getOpposite())) faces.add(face);
+        }
         if (faces.isEmpty() && getBlockState().hasProperty(BundledCableBlock.FACE)) {
             faces.add(getBlockState().getValue(BundledCableBlock.FACE));
         }
@@ -194,6 +197,7 @@ public class BundledCableBlockEntity extends BlockEntity {
     }
 
     private static void loadArray(CompoundTag tag, String key, int[] target) {
+        Arrays.fill(target, 0);
         if (!tag.contains(key, Tag.TAG_INT_ARRAY)) return;
         int[] stored = tag.getIntArray(key);
         for (int i = 0; i < Math.min(stored.length, target.length); i++) {

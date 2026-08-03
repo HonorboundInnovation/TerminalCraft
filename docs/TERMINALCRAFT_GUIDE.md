@@ -1,6 +1,6 @@
 # The TerminalCraft Guide
 
-**The comprehensive player, administrator, shell, scripting, networking, and automation manual for TerminalCraft 1.0.0**
+**The comprehensive player, administrator, shell, scripting, networking, and automation manual for TerminalCraft 1.0.19**
 
 TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style computers. This guide documents the behavior of the current source release—not ordinary GNU Bash, ComputerCraft Lua, or features merely planned for a later release.
 
@@ -37,7 +37,7 @@ TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style
 | Component | Required version |
 |---|---|
 | Minecraft | 1.20.1 |
-| Minecraft Forge | 47.3.0 or compatible Forge 47.x |
+| Minecraft Forge | 47.4.10 |
 | Java | 17 |
 | TerminalCraft | Both client and server |
 
@@ -51,7 +51,7 @@ cd TerminalCraft
 ./gradlew clean build
 ```
 
-The output is `build/libs/terminalcraft-1.0.0.jar`.
+The output is `build/libs/terminalcraft-1.20.1-47.4.10-1.0.19.jar`.
 
 ## 2. Your first terminal
 
@@ -120,11 +120,19 @@ Connects and diagnoses wired network segments. Each face has persistent enabled 
 
 ### Red Alloy Wire
 
-A compact vanilla-redstone surface wire. It is separate from data networking and bundled control.
+A compact attenuating vanilla-redstone surface wire. Parts can occupy supported floor, wall, and
+ceiling faces, join across valid corners, and drop individually when support is removed. Right-click
+with a Forge/Common-tagged wrench (including the Create wrench) to inspect the selected face,
+current power, occupied faces, and links. Empty-hand interaction is deliberately left unclaimed for
+compatibility with Carry On and similar interaction mods.
+It is separate from data networking and bundled control.
 
 ### Bundled Control Cable
 
-Carries 16 independent channels numbered `0` through `15`. Values are strengths from `0` through `15`. Channel 0 bridges vanilla redstone behavior; data-network traffic remains a separate system.
+Carries 16 independent channels numbered `0` through `15`. Values are strengths from `0` through
+`15`. Channel 0 bridges vanilla redstone behavior; data-network traffic remains a separate system.
+Right-click with a Forge/Common-tagged wrench to inspect the selected face, links, and all active
+channels.
 
 ### Server Rack, Server Blade, and Router Blade
 
@@ -432,11 +440,25 @@ Special variables:
 | `$0` | Script path/name |
 | `$1` … `$9` | First nine script arguments |
 
-Variable expansion is intentionally simple and occurs before tokenization. Quote text containing spaces. There is no command substitution (`$(...)` or backticks), arrays, arithmetic expansion, or `${name:-default}` syntax.
+TerminalCraft supports bounded `$(command)` capture and signed-integer `$((expression))`
+expansion. Backticks, arrays, and `${name:-default}` remain unavailable.
+
+```sh
+JOB=$(server submit monitor set any 0 ready)
+NEXT=$((COUNT + 1))
+let COUNT=COUNT+1
+arith COUNT*2
+```
+
+Command substitution is limited to four nested substitutions, the configured command-length
+limit, and 4096 captured characters. Captured lines are normalized to a single space-separated
+value. The command still executes server-authoritatively and retains its normal side effects.
 
 ### Quoting
 
-Single and double quotes group whitespace. The current shell performs variable expansion before lexical tokenization, including text written inside single quotes. Do not rely on GNU Bash's rule that single quotes suppress expansion.
+Single and double quotes group whitespace. As in Bash, single quotes suppress variable, command,
+and arithmetic expansion; double quotes permit expansion while preserving the resulting text as
+one argument.
 
 ```sh
 GREETING='Hello operator'
@@ -472,11 +494,18 @@ test -e path            # file or directory exists
 test "$A" = "$B"      # string equality
 test "$A" == "$B"     # string equality
 test "$A" != "$B"     # string inequality
+test "$A" -eq "$B"    # integer equality
+test "$A" -ne "$B"    # integer inequality
+test "$A" -lt "$B"    # integer less-than
+test "$A" -le "$B"    # integer less-than-or-equal
+test "$A" -gt "$B"    # integer greater-than
+test "$A" -ge "$B"    # integer greater-than-or-equal
 test "$VALUE"          # nonempty string
 [ -f script.sh ]
 ```
 
-Numeric comparisons (`-eq`, `-lt`, and friends), compound tests (`-a`, `-o`), regexes, and glob tests are not implemented. The current `exit` command also does not abort a script; use `&&`, `||`, and `if` to guard later work.
+Compound tests (`-a`, `-o`), regexes, and glob tests are not implemented. `exit [status]`
+terminates the current script, while `break` and `continue` affect the nearest loop.
 
 ### Conditionals
 
@@ -522,7 +551,19 @@ while [ "$FLAG" = yes ]; do
 done
 ```
 
-Because there is no arithmetic expansion, use `for` for most fixed-count automation. Every loop is bounded to prevent runaway scripts.
+Arithmetic makes bounded counters possible:
+
+```sh
+COUNT=0
+while [ "$COUNT" -lt 8 ]; do
+  let COUNT=COUNT+1
+  if [ "$COUNT" -eq 3 ]; then continue; fi
+  echo step=$COUNT
+  if [ "$COUNT" -ge 6 ]; then break; fi
+done
+```
+
+Every loop remains bounded to 256 iterations to prevent runaway scripts.
 
 ### Pipes and redirection
 
@@ -543,6 +584,8 @@ The current shell enforces safeguards including:
 - maximum script nesting depth: 8;
 - maximum iterations per loop: 256;
 - maximum top-level chain steps: 128;
+- maximum command-substitution nesting: 4;
+- maximum captured command-substitution output: 4096 characters;
 - command length controlled by server config (default 512 characters);
 - command packet admission controlled by server config (default 20 per second per player);
 - editor: 512 lines, 512 characters per line, and 64 KiB maximum save size.
@@ -764,6 +807,8 @@ monitor set [side] <zero-based-row> <text>
 monitor title [side] <title>
 monitor color [side] <foreground> <background>
 monitor read [side]
+monitor service [list|add <name> <port>|remove <name>]
+monitor remote <service> clear|write|set|title|color ...
 ```
 
 Colors accept `#RRGGBB`, `0xRRGGBB`, or decimal `0..16777215`. Quote `#RRGGBB` values in scripts so `#` is not parsed as a comment.
@@ -779,6 +824,43 @@ monitor read right
 ```
 
 `monitor write` appends/writes according to the monitor host behavior; `monitor set` is preferable for stable dashboards.
+
+### Remote monitor walls
+
+A monitor service accepts a small, typed text-control protocol. It does not execute shell text.
+On the receiving computer, place an open modem so it either touches one monitor wall directly, or
+touches a terminal/turtle that in turn touches the wall. Exactly one wall must resolve from that
+modem.
+
+Receiver setup:
+
+```sh
+modem open 42
+monitor service add factory-wall 42
+monitor service list
+```
+
+From a pocket terminal within wireless range, open any reply channel once, then publish:
+
+```sh
+modem open 41
+monitor remote factory-wall clear
+monitor remote factory-wall title 'Factory Status'
+monitor remote factory-wall set 0 'Production online'
+monitor remote factory-wall color '#66ff99' '#050a05'
+```
+
+The direct layout still needs an adjacent terminal or turtle as its setup console. Registration is
+persisted on the modem. Service names are routing aliases, not passwords: any reachable peer on the
+same logical RedNet scope can publish to an advertised monitor service. Use network topology and
+logical network names as the trust boundary.
+
+### Create Display Links
+
+With Create `6.0.8` installed, a TerminalCraft monitor tile is a Display Link target. Point the
+Display Link at any tile; Create sees the row and column capacity of the complete connected wall.
+Choose the TerminalCraft monitor in the Display Link target UI and configure the source as usual.
+TerminalCraft sanitizes incoming components and bounds writes to the wall. Create remains optional.
 
 ## 12. Redstone and bundled control
 
@@ -801,7 +883,13 @@ rs set front 15
 rs output front
 ```
 
-A successful read only says that the side was valid and readable; script conditions cannot directly compare command output because command substitution is unavailable.
+A successful read only says that the side was valid and readable. Capture bounded output when a
+script needs to record or compare a returned value:
+
+```sh
+POWER=$(rs get back)
+echo power=$POWER
+```
 
 ### Bundled cable
 
@@ -1247,18 +1335,19 @@ This section prevents the most common incorrect assumptions.
 | GNU Bash feature | TerminalCraft status |
 |---|---|
 | External OS commands/processes | Not available |
-| Command substitution `$(...)` / backticks | Not available |
-| Arithmetic `$((...))`, `let`, `((...))` | Not available |
+| Command substitution `$(...)` | Supported with depth/output bounds; backticks unavailable |
+| Arithmetic `$((...))`, `let`, `arith` | Supported signed-integer subset; `((...))` command unavailable |
 | Functions | Not available |
 | Arrays | Not available |
 | Globbing/filename expansion | Not a documented feature |
-| Numeric `test -eq/-lt/...` | Not available |
+| Numeric `test -eq/-ne/-lt/-le/-gt/-ge` | Supported |
 | `case`, `select`, `until` | Not available |
 | Background jobs `&` | Not available |
 | Signals/process control | Not available |
-| `exit` terminates a script | No; current `exit` prints `logout` and succeeds |
+| `exit` terminates a script | Supported with optional status |
+| `break` / `continue` | Supported for the nearest bounded loop |
 | Real sleeping through `sleep` | Not available; current command is a no-op |
-| Single quotes suppress expansion | **No**; expansion occurs before tokenization |
+| Single quotes suppress expansion | Supported |
 | Full escape/`printf` formatting | Not available |
 | Unlimited loops/scripts | No; deliberately bounded |
 | Pipes/redirection | Supported as bounded sequential text flow |

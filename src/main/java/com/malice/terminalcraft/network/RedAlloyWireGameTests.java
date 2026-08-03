@@ -88,6 +88,10 @@ public final class RedAlloyWireGameTests {
 
         helper.assertTrue(helper.getBlockEntity(terminal) instanceof TerminalBlockEntity,
                 "terminal fixture must create its block entity");
+        helper.assertTrue(RedAlloyWireBlock.isConnected(
+                        RedAlloyWireBlock.renderState(helper.getLevel(), helper.absolutePos(wire), Direction.UP),
+                        Direction.WEST),
+                "wire beside a redstone-capable terminal must render an arm toward the device");
         TerminalBlockEntity terminalEntity = (TerminalBlockEntity) helper.getBlockEntity(terminal);
         helper.assertTrue(terminalEntity.setRedstoneOutput("east", 12),
                 "terminal must accept an east-side redstone output");
@@ -100,6 +104,32 @@ public final class RedAlloyWireGameTests {
             helper.runAfterDelay(3, () -> {
                 helper.assertTrue(power(helper, wire) == 0,
                         "terminal neighbor notifications must depower the adjacent wire after output is cleared");
+                helper.succeed();
+            });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void wireOutputNotifiesAdjacentVanillaDevice(GameTestHelper helper) {
+        BlockPos source = new BlockPos(1, 2, 2);
+        BlockPos wire = new BlockPos(2, 2, 2);
+        BlockPos lamp = new BlockPos(3, 2, 2);
+        helper.setBlock(wire.below(), Blocks.STONE);
+        helper.setBlock(source, Blocks.REDSTONE_BLOCK);
+        helper.setBlock(wire, wire(Direction.UP));
+        helper.setBlock(lamp, Blocks.REDSTONE_LAMP);
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(helper.getBlockState(lamp).getValue(
+                            net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                    "a powered wire must notify and energize an adjacent vanilla receiver");
+            helper.destroyBlock(source);
+            RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+            helper.runAfterDelay(3, () -> {
+                helper.assertTrue(!helper.getBlockState(lamp).getValue(
+                                net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                        "a depowered wire must notify and release an adjacent vanilla receiver");
                 helper.succeed();
             });
         });

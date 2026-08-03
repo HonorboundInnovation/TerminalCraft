@@ -5,7 +5,6 @@ import com.malice.terminalcraft.device.DurableCraftingLedger;
 import com.malice.terminalcraft.device.GenericCraftingService;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -18,8 +17,7 @@ public final class RefinedStorageBridgeBlockEntityTest {
     private RefinedStorageBridgeBlockEntityTest() {}
 
     public static void main(String[] args) {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
         BlockEntityType<?> type = BlockEntityType.Builder.of(
                 (position, state) -> { throw new UnsupportedOperationException("test-only type"); },
                 Blocks.STONE).build(null);

@@ -1,5 +1,6 @@
 package com.malice.terminalcraft.shell;
 
+import com.malice.terminalcraft.network.MonitorRemoteRequest;
 import net.minecraft.nbt.CompoundTag;
 
 import java.util.ArrayList;
@@ -24,6 +25,26 @@ public final class BashShellCharacterizationTest {
 
         ShellCommandResult alias = shell.executeForResult("printenv USER");
         assertResult(alias, 0, List.of("player"), "builtin alias");
+
+        assertResult(shell.executeForResult("echo '$USER'"), 0, List.of("$USER"),
+                "single quotes suppress expansion");
+        assertResult(shell.executeForResult("JOB=$(echo job-42); echo $JOB"), 0, List.of("job-42"),
+                "command substitution captures identifiers without leaking output");
+        assertResult(shell.executeForResult("echo $((2 + 3 * 4))"), 0, List.of("14"),
+                "bounded arithmetic expansion");
+        assertResult(shell.executeForResult("MIN=-9223372036854775808; arith MIN / -1"), 2,
+                List.of("arith: long overflow"), "arithmetic overflow fails closed");
+        assertResult(shell.executeForResult(
+                        "I=0; while [ \"$I\" -lt 3 ]; do echo $I; let I=$I+1; done"),
+                0, List.of("0", "1", "2"), "arithmetic while loop");
+        assertResult(shell.executeForResult(
+                        "for item in one two three; do echo $item; break; echo never; done"),
+                0, List.of("one"), "break exits nearest loop");
+        assertResult(shell.executeForResult(
+                        "for item in one two; do continue; echo never; done\necho continued"),
+                0, List.of("continued"), "continue advances nearest loop");
+        assertResult(shell.executeForResult("echo before; exit 7; echo after"),
+                7, List.of("before"), "exit terminates the current script");
 
         assertMonitorDemoPrograms(shell);
 
@@ -75,6 +96,16 @@ public final class BashShellCharacterizationTest {
         assertEquals(true, host.lines.get(23).contains("|" + "D".repeat(38) + "|"),
                 "second tile row is detected rather than assumed");
 
+        assertResult(shell.executeForResult("monitor service add dashboard 42"), 0,
+                List.of("monitor service dashboard 42"), "monitor service registration");
+        assertResult(shell.executeForResult("monitor service list"), 0,
+                List.of("dashboard 42"), "monitor service listing");
+        assertResult(shell.executeForResult("monitor remote dashboard set 2 'Factory online'"), 0,
+                List.of("accepted service=dashboard operation=set"), "remote monitor publication");
+        assertEquals(MonitorRemoteRequest.set(2, "Factory online"),
+                MonitorRemoteRequest.decode(host.remotePayload).orElseThrow(),
+                "remote monitor payload is typed and round-trippable");
+
         shell.getVfs().writeFile("/home/player/programs/monitor_demo.sh", "echo player-version\n");
         shell.getVfs().writeFile("/home/player/programs/monitor_wall_grid.sh",
                 "#!/bin/bash\n# Full 2x2 wall test: legacy stock program\n");
@@ -108,6 +139,8 @@ public final class BashShellCharacterizationTest {
         private final List<String> lines = new ArrayList<>();
         private final int columns;
         private final int rows;
+        private String remoteService = "";
+        private String remotePayload = "";
 
         private FakeMonitorHost(int columns, int rows) {
             this.columns = columns;
@@ -132,6 +165,23 @@ public final class BashShellCharacterizationTest {
         @Override public List<String> monitorLines(String side) { return List.copyOf(lines); }
         @Override public int monitorColumns(String side) { return columns; }
         @Override public int monitorRows(String side) { return rows; }
+        @Override public boolean monitorRegisterService(String service, int port) {
+            remoteService = service.toLowerCase(java.util.Locale.ROOT) + " " + port;
+            return true;
+        }
+        @Override public boolean monitorUnregisterService(String service) {
+            if (!remoteService.startsWith(service.toLowerCase(java.util.Locale.ROOT) + " ")) return false;
+            remoteService = "";
+            return true;
+        }
+        @Override public List<String> monitorServices() {
+            return remoteService.isEmpty() ? List.of() : List.of(remoteService);
+        }
+        @Override public boolean monitorRemote(String service, String encodedRequest) {
+            if (!remoteService.startsWith(service.toLowerCase(java.util.Locale.ROOT) + " ")) return false;
+            remotePayload = encodedRequest;
+            return true;
+        }
         @Override public int getRedstoneInput(String side) { return 0; }
         @Override public int getRedstoneOutput(String side) { return 0; }
         @Override public boolean setRedstoneOutput(String side, int power) { return false; }

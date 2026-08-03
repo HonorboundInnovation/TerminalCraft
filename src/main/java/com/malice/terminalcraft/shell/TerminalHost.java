@@ -51,6 +51,10 @@ public interface TerminalHost {
     default int monitorColumns(String side) { return 0; }
     /** Logical text height of the complete connected monitor wall, or 0 when unavailable. */
     default int monitorRows(String side) { return 0; }
+    default boolean monitorRegisterService(String service, int port) { return false; }
+    default boolean monitorUnregisterService(String service) { return false; }
+    default List<String> monitorServices() { return List.of(); }
+    default boolean monitorRemote(String service, String encodedRequest) { return false; }
 
     default boolean modemOpen(int channel) { return false; }
     default boolean modemClose(int channel) { return false; }

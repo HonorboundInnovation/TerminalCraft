@@ -9,13 +9,13 @@ TerminalCraft is a Forge mod for **Minecraft 1.20.1** that adds programmable, Ba
 - **Terminal computers** with a persistent Bash-inspired shell and virtual filesystem.
 - **Pocket terminals** that retain their state on the item.
 - **Turtles** with programmable movement, inspection, digging, placing, and device access.
-- **Monitor walls** and text displays for scripts and automation feedback.
+- **Monitor walls** for local scripts, typed RedNet publication from pocket terminals, and optional Create Display Links.
 - **Floppy disks and disk drives** with mountable, persistent storage.
 - **RedNet networking** with wireless modems, physical network cable, routers, named hosts and services, typed routes, bounded queues, and reliable-delivery diagnostics.
 - **Redstone automation** through red alloy wire and 16-channel bundled control cable.
 - **Server racks and scheduled jobs** for bounded, persistent automation workloads.
 - **Generic Forge device access** for adjacent item, fluid, and energy capabilities.
-- **Optional storage integrations** for Sophisticated Storage, Sophisticated Backpacks, Storage Drawers, and Refined Storage. These mods are not required for TerminalCraft to start.
+- **Optional integrations** for Create, Sophisticated Storage, Sophisticated Backpacks, Storage Drawers, and Refined Storage. These mods are not required for TerminalCraft to start.
 
 ## Shell overview
 
@@ -37,7 +37,7 @@ Scripts support variables, exit status, pipes, redirection, command chaining, an
 
 ## Complete documentation
 
-Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual. For production-style examples, failure-aware automation, exact transfers, RedNet operations, events, and jobs, see the **[Advanced Script Cookbook](docs/ADVANCED_SCRIPT_COOKBOOK.md)**.
+Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual. For production-style examples, failure-aware automation, exact transfers, RedNet operations, events, and jobs, see the **[Advanced Script Cookbook](docs/ADVANCED_SCRIPT_COOKBOOK.md)**. Version history is maintained in the **[changelog](docs/CHANGELOG.md)**, with additional context in the **[1.0.19 release notes](docs/RELEASE_NOTES_1.0.19.md)**.
 
 The full guide includes:
 
@@ -54,7 +54,7 @@ The full guide includes:
 | Component | Version |
 |---|---|
 | Minecraft | 1.20.1 |
-| Minecraft Forge | 47.3.0 or a compatible Forge 47.x release |
+| Minecraft Forge | 47.4.10 |
 | Java | 17 |
 
 TerminalCraft is required on both the client and server.
@@ -87,7 +87,7 @@ On Windows:
 The built mod JAR is written to:
 
 ```text
-build/libs/terminalcraft-1.0.0.jar
+build/libs/terminalcraft-1.20.1-47.4.10-1.0.19.jar
 ```
 
 ForgeGradle will download the required development dependencies during the first build.

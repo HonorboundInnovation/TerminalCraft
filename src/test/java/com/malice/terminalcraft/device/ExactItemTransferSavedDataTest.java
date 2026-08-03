@@ -3,7 +3,6 @@ package com.malice.terminalcraft.device;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.items.ItemStackHandler;
@@ -21,8 +20,7 @@ public final class ExactItemTransferSavedDataTest {
     private ExactItemTransferSavedDataTest() {}
 
     public static void main(String[] args) {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
         roundTripPreservesReplayAndExactEscrow();
         malformedEntriesAreSkippedIndividually();
         legacyEscrowReceivesDeterministicId();

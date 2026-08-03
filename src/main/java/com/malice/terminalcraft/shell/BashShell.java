@@ -33,6 +33,10 @@ public class BashShell implements ShellCommandModule.Context {
     private static final int MAX_SCRIPT_DEPTH = 8;
     private static final int MAX_LOOP_ITERATIONS = 256;
     private static final int MAX_CHAIN_STEPS = 128;
+    private static final int MAX_COMMAND_SUBSTITUTION_DEPTH = 4;
+    private static final int MAX_COMMAND_SUBSTITUTION_OUTPUT = 4096;
+
+    private enum ControlSignal { NONE, BREAK, CONTINUE, EXIT }
 
     private final VirtualFileSystem vfs = new VirtualFileSystem();
     private final Map<String, String> env = new LinkedHashMap<>();
@@ -59,6 +63,13 @@ public class BashShell implements ShellCommandModule.Context {
     private final StringBuilder captureBuffer = new StringBuilder();
     private boolean capturing = false;
     private String pendingStdin = null;
+    private int executionDepth;
+    private int loopDepth;
+    private int substitutionDepth;
+    private ControlSignal controlSignal = ControlSignal.NONE;
+    private boolean substitutionCapturing;
+    private List<String> substitutionOutput = new ArrayList<>();
+    private Integer lastSubstitutionExitCode;
 
     public BashShell() {
         env.put("HOME", "/home/player");
@@ -77,7 +88,7 @@ public class BashShell implements ShellCommandModule.Context {
         }
         booted = true;
         if (Config.showWelcomeBanner) {
-            println("TerminalCraft bash 1.1.0 (Minecraft)");
+            println(com.malice.terminalcraft.BuildInfo.systemIdentity());
             println("Type 'help' for available commands.");
             println("");
         }
@@ -291,18 +302,24 @@ public class BashShell implements ShellCommandModule.Context {
 
     /** Run multi-line script text without mutating the prompt. */
     public synchronized int runScriptText(String text) {
-        if (text == null || text.isBlank()) {
-            lastExitCode = 0;
-            return 0;
-        }
-        List<String> lines = new ArrayList<>();
-        for (String raw : text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)) {
-            String stripped = stripComment(raw);
-            if (!stripped.isBlank()) {
-                lines.add(stripped);
+        boolean outermost = executionDepth == 0;
+        if (outermost) controlSignal = ControlSignal.NONE;
+        executionDepth++;
+        try {
+            if (text == null || text.isBlank()) {
+                lastExitCode = 0;
+                return 0;
             }
+            List<String> lines = new ArrayList<>();
+            for (String raw : text.replace("\r\n", "\n").replace('\r', '\n').split("\n", -1)) {
+                String stripped = stripComment(raw);
+                if (!stripped.isBlank()) lines.add(stripped);
+            }
+            return runLines(lines, 0, lines.size());
+        } finally {
+            executionDepth--;
+            if (outermost) controlSignal = ControlSignal.NONE;
         }
-        return runLines(lines, 0, lines.size());
     }
 
     /**
@@ -470,6 +487,7 @@ public class BashShell implements ShellCommandModule.Context {
             }
 
             runChainedLine(line);
+            if (controlSignal != ControlSignal.NONE) return lastExitCode;
             i++;
         }
         return lastExitCode;
@@ -504,14 +522,28 @@ public class BashShell implements ShellCommandModule.Context {
             return skipTo(lines, start, end, "done") + 1;
         }
         int n = 0;
-        for (String value : parsed.values) {
-            if (++n > MAX_LOOP_ITERATIONS) {
-                println("bash: for: iteration limit exceeded");
-                lastExitCode = 1;
-                break;
+        loopDepth++;
+        try {
+            for (String value : parsed.values) {
+                if (++n > MAX_LOOP_ITERATIONS) {
+                    println("bash: for: iteration limit exceeded");
+                    lastExitCode = 1;
+                    break;
+                }
+                env.put(parsed.varName, expand(value));
+                runScriptText(parsed.body);
+                if (controlSignal == ControlSignal.BREAK) {
+                    controlSignal = ControlSignal.NONE;
+                    break;
+                }
+                if (controlSignal == ControlSignal.CONTINUE) {
+                    controlSignal = ControlSignal.NONE;
+                    continue;
+                }
+                if (controlSignal == ControlSignal.EXIT) break;
             }
-            env.put(parsed.varName, value);
-            runScriptText(parsed.body);
+        } finally {
+            loopDepth--;
         }
         return skipTo(lines, start, end, "done") + 1;
     }
@@ -525,18 +557,33 @@ public class BashShell implements ShellCommandModule.Context {
             return skipTo(lines, start, end, "done") + 1;
         }
         int n = 0;
-        while (true) {
-            if (++n > MAX_LOOP_ITERATIONS) {
-                println("bash: while: iteration limit exceeded");
-                lastExitCode = 1;
-                break;
+        loopDepth++;
+        try {
+            while (true) {
+                if (++n > MAX_LOOP_ITERATIONS) {
+                    println("bash: while: iteration limit exceeded");
+                    lastExitCode = 1;
+                    break;
+                }
+                runChainedLine(parsed.condition);
+                if (controlSignal == ControlSignal.EXIT) break;
+                if (lastExitCode != 0) {
+                    lastExitCode = 0;
+                    break;
+                }
+                runScriptText(parsed.body);
+                if (controlSignal == ControlSignal.BREAK) {
+                    controlSignal = ControlSignal.NONE;
+                    break;
+                }
+                if (controlSignal == ControlSignal.CONTINUE) {
+                    controlSignal = ControlSignal.NONE;
+                    continue;
+                }
+                if (controlSignal == ControlSignal.EXIT) break;
             }
-            runChainedLine(parsed.condition);
-            if (lastExitCode != 0) {
-                lastExitCode = 0;
-                break;
-            }
-            runScriptText(parsed.body);
+        } finally {
+            loopDepth--;
         }
         return skipTo(lines, start, end, "done") + 1;
     }
@@ -828,6 +875,7 @@ public class BashShell implements ShellCommandModule.Context {
         List<String> sequential = splitStatementsPreservingBlocks(trimmed);
         int steps = 0;
         for (String seq : sequential) {
+            if (controlSignal != ControlSignal.NONE) return;
             if (++steps > MAX_CHAIN_STEPS) {
                 println("bash: too many chained commands");
                 lastExitCode = 1;
@@ -959,6 +1007,7 @@ public class BashShell implements ShellCommandModule.Context {
         List<ChainPart> parts = splitAndOr(line);
         boolean runNext = true;
         for (ChainPart part : parts) {
+            if (controlSignal != ControlSignal.NONE) return;
             if (runNext) {
                 runPipeline(part.command);
             }
@@ -1029,6 +1078,7 @@ public class BashShell implements ShellCommandModule.Context {
         }
         String stdin = null;
         for (int i = 0; i < stages.size(); i++) {
+            if (controlSignal != ControlSignal.NONE) return;
             boolean last = i == stages.size() - 1;
             stdin = runSimpleCommand(stages.get(i).trim(), stdin, !last);
             if (stdin == null) {
@@ -1046,7 +1096,16 @@ public class BashShell implements ShellCommandModule.Context {
         capturing = captureStdout;
         captureBuffer.setLength(0);
 
-        String expandedLine = expand(line == null ? "" : line.trim());
+        String expandedLine;
+        try {
+            expandedLine = expand(line == null ? "" : line.trim());
+        } catch (IllegalArgumentException invalid) {
+            println("bash: expansion: " + invalid.getMessage());
+            lastExitCode = 2;
+            capturing = false;
+            pendingStdin = null;
+            return captureStdout ? "" : null;
+        }
         if (expandedLine.isEmpty()) {
             lastExitCode = 0;
             capturing = false;
@@ -1063,7 +1122,7 @@ public class BashShell implements ShellCommandModule.Context {
             String value = expandedLine.substring(eq + 1).trim();
             if (isValidName(name)) {
                 env.put(name, stripQuotes(value));
-                lastExitCode = 0;
+                lastExitCode = lastSubstitutionExitCode == null ? 0 : lastSubstitutionExitCode;
                 capturing = false;
                 pendingStdin = null;
                 return captureStdout ? captureBuffer.toString() : null;
@@ -1078,7 +1137,7 @@ public class BashShell implements ShellCommandModule.Context {
                 String value = body.substring(e + 1).trim();
                 if (isValidName(name)) {
                     env.put(name, stripQuotes(value));
-                    lastExitCode = 0;
+                    lastExitCode = lastSubstitutionExitCode == null ? 0 : lastSubstitutionExitCode;
                     capturing = false;
                     pendingStdin = null;
                     return captureStdout ? captureBuffer.toString() : null;
@@ -1291,7 +1350,7 @@ public class BashShell implements ShellCommandModule.Context {
         commandRegistry.register("env", this::cmdEnv, "printenv");
         commandRegistry.register("history", args -> cmdHistory());
         commandRegistry.register("uname", args -> {
-            println("TerminalCraft 1.1.0 Minecraft-Forge-1.20.1");
+            println(com.malice.terminalcraft.BuildInfo.systemIdentity());
             lastExitCode = 0;
         });
         commandRegistry.register("date", args -> {
@@ -1300,10 +1359,11 @@ public class BashShell implements ShellCommandModule.Context {
         });
         commandRegistry.register("true", args -> lastExitCode = 0);
         commandRegistry.register("false", args -> lastExitCode = 1);
-        commandRegistry.register("exit", args -> {
-            println("logout");
-            lastExitCode = 0;
-        });
+        commandRegistry.register("exit", this::cmdExit);
+        commandRegistry.register("break", args -> cmdLoopControl(ControlSignal.BREAK, "break"));
+        commandRegistry.register("continue", args -> cmdLoopControl(ControlSignal.CONTINUE, "continue"));
+        commandRegistry.register("let", this::cmdLet);
+        commandRegistry.register("arith", this::cmdArithmetic);
         commandRegistry.register("printf", this::cmdPrintf);
         commandRegistry.register("test", this::cmdTest, "[");
         commandRegistry.register("write", this::cmdWrite);
@@ -1425,6 +1485,8 @@ public class BashShell implements ShellCommandModule.Context {
         println("  touch / mkdir / rm   File operations");
         println("  env / history / clear");
         println("  test / [             Conditional tests");
+        println("  let NAME=EXPR        Bounded signed-integer arithmetic");
+        println("  arith EXPR           Print an arithmetic result");
         println("  source / . / bash    Run a script from VFS");
         println("  selftest             Run built-in shell tests");
         println("  redstone / rs        Read/write redstone (get|set|sides)");
@@ -1443,8 +1505,8 @@ public class BashShell implements ShellCommandModule.Context {
         println("  disk                 Disk status / label [name] / sync");
         println("Operators:");
         println("  ; && || |  > >> <");
-        println("  if/then/else/fi  for/do/done  while/do/done");
-        println("  NAME=value   $NAME  ${NAME}  $?  $1..$9");
+        println("  if/then/else/fi  for/do/done  while/do/done  break  continue  exit");
+        println("  NAME=value   $NAME  ${NAME}  $?  $1..$9  $(command)  $((expression))");
         lastExitCode = 0;
     }
 
@@ -2194,6 +2256,80 @@ public class BashShell implements ShellCommandModule.Context {
         lastExitCode = 0;
     }
 
+    private void cmdExit(List<String> args) {
+        if (args.size() > 1) {
+            println("exit: usage: exit [status]");
+            lastExitCode = 2;
+            return;
+        }
+        int status = lastExitCode;
+        if (!args.isEmpty()) {
+            try {
+                status = Integer.parseInt(args.get(0));
+            } catch (NumberFormatException invalid) {
+                println("exit: numeric status required");
+                lastExitCode = 2;
+                return;
+            }
+        }
+        lastExitCode = Math.floorMod(status, 256);
+        controlSignal = ControlSignal.EXIT;
+    }
+
+    private void cmdLoopControl(ControlSignal signal, String command) {
+        if (loopDepth <= 0) {
+            println(command + ": only meaningful in a loop");
+            lastExitCode = 1;
+            return;
+        }
+        lastExitCode = 0;
+        controlSignal = signal;
+    }
+
+    private void cmdLet(List<String> args) {
+        if (args.isEmpty()) {
+            println("let: usage: let NAME=EXPRESSION");
+            lastExitCode = 2;
+            return;
+        }
+        String assignment = String.join(" ", args);
+        int equals = assignment.indexOf('=');
+        if (equals <= 0) {
+            println("let: usage: let NAME=EXPRESSION");
+            lastExitCode = 2;
+            return;
+        }
+        String name = assignment.substring(0, equals).trim();
+        if (!isValidName(name)) {
+            println("let: invalid variable name");
+            lastExitCode = 2;
+            return;
+        }
+        try {
+            long value = ShellArithmetic.evaluate(assignment.substring(equals + 1), env);
+            env.put(name, Long.toString(value));
+            lastExitCode = value == 0 ? 1 : 0;
+        } catch (ArithmeticException | IllegalArgumentException invalid) {
+            println("let: " + invalid.getMessage());
+            lastExitCode = 2;
+        }
+    }
+
+    private void cmdArithmetic(List<String> args) {
+        if (args.isEmpty()) {
+            println("arith: usage: arith EXPRESSION");
+            lastExitCode = 2;
+            return;
+        }
+        try {
+            println(Long.toString(ShellArithmetic.evaluate(String.join(" ", args), env)));
+            lastExitCode = 0;
+        } catch (ArithmeticException | IllegalArgumentException invalid) {
+            println("arith: " + invalid.getMessage());
+            lastExitCode = 2;
+        }
+    }
+
     private void cmdTest(List<String> args) {
         List<String> a = new ArrayList<>(args);
         if (!a.isEmpty() && "]".equals(a.get(a.size() - 1))) {
@@ -2215,6 +2351,25 @@ public class BashShell implements ShellCommandModule.Context {
             result = Objects.equals(a.get(0), a.get(2));
         } else if (a.size() == 3 && "!=".equals(a.get(1))) {
             result = !Objects.equals(a.get(0), a.get(2));
+        } else if (a.size() == 3 && java.util.Set.of("-eq", "-ne", "-lt", "-le", "-gt", "-ge")
+                .contains(a.get(1))) {
+            try {
+                long left = Long.parseLong(a.get(0));
+                long right = Long.parseLong(a.get(2));
+                result = switch (a.get(1)) {
+                    case "-eq" -> left == right;
+                    case "-ne" -> left != right;
+                    case "-lt" -> left < right;
+                    case "-le" -> left <= right;
+                    case "-gt" -> left > right;
+                    case "-ge" -> left >= right;
+                    default -> false;
+                };
+            } catch (NumberFormatException invalid) {
+                println("test: integer expression expected");
+                lastExitCode = 2;
+                return;
+            }
         } else if (a.size() == 1) {
             result = !a.get(0).isEmpty();
         } else {
@@ -2514,10 +2669,55 @@ public class BashShell implements ShellCommandModule.Context {
             println("monitor read [side]");
             println("monitor size [side]          # detect connected wall geometry");
             println("monitor demo [side]          # adaptive test for any rectangular wall");
+            println("monitor service [list|add <name> <port>|remove <name>]");
+            println("monitor remote <service> clear|write|set|title|color ...");
             lastExitCode = 0;
             return;
         }
         String op = args.get(0).toLowerCase(Locale.ROOT);
+        if ("service".equals(op)) {
+            String action = args.size() > 1 ? args.get(1).toLowerCase(Locale.ROOT) : "list";
+            if ("list".equals(action) && args.size() <= 2) {
+                List<String> services = host.monitorServices();
+                if (services.isEmpty()) println("(none)"); else services.forEach(this::println);
+                lastExitCode = 0;
+                return;
+            }
+            if (("add".equals(action) || "register".equals(action)) && args.size() == 4) {
+                try {
+                    int port = Integer.parseInt(args.get(3));
+                    if (port < 0 || port > 65535 || !host.monitorRegisterService(args.get(2), port)) {
+                        println("monitor: service registration failed (open port, unique target, and unique name required)");
+                        lastExitCode = 1;
+                        return;
+                    }
+                    println("monitor service " + args.get(2).toLowerCase(Locale.ROOT) + " " + port);
+                    lastExitCode = 0;
+                    return;
+                } catch (NumberFormatException invalid) {
+                    println("monitor: port must be an integer from 0 to 65535");
+                    lastExitCode = 1;
+                    return;
+                }
+            }
+            if (("remove".equals(action) || "unregister".equals(action)) && args.size() == 3) {
+                if (!host.monitorUnregisterService(args.get(2))) {
+                    println("monitor: monitor service not found");
+                    lastExitCode = 1;
+                    return;
+                }
+                println("monitor service removed " + args.get(2).toLowerCase(Locale.ROOT));
+                lastExitCode = 0;
+                return;
+            }
+            println("monitor: usage: monitor service [list|add <name> <port>|remove <name>]");
+            lastExitCode = 1;
+            return;
+        }
+        if ("remote".equals(op)) {
+            cmdRemoteMonitor(args);
+            return;
+        }
         if ("size".equals(op) || "dimensions".equals(op) || "geometry".equals(op)) {
             String side = args.size() > 1 ? args.get(1) : "any";
             if (args.size() > 2 || !isSideToken(side.toLowerCase(Locale.ROOT))) {
@@ -2641,6 +2841,57 @@ public class BashShell implements ShellCommandModule.Context {
         lastExitCode = 0;
     }
 
+    private void cmdRemoteMonitor(List<String> args) {
+        if (args.size() < 3) {
+            println("monitor: usage: monitor remote <service> clear|write|set|title|color ...");
+            lastExitCode = 1;
+            return;
+        }
+        String service = args.get(1);
+        String action = args.get(2).toLowerCase(Locale.ROOT);
+        com.malice.terminalcraft.network.MonitorRemoteRequest request;
+        try {
+            request = switch (action) {
+                case "clear" -> {
+                    if (args.size() != 3) throw new IllegalArgumentException("clear takes no arguments");
+                    yield com.malice.terminalcraft.network.MonitorRemoteRequest.clear();
+                }
+                case "write", "print", "say" -> {
+                    if (args.size() < 4) throw new IllegalArgumentException("write requires text");
+                    yield com.malice.terminalcraft.network.MonitorRemoteRequest.write(
+                            String.join(" ", args.subList(3, args.size())));
+                }
+                case "set" -> {
+                    if (args.size() < 5) throw new IllegalArgumentException("set requires row and text");
+                    yield com.malice.terminalcraft.network.MonitorRemoteRequest.set(
+                            Integer.parseInt(args.get(3)), String.join(" ", args.subList(4, args.size())));
+                }
+                case "title" -> {
+                    if (args.size() < 4) throw new IllegalArgumentException("title requires text");
+                    yield com.malice.terminalcraft.network.MonitorRemoteRequest.title(
+                            String.join(" ", args.subList(3, args.size())));
+                }
+                case "color", "palette" -> {
+                    if (args.size() != 5) throw new IllegalArgumentException("color requires foreground and background");
+                    yield com.malice.terminalcraft.network.MonitorRemoteRequest.palette(
+                            parseRgb(args.get(3)), parseRgb(args.get(4)));
+                }
+                default -> throw new IllegalArgumentException("unknown remote operation");
+            };
+        } catch (IllegalArgumentException invalid) {
+            println("monitor: " + invalid.getMessage());
+            lastExitCode = 1;
+            return;
+        }
+        if (!host.monitorRemote(service, request.encode())) {
+            println("monitor: remote service is offline, unreachable, or incompatible");
+            lastExitCode = 1;
+            return;
+        }
+        println("accepted service=" + service.toLowerCase(Locale.ROOT) + " operation=" + action);
+        lastExitCode = 0;
+    }
+
     /** Draws one labeled 40x20 test cell per physical tile using the detected wall geometry. */
     private void renderAdaptiveMonitorDemo(String side) {
         int columns = host.monitorColumns(side);
@@ -2754,12 +3005,38 @@ public class BashShell implements ShellCommandModule.Context {
     // ------------------------------------------------------------------
 
     private String expand(String input) {
+        if (substitutionDepth == 0) lastSubstitutionExitCode = null;
         StringBuilder out = new StringBuilder();
+        boolean inSingle = false;
+        boolean inDouble = false;
         for (int i = 0; i < input.length(); i++) {
             char c = input.charAt(i);
-            if (c == '$' && i + 1 < input.length()) {
+            if (c == '\'' && !inDouble) {
+                inSingle = !inSingle;
+                out.append(c);
+                continue;
+            }
+            if (c == '"' && !inSingle) {
+                inDouble = !inDouble;
+                out.append(c);
+                continue;
+            }
+            if (c == '$' && !inSingle && i + 1 < input.length()) {
                 char n = input.charAt(i + 1);
-                if (n == '{') {
+                if (n == '(' && i + 2 < input.length() && input.charAt(i + 2) == '(') {
+                    int end = findArithmeticExpansionEnd(input, i + 3);
+                    if (end < 0) throw new IllegalArgumentException("unterminated arithmetic expansion");
+                    long value = ShellArithmetic.evaluate(input.substring(i + 3, end), env);
+                    out.append(value);
+                    i = end + 1;
+                    continue;
+                } else if (n == '(') {
+                    int end = findCommandSubstitutionEnd(input, i + 2);
+                    if (end < 0) throw new IllegalArgumentException("unterminated command substitution");
+                    out.append(evaluateCommandSubstitution(input.substring(i + 2, end)));
+                    i = end;
+                    continue;
+                } else if (n == '{') {
                     int end = input.indexOf('}', i + 2);
                     if (end > i) {
                         String key = input.substring(i + 2, end);
@@ -2794,6 +3071,66 @@ public class BashShell implements ShellCommandModule.Context {
             out.append(c);
         }
         return out.toString();
+    }
+
+    private String evaluateCommandSubstitution(String command) {
+        if (++substitutionDepth > MAX_COMMAND_SUBSTITUTION_DEPTH) {
+            substitutionDepth--;
+            throw new IllegalArgumentException("command substitution nesting limit exceeded");
+        }
+        if (command.length() > Config.maxCommandLength) {
+            substitutionDepth--;
+            throw new IllegalArgumentException("command substitution is too long");
+        }
+        boolean previousCapture = substitutionCapturing;
+        List<String> previousOutput = substitutionOutput;
+        ControlSignal previousSignal = controlSignal;
+        substitutionCapturing = true;
+        substitutionOutput = new ArrayList<>();
+        try {
+            controlSignal = ControlSignal.NONE;
+            runChainedLine(command);
+            lastSubstitutionExitCode = lastExitCode;
+            String value = String.join("\n", substitutionOutput).strip()
+                    .replaceAll("\\s+", " ");
+            if (value.length() > MAX_COMMAND_SUBSTITUTION_OUTPUT) {
+                throw new IllegalArgumentException("command substitution output exceeds "
+                        + MAX_COMMAND_SUBSTITUTION_OUTPUT + " characters");
+            }
+            return value;
+        } finally {
+            controlSignal = previousSignal;
+            substitutionCapturing = previousCapture;
+            substitutionOutput = previousOutput;
+            substitutionDepth--;
+        }
+    }
+
+    private static int findCommandSubstitutionEnd(String input, int start) {
+        int depth = 1;
+        boolean inSingle = false;
+        boolean inDouble = false;
+        for (int i = start; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '\'' && !inDouble) inSingle = !inSingle;
+            else if (c == '"' && !inSingle) inDouble = !inDouble;
+            else if (!inSingle && !inDouble && c == '(') depth++;
+            else if (!inSingle && !inDouble && c == ')' && --depth == 0) return i;
+        }
+        return -1;
+    }
+
+    private static int findArithmeticExpansionEnd(String input, int start) {
+        int depth = 0;
+        for (int i = start; i + 1 < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')') {
+                if (depth > 0) depth--;
+                else if (input.charAt(i + 1) == ')') return i;
+            }
+        }
+        return -1;
     }
 
     private static List<String> tokenize(String line) {
@@ -2834,6 +3171,10 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void println(String line) {
+        if (substitutionCapturing) {
+            java.util.Collections.addAll(substitutionOutput, line.split("\n", -1));
+            return;
+        }
         if (capturing) {
             String[] parts = line.split("\n", -1);
             for (int i = 0; i < parts.length; i++) {

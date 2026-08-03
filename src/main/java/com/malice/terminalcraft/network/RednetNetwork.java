@@ -804,6 +804,29 @@ public final class RednetNetwork {
         return List.copyOf(out);
     }
 
+    /** Consumes only messages matching one exact typed application contract. */
+    public static List<PendingMessage> receiveProtocol(Level level, UUID modemId,
+                                                        RednetProtocol protocol, int max) {
+        if (level == null || level.isClientSide || modemId == null || protocol == null) return List.of();
+        RednetRuntimeScope.Endpoint endpoint = scope(level).endpoint(modemId);
+        int n = Math.max(1, Math.min(max, 32));
+        List<PendingMessage> out = new ArrayList<>();
+        QUEUES.computeIfPresent(endpoint, (ignored, queue) -> {
+            Iterator<PendingMessage> iterator = queue.iterator();
+            while (iterator.hasNext() && out.size() < n) {
+                PendingMessage pending = iterator.next();
+                NetworkEnvelope envelope = pending.envelope;
+                if (!protocol.id().equals(envelope.protocol())
+                        || !protocol.payloadType().equals(envelope.payloadType())) continue;
+                out.add(pending);
+                iterator.remove();
+                releaseApplicationQueue(endpoint, pending);
+            }
+            return queue;
+        });
+        return List.copyOf(out);
+    }
+
     public static int pendingCount(Level level, UUID modemId) {
         if (level == null || level.isClientSide || modemId == null) return 0;
         RednetRuntimeScope.Endpoint endpoint = scope(level).endpoint(modemId);

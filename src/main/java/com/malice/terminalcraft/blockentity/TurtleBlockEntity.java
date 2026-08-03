@@ -399,6 +399,30 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     }
 
     @Override
+    public boolean monitorRegisterService(String service, int port) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.registerMonitorService(service, port);
+    }
+
+    @Override
+    public boolean monitorUnregisterService(String service) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.unregisterMonitorService(service);
+    }
+
+    @Override
+    public List<String> monitorServices() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.monitorServices();
+    }
+
+    @Override
+    public boolean monitorRemote(String service, String encodedRequest) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.transmitMonitorService(service, encodedRequest);
+    }
+
+    @Override
     public boolean hasModem() {
         return findModem(null) != null;
     }

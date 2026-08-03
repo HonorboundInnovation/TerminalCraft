@@ -7,8 +7,7 @@ public final class ShellSyncPolicyTest {
     private ShellSyncPolicyTest() {}
 
     public static void main(String[] args) {
-        net.minecraft.SharedConstants.tryDetectVersion();
-        net.minecraft.server.Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
 
         assertEquals(0, ModNetwork.RUN_COMMAND_PACKET_ID, "run command packet ID");
         assertEquals(1, ModNetwork.SHELL_SYNC_PACKET_ID, "shell sync packet ID");

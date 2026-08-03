@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -94,6 +95,38 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
 
     public record WallRenderState(boolean anchor, int width, int height, List<String> lines,
                                   int foregroundColor, int backgroundColor) {}
+
+    /** Public wall geometry boundary used by optional display integrations. */
+    public int wallColumns() {
+        return new MonitorGroupDevice(this).maxLineLength();
+    }
+
+    /** Public wall geometry boundary used by optional display integrations. */
+    public int wallRows() {
+        return new MonitorGroupDevice(this).maxLines();
+    }
+
+    /** Stable top-left owner shared by optional integrations and the wall renderer. */
+    public MonitorBlockEntity wallAnchor() {
+        return MonitorGroupDevice.discover(this).anchor();
+    }
+
+    /** Writes one zero-based row across the complete connected wall. */
+    public void setWallLine(int row, String text) {
+        new MonitorGroupDevice(this).setLine(row, text);
+    }
+
+    /** World-space bounds for Create's Display Link target highlighting. */
+    public AABB wallBounds() {
+        MonitorGroupDevice.Group group = MonitorGroupDevice.discover(this);
+        BlockPos min = group.tiles().stream().map(MonitorBlockEntity::getBlockPos)
+                .reduce((a, b) -> new BlockPos(Math.min(a.getX(), b.getX()), Math.min(a.getY(), b.getY()),
+                        Math.min(a.getZ(), b.getZ()))).orElse(worldPosition);
+        BlockPos max = group.tiles().stream().map(MonitorBlockEntity::getBlockPos)
+                .reduce((a, b) -> new BlockPos(Math.max(a.getX(), b.getX()), Math.max(a.getY(), b.getY()),
+                        Math.max(a.getZ(), b.getZ()))).orElse(worldPosition);
+        return new AABB(min, max.offset(1, 1, 1));
+    }
 
     @Override
     public void setTitle(String title) {

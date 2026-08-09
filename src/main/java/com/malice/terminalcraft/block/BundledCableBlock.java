@@ -5,9 +5,12 @@ import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.Component;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -128,13 +131,13 @@ public class BundledCableBlock extends BaseEntityBlock {
     @Override
     @SuppressWarnings("deprecation")
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getDirectSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
@@ -148,6 +151,19 @@ public class BundledCableBlock extends BaseEntityBlock {
             return false;
         }
         return super.onDestroyedByPlayer(state, level, pos, player, willHarvest, fluid);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
+                                 InteractionHand hand, BlockHitResult hit) {
+        if (!WireInteractionSupport.isWrench(player.getItemInHand(hand))) return InteractionResult.PASS;
+        if (!level.isClientSide) {
+            Direction face = targetedFace(level, pos, player.getEyePosition(), hit.getLocation());
+            if (face == null) face = state.getValue(FACE);
+            player.displayClientMessage(Component.literal(diagnostic(level, pos, face)), false);
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     @Override
@@ -231,6 +247,29 @@ public class BundledCableBlock extends BaseEntityBlock {
         return state.getValue(CableShapeSupport.property(direction));
     }
 
+    /** Bounded player-facing inspection of occupancy, links, and active channels. */
+    public static String diagnostic(BlockGetter level, BlockPos pos, Direction face) {
+        if (!(level.getBlockEntity(pos) instanceof BundledCableBlockEntity cable) || !cable.hasFace(face)) {
+            return "Bundled Cable: unavailable";
+        }
+        BlockState rendered = renderState(level, pos, face);
+        String links = java.util.Arrays.stream(planeDirections(face))
+                .filter(direction -> isConnected(rendered, direction))
+                .map(direction -> direction.getName().toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.joining(","));
+        if (links.isEmpty()) links = "none";
+        StringBuilder active = new StringBuilder();
+        for (int channel = 0; channel < BundledCableBlockEntity.CHANNELS; channel++) {
+            int signal = cable.getSignal(channel);
+            if (signal <= 0) continue;
+            if (!active.isEmpty()) active.append(',');
+            active.append(channel).append('=').append(signal);
+        }
+        if (active.isEmpty()) active.append("none");
+        return "Bundled Cable face=" + face.getName().toLowerCase(java.util.Locale.ROOT)
+                + " faces=" + cable.faceCount() + " links=" + links + " active=" + active;
+    }
+
     @Nullable
     public static Direction targetedFace(BlockGetter level, BlockPos pos, Vec3 start, Vec3 end) {
         Direction nearest = null;
@@ -306,9 +345,24 @@ public class BundledCableBlock extends BaseEntityBlock {
         }
     }
 
-    private static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
+    /** Returns whether the support block still carries a mounted bundled face. */
+    public static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
         BlockPos support = pos.relative(face.getOpposite());
         return level.getBlockState(support).isFaceSturdy(level, support, face);
+    }
+
+    /** Exposes channel zero only through the plane of an occupied mounted face. */
+    private static int outputPower(BlockGetter level, BlockPos pos, BlockState state,
+                                   Direction direction) {
+        if (direction == null) return 0;
+        if (level.getBlockEntity(pos) instanceof BundledCableBlockEntity cable) {
+            for (Direction face : cable.faces()) {
+                if (face.getAxis() != direction.getAxis()) return state.getValue(POWER);
+            }
+            return 0;
+        }
+        return state.hasProperty(FACE) && state.getValue(FACE).getAxis() != direction.getAxis()
+                ? state.getValue(POWER) : 0;
     }
 
     private static boolean canAttachDevice(BlockState state) {

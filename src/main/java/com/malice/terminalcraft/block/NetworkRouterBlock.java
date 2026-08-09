@@ -16,6 +16,8 @@ import net.minecraft.world.level.LevelReader;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
@@ -42,6 +44,15 @@ public class NetworkRouterBlock extends BaseEntityBlock implements WiredNetworkN
     @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new NetworkRouterBlockEntity(pos, state);
+    }
+
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state,
+                                                                  BlockEntityType<T> type) {
+        if (level.isClientSide) return null;
+        return createTickerHelper(type, com.malice.terminalcraft.registry.ModRegistries.NETWORK_ROUTER_BLOCK_ENTITY.get(),
+                NetworkRouterBlockEntity::serverTick);
     }
 
     @Override
@@ -114,6 +125,9 @@ public class NetworkRouterBlock extends BaseEntityBlock implements WiredNetworkN
         super.onRemove(state, level, pos, newState, moving);
         if (state.getBlock() != newState.getBlock()
                 && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            if (level.getBlockEntity(pos) instanceof NetworkRouterBlockEntity router) {
+                com.malice.terminalcraft.network.RednetNetwork.unregisterRouter(serverLevel, router.getRouterId());
+            }
             com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, pos);
         }
     }

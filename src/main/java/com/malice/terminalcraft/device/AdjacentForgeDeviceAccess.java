@@ -17,10 +17,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 
 /** Caller-local adjacency overlay for generic Forge capabilities. */
 public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemTransferAccess, ExactItemEscrowAccess,
-        ExactFluidTransferAccess, ExactFluidEscrowAccess {
+        ExactFluidTransferAccess, ExactFluidEscrowAccess, DeviceEventSubscriptionAccess, DeviceEventWaitAccess {
     private final DeviceAccess base;
     private final ServerLevel level;
     private final BlockPos hostPosition;
@@ -105,7 +106,7 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
             BlockEntity target = candidate.map(value -> level.getBlockEntity(value.target())).orElse(null);
             if (target != null) {
                 com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.Decision decision =
-                        com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.evaluate(target);
+                        com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.evaluate(target, context());
                 DeviceAuthorization.Decision authorization = DeviceAuthorization.decide(
                         context(), DeviceAuthorization.Action.MUTATE,
                         decision.allowed(), decision.reason());
@@ -121,6 +122,70 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
     }
 
     @Override public DeviceEventBatch pollEvents(int limit) { return base.pollEvents(limit); }
+
+    @Override
+    public DeviceResult subscribeEvents(DeviceEventSubscription subscription) {
+        DeviceEventSubscriptionAccess access = eventSubscriptions();
+        return access == null ? unsupportedEventSubscriptions() : access.subscribeEvents(subscription);
+    }
+
+    @Override
+    public DeviceEventBatch pollSubscription(UUID subscriptionId, int limit) {
+        DeviceEventSubscriptionAccess access = eventSubscriptions();
+        return access == null ? new DeviceEventBatch(List.of(), 0) : access.pollSubscription(subscriptionId, limit);
+    }
+
+    @Override
+    public Optional<DeviceEventDiagnostics> eventDiagnostics(UUID subscriptionId) {
+        DeviceEventSubscriptionAccess access = eventSubscriptions();
+        return access == null ? Optional.empty() : access.eventDiagnostics(subscriptionId);
+    }
+
+    @Override
+    public boolean unsubscribeEvents(UUID subscriptionId) {
+        DeviceEventSubscriptionAccess access = eventSubscriptions();
+        return access != null && access.unsubscribeEvents(subscriptionId);
+    }
+
+    @Override
+    public DeviceResult beginEventWait(UUID subscriptionId, long gameTime, long timeoutTicks) {
+        DeviceEventWaitAccess access = eventWaits();
+        return access == null ? unsupportedEventSubscriptions()
+                : access.beginEventWait(subscriptionId, gameTime, timeoutTicks);
+    }
+
+    @Override
+    public DeviceResult beginEventWait(UUID subscriptionId, long gameTime, long timeoutTicks,
+                                       LongConsumer wakeup) {
+        DeviceEventWaitAccess access = eventWaits();
+        return access == null ? unsupportedEventSubscriptions()
+                : access.beginEventWait(subscriptionId, gameTime, timeoutTicks, wakeup);
+    }
+
+    @Override
+    public Optional<DeviceEventWaitResult> pollEventWait(UUID waitId, long gameTime) {
+        DeviceEventWaitAccess access = eventWaits();
+        return access == null ? Optional.empty() : access.pollEventWait(waitId, gameTime);
+    }
+
+    @Override
+    public boolean cancelEventWait(UUID waitId) {
+        DeviceEventWaitAccess access = eventWaits();
+        return access != null && access.cancelEventWait(waitId);
+    }
+
+    private DeviceEventSubscriptionAccess eventSubscriptions() {
+        return base instanceof DeviceEventSubscriptionAccess access ? access : null;
+    }
+
+    private DeviceEventWaitAccess eventWaits() {
+        return base instanceof DeviceEventWaitAccess access ? access : null;
+    }
+
+    private static DeviceResult unsupportedEventSubscriptions() {
+        return DeviceResult.failure(DeviceErrorCode.UNSUPPORTED,
+                "event subscriptions are unavailable", false);
+    }
 
     /** Executes a caller-scoped exact transfer without accepting positions or capability sides. */
     @Override
@@ -308,7 +373,7 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
 
     private boolean mutationAllowed(BlockEntity target) {
         com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.Decision policy =
-                com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.evaluate(target);
+                com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistry.evaluate(target, context());
         return DeviceAuthorization.decide(context(), DeviceAuthorization.Action.MUTATE,
                 policy.allowed(), policy.reason()).allowed();
     }

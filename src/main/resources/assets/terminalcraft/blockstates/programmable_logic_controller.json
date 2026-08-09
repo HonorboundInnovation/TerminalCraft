@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "terminalcraft:block/programmable_logic_controller" },
+    "facing=east": { "model": "terminalcraft:block/programmable_logic_controller", "y": 90 },
+    "facing=south": { "model": "terminalcraft:block/programmable_logic_controller", "y": 180 },
+    "facing=west": { "model": "terminalcraft:block/programmable_logic_controller", "y": 270 }
+  }
+}

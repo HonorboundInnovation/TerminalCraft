@@ -2,6 +2,7 @@ package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.block.TerminalBlock;
+import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
 import com.malice.terminalcraft.blockentity.TerminalBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -10,6 +11,7 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.gametest.GameTestHolder;
@@ -88,6 +90,10 @@ public final class RedAlloyWireGameTests {
 
         helper.assertTrue(helper.getBlockEntity(terminal) instanceof TerminalBlockEntity,
                 "terminal fixture must create its block entity");
+        helper.assertTrue(RedAlloyWireBlock.isConnected(
+                        RedAlloyWireBlock.renderState(helper.getLevel(), helper.absolutePos(wire), Direction.UP),
+                        Direction.WEST),
+                "wire beside a redstone-capable terminal must render an arm toward the device");
         TerminalBlockEntity terminalEntity = (TerminalBlockEntity) helper.getBlockEntity(terminal);
         helper.assertTrue(terminalEntity.setRedstoneOutput("east", 12),
                 "terminal must accept an east-side redstone output");
@@ -100,6 +106,32 @@ public final class RedAlloyWireGameTests {
             helper.runAfterDelay(3, () -> {
                 helper.assertTrue(power(helper, wire) == 0,
                         "terminal neighbor notifications must depower the adjacent wire after output is cleared");
+                helper.succeed();
+            });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void wireOutputNotifiesAdjacentVanillaDevice(GameTestHelper helper) {
+        BlockPos source = new BlockPos(1, 2, 2);
+        BlockPos wire = new BlockPos(2, 2, 2);
+        BlockPos lamp = new BlockPos(3, 2, 2);
+        helper.setBlock(wire.below(), Blocks.STONE);
+        helper.setBlock(source, Blocks.REDSTONE_BLOCK);
+        helper.setBlock(wire, wire(Direction.UP));
+        helper.setBlock(lamp, Blocks.REDSTONE_LAMP);
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(helper.getBlockState(lamp).getValue(
+                            net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                    "a powered wire must notify and energize an adjacent vanilla receiver");
+            helper.destroyBlock(source);
+            RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+            helper.runAfterDelay(3, () -> {
+                helper.assertTrue(!helper.getBlockState(lamp).getValue(
+                                net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                        "a depowered wire must notify and release an adjacent vanilla receiver");
                 helper.succeed();
             });
         });
@@ -245,6 +277,63 @@ public final class RedAlloyWireGameTests {
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
         helper.assertTrue(power(helper, wire) == 15,
                 "wire must query a directional source from the source's face toward the receiver");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void outputStaysWithinEachMountedSurfacePlane(GameTestHelper helper) {
+        BlockPos floorWire = new BlockPos(2, 2, 2);
+        BlockPos wallWire = new BlockPos(6, 2, 2);
+        helper.setBlock(floorWire.below(), Blocks.REDSTONE_BLOCK);
+        helper.setBlock(floorWire, wire(Direction.UP));
+        helper.setBlock(wallWire.west(), Blocks.REDSTONE_BLOCK);
+        helper.setBlock(wallWire, wire(Direction.EAST));
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(floorWire));
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wallWire));
+
+        BlockPos floorWorld = helper.absolutePos(floorWire);
+        BlockState floorState = helper.getLevel().getBlockState(floorWorld);
+        int floorEast = floorState.getBlock().getSignal(floorState, helper.getLevel(), floorWorld, Direction.EAST);
+        int floorUp = floorState.getBlock().getSignal(floorState, helper.getLevel(), floorWorld, Direction.UP);
+        int floorDown = floorState.getBlock().getDirectSignal(floorState, helper.getLevel(), floorWorld, Direction.DOWN);
+        helper.assertTrue(floorEast == 15 && floorUp == 0 && floorDown == 0,
+                "a floor-mounted wire must emit horizontally but not through its support or outward normal");
+
+        BlockPos wallWorld = helper.absolutePos(wallWire);
+        BlockState wallState = helper.getLevel().getBlockState(wallWorld);
+        int wallNorth = wallState.getBlock().getDirectSignal(wallState, helper.getLevel(), wallWorld, Direction.NORTH);
+        int wallWest = wallState.getBlock().getSignal(wallState, helper.getLevel(), wallWorld, Direction.WEST);
+        int wallEast = wallState.getBlock().getSignal(wallState, helper.getLevel(), wallWorld, Direction.EAST);
+        helper.assertTrue(wallNorth == 15 && wallWest == 0 && wallEast == 0,
+                "a wall-mounted wire must emit within its wall plane but not through support axes");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void persistedMultipartFacesSanitizeUnsupportedParts(GameTestHelper helper) {
+        BlockPos space = new BlockPos(3, 2, 2);
+        BlockPos floorSupport = space.below();
+        BlockPos wallSupport = space.west();
+        helper.setBlock(floorSupport, Blocks.STONE);
+        helper.setBlock(wallSupport, Blocks.STONE);
+        helper.setBlock(space, wire(Direction.UP));
+        helper.assertTrue(RedAlloyWireBlock.addFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "test fixture must contain two persisted multipart faces");
+
+        RedAlloyWireBlockEntity wire =
+                (RedAlloyWireBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(space));
+        net.minecraft.nbt.CompoundTag persisted = wire.saveWithoutMetadata();
+        helper.destroyBlock(wallSupport);
+        wire.load(persisted);
+        wire.onLoad();
+
+        helper.assertTrue(RedAlloyWireBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.UP),
+                "reload sanitation must preserve the still-supported face");
+        helper.assertTrue(!RedAlloyWireBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "reload sanitation must remove a face whose support disappeared while unloaded");
+        helper.assertTrue(helper.getBlockState(space).getValue(RedAlloyWireBlock.POWER) == 0,
+                "reload sanitation must recompute stale persisted power");
         helper.succeed();
     }
 

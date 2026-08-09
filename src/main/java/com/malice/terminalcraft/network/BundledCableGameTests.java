@@ -2,12 +2,14 @@ package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.BundledCableBlock;
 import com.malice.terminalcraft.blockentity.BundledCableBlockEntity;
+import com.malice.terminalcraft.blockentity.TurtleBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.gametest.GameTestHolder;
 
 /** Live proof of independent deterministic bundled-control channels and partitions. */
@@ -113,6 +115,90 @@ public final class BundledCableGameTests {
             helper.assertTrue(helper.getBlockState(space).getBlock() instanceof BundledCableBlock,
                     "the multipart container must remain while one supported face survives");
             helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void channelZeroBridgesVanillaSourcesAndStaysInMountedPlane(GameTestHelper helper) {
+        BlockPos cablePos = new BlockPos(2, 2, 2);
+        helper.setBlock(cablePos.below(), Blocks.REDSTONE_BLOCK);
+        helper.setBlock(cablePos, cable(Direction.UP));
+        BundledCableBlockEntity cable = (BundledCableBlockEntity) helper.getBlockEntity(cablePos);
+        cable.refreshVanillaInput();
+
+        BlockPos worldPos = helper.absolutePos(cablePos);
+        BlockState state = helper.getLevel().getBlockState(worldPos);
+        int east = state.getBlock().getSignal(state, helper.getLevel(), worldPos, Direction.EAST);
+        int up = state.getBlock().getSignal(state, helper.getLevel(), worldPos, Direction.UP);
+        int down = state.getBlock().getDirectSignal(state, helper.getLevel(), worldPos, Direction.DOWN);
+        helper.assertTrue(cable.getSignal(0) == 15 && east == 15 && up == 0 && down == 0,
+                "channel zero must bridge a vanilla support source without leaking off the mounted plane");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void turtleBundledComputerApiReadsAndWritesAdjacentCable(GameTestHelper helper) {
+        BlockPos cablePos = new BlockPos(2, 2, 2);
+        BlockPos turtlePos = cablePos.south();
+        helper.setBlock(cablePos.below(), Blocks.STONE);
+        helper.setBlock(cablePos, cable(Direction.UP));
+        helper.setBlock(turtlePos, ModRegistries.TURTLE_BLOCK.get());
+
+        TurtleBlockEntity turtle = (TurtleBlockEntity) helper.getBlockEntity(turtlePos);
+        BundledCableBlockEntity cable = (BundledCableBlockEntity) helper.getBlockEntity(cablePos);
+        helper.assertTrue(turtle.hasBundledCable("north"),
+                "turtle bundled API must discover the cable on the named side");
+        helper.assertTrue(turtle.setBundledOutput("north", 4, 11),
+                "turtle bundled API must set a bounded per-channel source");
+        helper.assertTrue(turtle.bundledOutput("north", 4) == 11
+                        && turtle.bundledSignal("north", 4) == 11
+                        && cable.getSignal(4) == 11,
+                "turtle output must be visible as the effective bundled channel");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void persistedMultipartFacesSanitizeUnsupportedParts(GameTestHelper helper) {
+        BlockPos space = new BlockPos(3, 2, 2);
+        helper.setBlock(space.below(), Blocks.STONE);
+        helper.setBlock(space.west(), Blocks.STONE);
+        helper.setBlock(space, cable(Direction.UP));
+        helper.assertTrue(BundledCableBlock.addFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "test fixture must contain two persisted bundled faces");
+
+        BundledCableBlockEntity cable =
+                (BundledCableBlockEntity) helper.getLevel().getBlockEntity(helper.absolutePos(space));
+        net.minecraft.nbt.CompoundTag persisted = cable.saveWithoutMetadata();
+        helper.destroyBlock(space.west());
+        cable.load(persisted);
+        cable.onLoad();
+        helper.assertTrue(BundledCableBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.UP)
+                        && !BundledCableBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "reload sanitation must remove only the bundled face whose support disappeared");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void channelZeroNotifiesAndDepowersVanillaReceiver(GameTestHelper helper) {
+        BlockPos cablePos = new BlockPos(2, 2, 2);
+        BlockPos lampPos = cablePos.east();
+        helper.setBlock(cablePos.below(), Blocks.STONE);
+        helper.setBlock(cablePos, cable(Direction.UP));
+        helper.setBlock(lampPos, Blocks.REDSTONE_LAMP);
+        BundledCableBlockEntity cable = (BundledCableBlockEntity) helper.getBlockEntity(cablePos);
+
+        cable.setLocalOutput(0, 15);
+        helper.runAfterDelay(2, () -> {
+            helper.assertTrue(helper.getBlockState(lampPos).getValue(
+                            net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                    "channel zero power must notify and light an adjacent vanilla receiver");
+            cable.setLocalOutput(0, 0);
+            helper.runAfterDelay(2, () -> {
+                helper.assertTrue(!helper.getBlockState(lampPos).getValue(
+                                net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                        "channel zero depower must notify and release an adjacent vanilla receiver");
+                helper.succeed();
+            });
         });
     }
 

@@ -1,6 +1,6 @@
 # The TerminalCraft Guide
 
-**The comprehensive player, administrator, shell, scripting, networking, and automation manual for TerminalCraft 1.0.0**
+**The comprehensive player, administrator, shell, scripting, networking, and automation manual for TerminalCraft 1.0.38**
 
 TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style computers. This guide documents the behavior of the current source release—not ordinary GNU Bash, ComputerCraft Lua, or features merely planned for a later release.
 
@@ -37,8 +37,8 @@ TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style
 | Component | Required version |
 |---|---|
 | Minecraft | 1.20.1 |
-| Minecraft Forge | 47.3.0 or compatible Forge 47.x |
-| Java | 17 |
+| Minecraft Forge | 47.4.10 |
+| Java | 21 |
 | TerminalCraft | Both client and server |
 
 Install Forge, place the TerminalCraft JAR in the instance's `mods` directory, and launch the matching Forge profile. On multiplayer servers, install the same TerminalCraft build on the server and every connecting client.
@@ -51,7 +51,7 @@ cd TerminalCraft
 ./gradlew clean build
 ```
 
-The output is `build/libs/terminalcraft-1.0.0.jar`.
+The output is `build/libs/terminalcraft-1.20.1-47.4.10-1.0.38.jar`.
 
 ## 2. Your first terminal
 
@@ -84,6 +84,10 @@ label
 
 Terminal state, label, shell files, history-relevant state, and supported host state are persisted by the server. Clients display and submit input; they do not authoritatively mutate the world.
 
+Press `F6` in an open terminal to switch between the scrollback log and the server-synchronized
+40×16 character-cell surface. The surface mode is a passive clipped view of the same bounded state
+used by terminal-capable clients; input still goes through the authenticated server shell.
+
 ## 3. Blocks and items
 
 ### Terminal
@@ -102,29 +106,216 @@ A mobile computer with its own shell and VFS. It can move, rotate, inspect, dig,
 
 A server-owned text display with 20 rows of 40 characters per tile. Adjacent computers can write text, set individual zero-based rows, set a title and color palette, clear it, or read its current lines. Up to 8 by 6 equally facing adjacent tiles form a wall (maximum 48 tiles). Shift-right-click displays content in chat; normal right-click publishes a touch event. Monitor resizing/rebuild behavior is exposed through the event system.
 
+Monitor walls can also be display targets. A monitor directly beside a PLC shows its colored PLC
+dashboard instead of the PLC shell. A wireless display receiver or a routed Video Cable can mirror
+an adjacent terminal, turtle, server rack, or PLC onto the complete connected wall. The wall is one
+global canvas; a source is never duplicated independently per tile.
+
 ### Disk Drive and Floppy Disk
 
 Place a Disk Drive adjacent to a computer, insert a Floppy Disk, and mount it at `/disk`. Floppies carry a portable bounded filesystem and label.
 
 ### Modem
 
-Provides RedNet communication with a default 64-block wireless range and at most 128 open channels. A modem can operate wirelessly or as an endpoint on physical Network Cable. Shift-right-click toggles its wireless/wired mode; normal right-click reports status. A placed computer must have an adjacent modem for the `modem` command family.
+Provides RedNet communication with a default 64-block wireless range and at most 128 open channels. A modem can operate wirelessly or as an endpoint on physical Network Cable. Shift-right-click toggles its wireless/wired mode; normal right-click reports status. A placed computer must have an adjacent modem for the `modem` command family. New modems automatically open channel 42, receive a stable `node-...` hostname, and receive a bounded private RedNet address.
 
 ### Network Cable
 
 Carries wired RedNet traffic through physical topology. Breaking a required segment partitions the route immediately. It does not carry bundled-control signals.
 
+### Universal Sensor Array
+
+```text
+IRI
+RCR
+IRI
+```
+
+`I` iron ingot, `R` redstone, `C` comparator.
+
+### Wireless Display Link
+
+A paired source/receiver display transport. Place the source link beside a terminal, turtle, server
+rack, or PLC and the receiver beside a monitor or monitor wall. Sneak-right-click the source and then
+the receiver to pair them, or use `displaylink source`, `sink`, and `pair` from an adjacent shell.
+Links use a bounded, case-normalized channel and only connect source and receiver links in the same
+dimension. A PLC source renders its dashboard; every other host is copied as a passive terminal
+surface. Normal right-click opens a diagnostics/configuration GUI where the channel, role, attachment
+state, and pair/clear actions are visible. Named channels can be edited directly in that GUI.
+
+### Video Cable
+
+A physical six-direction display cable. Connected cable blocks form a bounded routed component and
+may turn horizontally or vertically. A component can have a terminal-capable source at one end and
+one or more monitors at the other; the lowest-positioned source is selected if multiple sources are
+present. Video Cable carries display cells only, not RedNet packets, redstone, or bundled signals.
+Normal right-click opens a cable diagnostics GUI showing local directions, routing limits, and endpoint
+guidance. Branching a cable naturally acts as a splitter; the component graph remains bounded to 2,048
+nodes and chooses the lowest-positioned source deterministically.
+
 ### Network Router
 
-Connects and diagnoses wired network segments. Each face has persistent enabled state and logical-network assignment. Shift-right-click a face with a redstone torch to toggle it, with a renamed item to assign that item's custom name as the network, or empty-handed to restore automatic selection. Normal right-click shows bounded topology diagnostics. A router does not create a cross-dimensional gateway.
+Connects and diagnoses wired network segments and acts as the DHCP-equivalent authority for its attached RedNet subnets. Each face has persistent enabled state and logical-network assignment. Shift-right-click a face with a redstone torch to toggle it, with a renamed item to assign that item's custom name as the network, or empty-handed to restore automatic selection. Normal right-click shows bounded topology diagnostics. A router does not create a cross-dimensional gateway.
+
+### Individual sensor recipes
+
+Each dedicated sensor is crafted shapelessly from one **Universal Sensor Array** plus its family
+ingredient:
+
+| Sensor | Added ingredient |
+|---|---|
+| Redstone | Redstone dust |
+| Block State | Comparator |
+| Inventory | Chest |
+| Fluid | Bucket |
+| Energy | Redstone block |
+| Entity | Spider Eye |
+| Machine | Observer |
+| Environment | Compass |
+| Network | Network Cable |
+| Kinetic | Iron Ingot |
+| Chemical | Glass Bottle |
+
+### Universal Sensor Array
+
+A **Universal Sensor Array** is a server-authoritative telemetry block with up to 16 named channels.
+Place it beside a terminal, PLC, or modem. Right-click shows a bounded status summary; terminals use
+the `sensor` command family for configuration. Each channel targets `self` or one adjacent face and
+selects a metric from a standard, provider-neutral family:
+
+- `redstone`: signal level or powered state;
+- `block_state`: block ID or an exposed block-state property;
+- `inventory`: item count, capacity, slots, fill percentage, or an exact item selector;
+- `fluid`: millibuckets, capacity, tanks, fill percentage, or an exact fluid selector;
+- `energy`: FE stored/capacity/fill percentage and receive/extract capability;
+- `entity`: bounded nearby counts, presence, `players`, `items`, or an entity type selector;
+- `machine`: common active/lit/powered/progress state properties and TerminalCraft PLC state;
+- `environment`: light, sky/block light, rain, thunder, day, time, temperature, and dimension;
+- `network`: modem online/channels/pending/hosts/routers or router status;
+- `kinetic`: generic exposed speed/rotation/overstress state properties;
+- `chemical`: reserved and explicitly reports `unsupported` until a generic capability exists.
+
+Samples carry a quality value (`ok`, `unavailable`, `chunk_unloaded`, `partial`, or `unsupported`).
+An unavailable or unsupported sample never becomes a PLC signal. Create and Mekanism-specific values
+are therefore not guessed through private APIs; their standard Forge capabilities and exposed block
+state are still usable immediately.
+
+Example terminal setup:
+
+```sh
+sensor configure tank_level fluid north fill_percent
+sensor configure iron inventory north count minecraft:iron_ingot 2
+sensor configure machine machine east active
+sensor list
+sensor read tank_level
+sensor calibrate tank_level 0 100
+```
+
+PLC programs can consume the calibrated 0-15 output from an adjacent array:
+
+```text
+SCAN 2
+AIN TANK SENSOR tank_level
+AOUT PUMP REDSTONE EAST
+RUNG PUMP = TANK
+```
+
+The array also registers as a normal `device` endpoint with `sensor.list`, `sensor.read`,
+`sensor.snapshot`, configuration, calibration, enable, remove, and interval methods. A modem touching
+the array can publish it as a typed RedNet service with `modem sensor add telemetry 42`; remote hosts
+can request `list`, `snapshot`, or `read <channel>` with `modem sensor request ...`. RedNet replies are
+bounded text telemetry and do not grant world mutation.
+
+### Individual Sensors
+
+Every Sensor Array family is also available as a dedicated one-channel block: **Redstone**,
+**Block State**, **Inventory**, **Fluid**, **Energy**, **Entity**, **Machine**, **Environment**,
+**Network**, **Kinetic**, and **Chemical Sensor**. Place one against the block or space it should
+sample; the sensor face points at its target. Each block exposes the fixed channel `value`, has the
+same quality-aware reading engine as the array, emits a redstone signal from its calibrated numeric
+reading, and can be attached directly to a terminal, PLC, or modem.
+
+Dedicated sensors use the same terminal commands with a shorter configuration form:
+
+```sh
+sensor configure fill_percent
+sensor configure count minecraft:iron_ingot 2
+sensor read value
+sensor calibrate value 0 100
+sensor disable value
+```
+
+The sensor family is fixed by the block, while the metric and optional selector remain configurable.
+An individual sensor can be used by a PLC with `AIN LEVEL SENSOR value`. If several individual
+sensors are adjacent, the PLC uses the first one found in its fixed direction order; use a Sensor
+Array when a deterministic multi-channel panel is needed. A modem can publish an individual sensor
+with the same `modem sensor add` and `modem sensor request` workflow used by an array. Its device
+endpoint exposes one channel and does not offer channel removal; break the block to remove it.
+
+### Network Access Storage and Materializer
+
+A **Network Access Storage** block accepts up to eight portable Solid-State Drives. Basic, Advanced,
+and Quantum drives provide progressively larger item/fluid capacities. Drive contents are stored on
+the SSD item, so removing a drive is safe and the drive can be moved to another NAS.
+
+Shift-right-click the NAS with an item stack to store it. A filled fluid container can be emptied into
+the NAS. An adjacent terminal can use the generic storage surface:
+
+```sh
+storage list
+storage query 0 --limit 16
+storage count 0 minecraft:iron_ingot
+storage extract 0 minecraft:iron_ingot 32
+```
+
+The NAS also exposes item and fluid Forge capabilities for compatible automation. Its device endpoint
+supports bounded item queries and item/fluid insertion and extraction.
+
+Place a **Materializer** beside the NAS to create an output point. Empty-hand right-click extracts the
+first available item; holding an item requests that item; holding a compatible fluid container fills
+it from stored fluid. Machines can pull through the Materializer's read-only item/fluid capabilities,
+which prevents accidental insertion back into the storage network.
 
 ### Red Alloy Wire
 
-A compact vanilla-redstone surface wire. It is separate from data networking and bundled control.
+A compact attenuating vanilla-redstone surface wire. Parts can occupy supported floor, wall, and
+ceiling faces, join across valid corners, and drop individually when support is removed. Right-click
+with a Forge/Common-tagged wrench (including the Create wrench) to inspect the selected face,
+current power, occupied faces, and links. Empty-hand interaction is deliberately left unclaimed for
+compatibility with Carry On and similar interaction mods. A vanilla source is sampled using its
+directional output toward the wire, including the solid support behind a mounted face. Power loses
+one strength per connected wire edge. Output is limited to the plane of the mounted face, so a
+floor wire emits horizontally, a wall wire emits vertically and horizontally within that wall,
+and neither leaks through its support nor through its outward normal.
+It is separate from data networking and bundled control.
 
 ### Bundled Control Cable
 
-Carries 16 independent channels numbered `0` through `15`. Values are strengths from `0` through `15`. Channel 0 bridges vanilla redstone behavior; data-network traffic remains a separate system.
+Carries 16 independent channels numbered `0` through `15`. Values are strengths from `0` through
+`15`. Channel 0 bridges vanilla redstone behavior; data-network traffic remains a separate system.
+Right-click with a Forge/Common-tagged wrench to inspect the selected face, links, and all active
+channels. Terminals and turtles adjacent to a cable expose the same channels through `wire` and
+`bundled`; setting a channel is a local computer-owned source, while reads report the effective
+component signal. Channel 0 accepts vanilla redstone input from adjacent sources, including a
+mounted face's support block, and cable output stays within the plane of its occupied face.
+
+### Programmable Logic Controller
+
+A **Programmable Logic Controller** is a dedicated server-authoritative automation block. Right-click
+it to open the PLC Programmer: a line-numbered source editor with compile/load, run, stop, reset,
+alarm acknowledgment, and four save/load program slots. The live commissioning panel shows scan
+state, I/O, forces, alarms, and compile/runtime faults. The attached shell still exposes the `plc`
+command family for scripted administration. The controller can read adjacent vanilla redstone or
+bundled cable channels, evaluate a bounded program, and drive redstone/bundled outputs. Programs
+stop and clear outputs when compilation or I/O fails.
+
+When a PLC is directly beside a monitor, that monitor becomes a control dashboard. The same dashboard
+is used through a wireless display receiver or Video Cable. It shows run state, scan count, inputs,
+outputs, program text, faults, and a four-page trend view. Touch the `RUN`, `STOP`, or `RESET` buttons on the monitor to
+control the PLC; the interaction is server-authoritative and uses the wall's global coordinates. The
+`<` and `>` buttons switch between overview, live watch, program/fault-history, and oscilloscope/trend pages. PLCs record
+their placer as owner; the owner or a server operator can control the dashboard, while everyone can
+read it.
 
 ### Server Rack, Server Blade, and Router Blade
 
@@ -133,6 +324,23 @@ Server racks host bounded scheduled work. Up to three equally facing rack blocks
 ### Refined Storage Bridge
 
 A dedicated attachment point for optional Refined Storage telemetry and crafting integration. It deliberately fails closed when native network identity or permissions are unavailable.
+
+### Applied Energistics 2 Bridge
+
+A dedicated attachment point for optional Applied Energistics 2 grid telemetry and read-only cached
+item queries. The bridge examines only exposed AE2 nodes on its six directly adjacent blocks and
+fails closed for detached, ambiguous, inactive, or API-error topology. Item queries are bounded,
+paginated, tag-aware, and aggregate item-key variants by item ID.
+If the cached source contains more than the adapter's 4,096-key scan bound, the query returns an
+empty page instead of presenting an incomplete result as complete.
+
+The bridge never inserts, extracts, crafts, cancels, or impersonates an AE2 security principal.
+Until caller-aware native security mapping is available, all mutations are denied before AE2 is
+invoked. Power, boot, channel, node, and bounded cached-inventory telemetry remain visible through
+the generic device descriptor.
+When AE2 crafting CPUs are present, the descriptor also reports bounded CPU count, busy CPU count,
+available storage, and whether the CPU scan was complete. This is telemetry only; it never starts or
+cancels an AE2 job.
 
 ## 4. Crafting reference
 
@@ -224,6 +432,33 @@ CRC
 
 `C` Network Cable, `T` comparator.
 
+### Solid-State Drives
+
+The Basic SSD is shapeless: iron ingot + redstone + glass pane. Upgrade shapelessly with:
+
+- Basic SSD + diamond + redstone block → Advanced SSD;
+- Advanced SSD + Nether Star + Ender Pearl → Quantum SSD.
+
+### Network Access Storage
+
+```text
+IRI
+DCD
+IRI
+```
+
+`I` iron ingot, `R` redstone, `D` Basic SSD, `C` comparator.
+
+### Materializer
+
+```text
+IPI
+RNR
+IGI
+```
+
+`I` iron ingot, `P` piston, `R` redstone, `N` Network Access Storage, `G` glass pane.
+
 ### Red Alloy Wire (12)
 
 ```text
@@ -272,6 +507,36 @@ INI
 
 `T` Terminal, `C` comparator, `R` redstone block, `N` Network Router.
 
+### Programmable Logic Controller
+
+```text
+IRI
+RCR
+IRI
+```
+
+`I` iron ingot, `R` redstone, `C` comparator.
+
+### Wireless Display Link
+
+```text
+IRI
+RER
+ICI
+```
+
+`I` iron ingot, `R` redstone, `E` ender pearl, `C` comparator.
+
+### Video Cable (8)
+
+```text
+IRI
+CCC
+IRI
+```
+
+`I` iron nugget, `R` redstone, `C` copper ingot.
+
 ### Refined Storage Bridge
 
 ```text
@@ -281,6 +546,17 @@ IRI
 ```
 
 `C` comparator.
+
+### Applied Energistics 2 Bridge
+
+```text
+IRI
+RCR
+IRI
+```
+
+`C` comparator. AE2 must be installed for the bridge's network adapter to activate; the block itself
+remains safe to load when AE2 is absent.
 
 ## 5. The virtual filesystem
 
@@ -379,9 +655,12 @@ The pipeline passes one command's textual output to the next command's standard 
 | `peripheral` | List adjacent peripheral/device information |
 | `redstone`, `rs` | Read/set vanilla redstone sides |
 | `wire`, `bundled` | Read/set bundled channels |
+| `plc` | Program, inspect, start, stop, and reset the attached PLC |
+| `displaylink`, `display-link`, `dlink` | Pair and configure adjacent wireless display links |
 | `turtle`, `tu` | Turtle movement and interaction |
 | `monitor` | Adjacent monitor control |
 | `modem`, `rednet` | RedNet network operations |
+| `sensor`, `sensors` | Configure and read an adjacent Sensor Array or individual sensor |
 | `mount`, `umount`, `unmount`, `disk` | Floppy operations |
 | `device`, `devices` | Unified device API |
 | `storage`, `inventory` | Generic storage API |
@@ -389,6 +668,9 @@ The pipeline passes one command's textual output to the next command's standard 
 | `drawers` | Storage Drawers adapter |
 | `server`, `jobs` | Server-rack jobs |
 | `auth`, `authorization` | Current caller authorization diagnostics |
+
+The terminal screen also supports `Ctrl+R` reverse history search, `Ctrl+L` input clearing, `F6`
+surface/log switching, Page Up/Page Down scrollback, and the existing editor copy/paste shortcuts.
 
 ## 7. Scripting language
 
@@ -432,11 +714,25 @@ Special variables:
 | `$0` | Script path/name |
 | `$1` … `$9` | First nine script arguments |
 
-Variable expansion is intentionally simple and occurs before tokenization. Quote text containing spaces. There is no command substitution (`$(...)` or backticks), arrays, arithmetic expansion, or `${name:-default}` syntax.
+TerminalCraft supports bounded `$(command)` capture and signed-integer `$((expression))`
+expansion. Backticks, arrays, and `${name:-default}` remain unavailable.
+
+```sh
+JOB=$(server submit monitor set any 0 ready)
+NEXT=$((COUNT + 1))
+let COUNT=COUNT+1
+arith COUNT*2
+```
+
+Command substitution is limited to four nested substitutions, the configured command-length
+limit, and 4096 captured characters. Captured lines are normalized to a single space-separated
+value. The command still executes server-authoritatively and retains its normal side effects.
 
 ### Quoting
 
-Single and double quotes group whitespace. The current shell performs variable expansion before lexical tokenization, including text written inside single quotes. Do not rely on GNU Bash's rule that single quotes suppress expansion.
+Single and double quotes group whitespace. As in Bash, single quotes suppress variable, command,
+and arithmetic expansion; double quotes permit expansion while preserving the resulting text as
+one argument.
 
 ```sh
 GREETING='Hello operator'
@@ -472,11 +768,18 @@ test -e path            # file or directory exists
 test "$A" = "$B"      # string equality
 test "$A" == "$B"     # string equality
 test "$A" != "$B"     # string inequality
+test "$A" -eq "$B"    # integer equality
+test "$A" -ne "$B"    # integer inequality
+test "$A" -lt "$B"    # integer less-than
+test "$A" -le "$B"    # integer less-than-or-equal
+test "$A" -gt "$B"    # integer greater-than
+test "$A" -ge "$B"    # integer greater-than-or-equal
 test "$VALUE"          # nonempty string
 [ -f script.sh ]
 ```
 
-Numeric comparisons (`-eq`, `-lt`, and friends), compound tests (`-a`, `-o`), regexes, and glob tests are not implemented. The current `exit` command also does not abort a script; use `&&`, `||`, and `if` to guard later work.
+Compound tests (`-a`, `-o`), regexes, and glob tests are not implemented. `exit [status]`
+terminates the current script, while `break` and `continue` affect the nearest loop.
 
 ### Conditionals
 
@@ -522,7 +825,19 @@ while [ "$FLAG" = yes ]; do
 done
 ```
 
-Because there is no arithmetic expansion, use `for` for most fixed-count automation. Every loop is bounded to prevent runaway scripts.
+Arithmetic makes bounded counters possible:
+
+```sh
+COUNT=0
+while [ "$COUNT" -lt 8 ]; do
+  let COUNT=COUNT+1
+  if [ "$COUNT" -eq 3 ]; then continue; fi
+  echo step=$COUNT
+  if [ "$COUNT" -ge 6 ]; then break; fi
+done
+```
+
+Every loop remains bounded to 256 iterations to prevent runaway scripts.
 
 ### Pipes and redirection
 
@@ -543,6 +858,8 @@ The current shell enforces safeguards including:
 - maximum script nesting depth: 8;
 - maximum iterations per loop: 256;
 - maximum top-level chain steps: 128;
+- maximum command-substitution nesting: 4;
+- maximum captured command-substitution output: 4096 characters;
 - command length controlled by server config (default 512 characters);
 - command packet admission controlled by server config (default 20 per second per player);
 - editor: 512 lines, 512 characters per line, and 64 KiB maximum save size.
@@ -764,6 +1081,16 @@ monitor set [side] <zero-based-row> <text>
 monitor title [side] <title>
 monitor color [side] <foreground> <background>
 monitor read [side]
+monitor bar [side] <row> <label> <0-100> [width]
+monitor led [side] <row> <label> <on|off>
+monitor spark [side] <row> <label> <values...>
+monitor screensaver [start|color|stop|status] [side]
+monitor service [list|add <name> <port>|remove <name>]
+monitor remote <service> clear|write|set|title|color ...
+displaylink status|list
+displaylink source <channel>
+displaylink sink <channel>
+displaylink pair [channel]
 ```
 
 Colors accept `#RRGGBB`, `0xRRGGBB`, or decimal `0..16777215`. Quote `#RRGGBB` values in scripts so `#` is not parsed as a comment.
@@ -776,9 +1103,108 @@ monitor title right 'Smelter'
 monitor set right 0 'State: ready'
 monitor set right 1 'Input: check chest'
 monitor read right
+monitor bar right 2 'Steam Load' 72 16
+monitor led right 3 'Pump' on
+monitor spark right 4 'Temperature' 10 12 15 18 14 11
 ```
 
 `monitor write` appends/writes according to the monitor host behavior; `monitor set` is preferable for stable dashboards.
+
+The geometric screensaver uses the complete connected wall as one global canvas. It renders a
+bounded animated pattern at the server tick rate and only splits rows when persisting them into
+the physical monitor tiles, so each tile displays its portion of one larger animation:
+
+```sh
+monitor screensaver start any
+monitor screensaver color any
+monitor screensaver status any
+monitor screensaver stop any
+bash ~/programs/geometric_screensaver.sh
+bash ~/programs/geometric_screensaver_color.sh
+```
+
+The bundled programs start the runtime and return immediately; use the `stop` action to end the
+animation. `color` enables the full 16-color animated palette while `start` retains the original
+monochrome green presentation. Re-running either start action restarts the phase on the current
+wall geometry. The source versions are available as
+[`geometric-screensaver.sh`](../examples/scripts/geometric-screensaver.sh) and
+[`geometric-screensaver-color.sh`](../examples/scripts/geometric-screensaver-color.sh).
+
+The monitor device also advertises the bounded ComputerCraft-style character-cell surface used by
+terminal-capable clients. Its `term.blit` and `term.scroll` operations update per-cell colors and
+cursor state, while the read-only `term.delta <since_revision> <max_cells> [offset]` method returns
+a revisioned, bounded page. A response with `complete=false` supplies `next_offset`; request that
+offset with the same revision before advancing the client's acknowledgement. The descriptor's
+`surface_revision` property is the current server-authoritative revision. Connected walls use one
+global surface coordinate space while persisting each tile's bounded cell state.
+
+The wall surface revision is global across all connected tiles, so a cell mutation on any tile is
+visible to the next delta request. The in-world renderer uses those persisted cell colors and
+backgrounds while keeping the server authoritative.
+
+Terminal-screen windows and widgets use bounded renderer-neutral layout primitives. Windows are
+clipped to the active viewport, widgets are capped at 128 per layout, hit testing is topmost-first,
+and no client-side script is executed. This keeps the client passive while allowing later screens to
+reuse the same surface and layout model.
+
+### Remote monitor walls
+
+A monitor service accepts a small, typed text-control protocol. It does not execute shell text.
+On the receiving computer, place an open modem so it either touches one monitor wall directly, or
+touches a terminal/turtle that in turn touches the wall. Exactly one wall must resolve from that
+modem.
+
+Receiver setup:
+
+```sh
+modem open 42
+monitor service add factory-wall 42
+monitor service list
+```
+
+From a pocket terminal within wireless range, open any reply channel once, then publish:
+
+```sh
+modem open 41
+monitor remote factory-wall clear
+monitor remote factory-wall title 'Factory Status'
+monitor remote factory-wall set 0 'Production online'
+monitor remote factory-wall color '#66ff99' '#050a05'
+```
+
+The direct layout still needs an adjacent terminal or turtle as its setup console. Registration is
+persisted on the modem. Service names are routing aliases, not passwords: any reachable peer on the
+same logical RedNet scope can publish to an advertised monitor service. Use network topology and
+logical network names as the trust boundary.
+
+### Create Display Links
+
+With Create `6.0.8` installed, a TerminalCraft monitor tile is a Display Link target. Point the
+Display Link at any tile; Create sees the row and column capacity of the complete connected wall.
+Choose the TerminalCraft monitor in the Display Link target UI and configure the source as usual.
+TerminalCraft sanitizes incoming components and bounds writes to the wall. Create remains optional.
+
+### Wireless display links and video cable
+
+Wireless pairing is intentionally a two-step physical interaction:
+
+1. Place a source link directly beside the terminal, server rack, turtle, or PLC that owns the display.
+2. Place a receiver link directly beside the target monitor or monitor wall.
+3. Sneak-right-click the source link, then sneak-right-click the receiver link.
+
+The source link receives a generated per-player channel. For named channels, configure either link
+from its adjacent shell:
+
+```sh
+displaylink source factory-floor
+displaylink sink factory-floor
+displaylink status
+```
+
+For a wired path, place Video Cable blocks between the source host and monitor. The cable can route
+through adjacent blocks in all six directions and updates when endpoints or cable segments change.
+The transport is bounded to 2,048 cable nodes per component. A PLC dashboard is selected automatically
+for PLC sources; ordinary hosts mirror their current terminal surface.
 
 ## 12. Redstone and bundled control
 
@@ -801,7 +1227,13 @@ rs set front 15
 rs output front
 ```
 
-A successful read only says that the side was valid and readable; script conditions cannot directly compare command output because command substitution is unavailable.
+A successful read only says that the side was valid and readable. Capture bounded output when a
+script needs to record or compare a returned value:
+
+```sh
+POWER=$(rs get back)
+echo power=$POWER
+```
 
 ### Bundled cable
 
@@ -820,6 +1252,88 @@ wire output back 3
 ```
 
 Bundled components are bounded and resolve per-channel strengths. Bundled control, red-alloy signals, and RedNet data are distinct systems.
+
+### Programmable Logic Controller
+
+A **Programmable Logic Controller** is a dedicated server-authoritative automation block. Right-click
+it to open the terminal screen. The normal shell editor can author a program file, and the `plc`
+command compiles or runs it:
+
+```sh
+edit /home/player/programs/factory.plc
+plc load /home/player/programs/factory.plc
+plc status
+plc start
+```
+
+Programs are deliberately bounded to 128 lines, 16 KiB, 32 total bindings, and 64 rungs. The
+controller scans every 1 to 20 game ticks, reads its declared inputs, updates timers/counters,
+evaluates rungs in order, and writes declared outputs. A missing input/output or compile error stops
+the controller and drives its declared outputs to zero.
+
+Example program:
+
+```text
+SCAN 2
+IN START REDSTONE NORTH
+IN STOP REDSTONE SOUTH
+IN SPEED BUNDLED WEST 3
+OUT MOTOR REDSTONE EAST
+OUT RUNNING BUNDLED WEST 4
+TIMER DELAY 20 = START
+LATCH ENABLE SET START RESET STOP
+RUNG MOTOR = ENABLE AND DELAY.DONE AND NOT STOP
+RUNG RUNNING = MOTOR OR SPEED
+```
+
+Use `REDSTONE side` for vanilla power and `BUNDLED side channel` for a 0–15 cable channel. Boolean
+expressions use `AND`, `OR`, `NOT`, parentheses, `ON`, and `OFF`. Analog bindings use `AIN` and
+`AOUT` and carry bounded 0–15 values. `MOVE` copies an analog value and `SCALE` linearly maps an
+input range to an output range. `PID` defines a bounded discrete controller, for example:
+`PID LOOP SETPOINT 12 PROCESS SENSOR OUTPUT HEATER KP 2 KI 0.1 KD 0.2`. Timer and counter flags are named
+`NAME.ACTIVE` and `NAME.DONE`; counters increment on rising edges. Latches are reset-dominant.
+`AIN name SENSOR channel` reads the calibrated signal from an adjacent Sensor Array or individual
+sensor (`value`). Sensor bindings
+are input-only, and a non-`ok` sample stops the PLC and clears its outputs.
+
+The complete command surface is:
+
+```text
+plc status | show | watch | start | stop | reset | clear
+plc load <file>
+plc set <program>       # use \n for embedded line breaks
+plc append <instruction>
+plc force input|analog|output <name> <on|off|0-15|clear>
+plc alarm|acknowledge
+plc page <0|1|2|3|next|previous>
+plc slot save|load|clear <0-3>
+plc remote open <x> <y> <z>
+```
+
+The dashboard is available without opening the PLC terminal. Attach a monitor directly to the PLC,
+or connect it through a display-link receiver or Video Cable. Touching its buttons changes the PLC
+run state; the dashboard refreshes every few ticks and keeps the PLC's normal compile and fail-safe
+rules. `plc watch` reports live signals, analog values, PID outputs, timers, counters, latches, trend
+series, and active overrides. Forced
+inputs and outputs are persisted until cleared; compile/I/O faults are retained in an eight-entry
+alarm history. `plc slot` provides four persisted program versions for quick rollback.
+
+The programmer screen's `F7` key toggles between source mode and the ladder workspace. In ladder
+mode, drag an available signal from the palette onto a rung to append an `AND` contact, or drag a
+rung to another position to reorder it. Declarations, timers, counters, latches, `SCALE`, and `PID`
+instructions remain source-controlled and are preserved when switching modes. Compile & Load always
+uses the same bounded server compiler.
+
+PLCs register on the authenticated TerminalCraft device network. From any authorized terminal,
+`device list`/`device info <uuid>` discovers the controller; `device call <uuid> status` reads
+status, `program.get` reads chunks, `program.set <source>` loads a program, `control.run|stop|reset`
+controls it, and `trend.get` returns the last 64 samples. Program writes and control calls require
+the PLC owner, and `plc remote open <x> <y> <z>` opens the same programmer screen from an
+authorized terminal in the same dimension.
+
+Red-alloy and bundled wiring is intentionally visible in 1.0.26. This release does not provide a
+concealment/facade representation; use the wrench interaction to inspect a mounted face or remove
+that face without disturbing the other faces in the same compact wire block.
 
 ## 13. Floppy disks
 
@@ -869,12 +1383,30 @@ If the current directory is inside `/disk`, unmounting returns the shell to its 
 - Every logical server and dimension has an isolated runtime scope.
 - There is no implicit cross-dimensional gateway.
 
-### 14.2 Core commands
+### 14.2 Beginner setup: place, connect, communicate
+
+The default profile is designed so a small network works without a configuration ceremony:
+
+1. Place a modem beside each Terminal, Turtle, or other shell host.
+2. For a wired network, shift-right-click each modem into wired mode and connect them with Network
+   Cable. Insert a Network Router anywhere a separate cable segment should be joined.
+3. Leave modem channels, hostnames, and router faces at their automatic defaults.
+4. Run `modem status` on each host. The modem should report `state=ready`, channel `42`, a
+   `node-...` identity, and a `10.x.x.x` RedNet lease.
+5. Send a message with `modem send 'hello network'`; receive it with `modem recv`.
+
+Automatic wired leases use the physical cable subnet as their pool. If a router is attached, the
+lease reports `source=router`; an isolated cable or wireless network uses the same bounded allocator
+as a link-local fallback. The lease is an in-world RedNet address and never opens a real LAN socket.
+
+### 14.3 Core commands
 
 ```text
 modem open|listen <channel>
 modem close|unlisten <channel>
 modem channels
+modem auto [on|off]
+modem status
 modem hostname [name|clear]
 modem network [name|clear]
 modem interfaces
@@ -883,10 +1415,11 @@ modem route <host>
 modem ping <host>
 modem hosts
 modem service [list|add <name> <channel>|remove <name>]
+modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]
 modem services
 modem call <service> [replyChannel] <message>
-modem send <channel> [replyChannel] <message>
-modem sendto <host> <channel> [replyChannel] <message>
+modem send [channel] [replyChannel] <message>
+modem sendto <host> [channel] [replyChannel] <message>
 modem probe <host> <port> <replyChannel> <message>
 modem delivery <messageId>
 modem recv [max]
@@ -894,9 +1427,18 @@ modem recv [max]
 
 List limits are bounded. `neighbors [max]` accepts `1..128`.
 
-### 14.3 Wireless setup
+### 14.4 Wireless setup
 
-On receiver:
+For a manual, named setup, configure the optional fields explicitly. The automatic equivalent is
+simply to place two wireless modems within range and use channel 42:
+
+```sh
+modem status
+modem send 'hello wireless'
+modem recv
+```
+
+On receiver (advanced named setup):
 
 ```sh
 modem hostname receiver
@@ -920,18 +1462,31 @@ On receiver:
 modem recv 8
 ```
 
-### 14.4 Wired setup
+### 14.5 Wired setup
 
 1. Place a modem beside each computer.
 2. Shift-right-click each modem into wired mode.
 3. Connect modems with Network Cable and, where desired, routers.
-4. Ensure required router faces/interfaces are enabled.
-5. Assign compatible logical network names or explicit router transitions.
-6. Use `modem interfaces`, `neighbors`, and `route <host>` to diagnose.
+4. Leave router faces enabled and automatic unless an advanced partition is required.
+5. Use `modem status`, `modem neighbors`, and `modem route <host>` to diagnose.
+6. Assign compatible logical network names only when intentionally partitioning or joining named
+   networks.
 
 A wireless modem touching cable is not a wired endpoint. Both route endpoints must be live wired modems.
 
-### 14.5 Named services
+### 14.6 Advanced network controls and protocol
+
+`modem auto off` disables the default channel, generated hostname, and automatic lease renewal for
+that modem. `modem auto on` restores them. Explicit `modem hostname`, `modem network`, `modem open`,
+router face names, and disabled router faces remain the advanced controls for segmented or managed
+installations.
+
+`modem status` also reports the RedNet envelope version, maximum hop count, payload bound, and the
+built-in channel/control protocol identifiers. RedNet packets are versioned, bounded, dimension
+local, and server-authoritative; a router forwards only valid reachable wired paths and decrements
+the envelope hop limit on each router transition.
+
+### 14.7 Named services
 
 Server:
 
@@ -952,7 +1507,7 @@ modem call inventory 81 'count-request'
 
 Service registration requires an open port and can fail for invalid/duplicate names or bounded directory capacity.
 
-### 14.6 Reliable probes
+### 14.8 Reliable probes
 
 ```sh
 modem probe receiver 42 41 'health-check'
@@ -966,7 +1521,7 @@ modem delivery <message-uuid>
 
 Reliable delivery is asynchronous, bounded, and opt-in. It uses acknowledgement, timeout, retry, correlation, and duplicate-suppression logic. Delivery records are transient; restart does not preserve them. A transport acknowledgement does not mean an application performed a requested business action.
 
-### 14.7 Network limits and diagnostics
+### 14.9 Network limits and diagnostics
 
 Queues, queue bytes, sender message/byte rates, duplicate state, acknowledgement controls, and retained delivery records are bounded. Admission failure is reported instead of silently pretending to send. RedNet does not use the machine's real network stack.
 
@@ -1073,6 +1628,16 @@ device events subscribe '*' 'disk_inserted,disk_removed,monitor_resize' 5 true
 
 The returned subscription UUID belongs to the authenticated caller. Queues are bounded and best-effort. Diagnostics report queued, delivered, dropped, debounced, and coalesced counts. Subscriptions are in-memory logical-server-lifetime state and do not survive restart.
 
+Scheduler-backed callers can use the `DeviceEventWaitAccess` capability for a cooperative wait:
+
+```text
+beginEventWait(subscription, current_game_time, timeout_ticks)
+pollEventWait(wait_id, current_game_time)
+cancelEventWait(wait_id)
+```
+
+`beginEventWait` returns immediately with `waiting`, `event`, or `timeout` plus a bounded `wake_at` tick. A matching publication completes the token and can wake a parked `ServerJobScheduler` job through `DeviceEventSchedulerBridge`; timeout resolution occurs when the caller polls at or after `wake_at`. One subscription may have one active wait, waits are caller-owned, and the maximum timeout is 1,200 game ticks. No server thread sleeps or blocks.
+
 ### 16.2 Server-rack jobs
 
 ```text
@@ -1133,6 +1698,15 @@ Use the analogous `drawers` command family.
 ### Refined Storage
 
 The dedicated bridge exposes bounded item/fluid/network/energy/capacity telemetry. Native crafting submit/status/cancel requires a currently authenticated online player and Refined Storage `AUTOCRAFTING` permission. Generic mutation is denied when authenticated native principal mapping is unavailable.
+
+### Applied Energistics 2
+
+The dedicated bridge exposes bounded cached item queries plus grid power, boot, channel, node,
+inventory-key, and read-only crafting-CPU telemetry. It requires a directly adjacent exposed AE2 node. The first slice is
+intentionally read-only: all insert/extract/crafting operations fail closed because TerminalCraft
+does not yet have a caller-aware AE2 security principal bridge. Cached inventory is refreshed by
+AE2 at most once per tick, and item/NBT variants are aggregated by item ID for the generic query
+contract.
 
 Craft operations use durable operation/job/native-task correlation to prevent duplicate submission across retries and restart ambiguity. Missing or ambiguous native state is not invented as success.
 
@@ -1247,18 +1821,19 @@ This section prevents the most common incorrect assumptions.
 | GNU Bash feature | TerminalCraft status |
 |---|---|
 | External OS commands/processes | Not available |
-| Command substitution `$(...)` / backticks | Not available |
-| Arithmetic `$((...))`, `let`, `((...))` | Not available |
+| Command substitution `$(...)` | Supported with depth/output bounds; backticks unavailable |
+| Arithmetic `$((...))`, `let`, `arith` | Supported signed-integer subset; `((...))` command unavailable |
 | Functions | Not available |
 | Arrays | Not available |
 | Globbing/filename expansion | Not a documented feature |
-| Numeric `test -eq/-lt/...` | Not available |
+| Numeric `test -eq/-ne/-lt/-le/-gt/-ge` | Supported |
 | `case`, `select`, `until` | Not available |
 | Background jobs `&` | Not available |
 | Signals/process control | Not available |
-| `exit` terminates a script | No; current `exit` prints `logout` and succeeds |
+| `exit` terminates a script | Supported with optional status |
+| `break` / `continue` | Supported for the nearest bounded loop |
 | Real sleeping through `sleep` | Not available; current command is a no-op |
-| Single quotes suppress expansion | **No**; expansion occurs before tokenization |
+| Single quotes suppress expansion | Supported |
 | Full escape/`printf` formatting | Not available |
 | Unlimited loops/scripts | No; deliberately bounded |
 | Pipes/redirection | Supported as bounded sequential text flow |

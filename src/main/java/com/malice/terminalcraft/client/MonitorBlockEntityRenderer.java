@@ -2,6 +2,7 @@ package com.malice.terminalcraft.client;
 
 import com.malice.terminalcraft.block.MonitorBlock;
 import com.malice.terminalcraft.blockentity.MonitorBlockEntity;
+import com.malice.terminalcraft.device.TerminalBuffer;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
@@ -14,8 +15,6 @@ import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.core.Direction;
 import org.joml.Matrix4f;
-
-import java.util.List;
 
 /** Renders one continuous display surface for a connected monitor wall. */
 public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<MonitorBlockEntity> {
@@ -39,26 +38,38 @@ public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<Mon
         pose.mulPose(Axis.YP.rotationDegrees(180.0f - facing.toYRot()));
         pose.translate(0.0, 0.0, SCREEN_Z);
 
-        drawScreen(pose, buffers, wall.width(), wall.height(), wall.backgroundColor());
-        drawText(pose, buffers, wall);
+        drawScreen(pose, buffers, wall.surface());
+        drawText(pose, buffers, wall.surface());
         pose.popPose();
     }
 
-    private static void drawScreen(PoseStack pose, MultiBufferSource buffers, int width, int height,
-                                   int rgb) {
+    private static void drawScreen(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface) {
+        float wallWidth = (float) surface.width() / MonitorBlockEntity.MAX_LINE_LEN;
+        float wallHeight = (float) surface.height() / MonitorBlockEntity.MAX_LINES;
         float left = 0.5f - SCREEN_MARGIN;
-        float right = -width + 0.5f + SCREEN_MARGIN;
+        float right = -wallWidth + 0.5f + SCREEN_MARGIN;
         float top = 0.5f - SCREEN_MARGIN;
-        float bottom = -height + 0.5f + SCREEN_MARGIN;
-        int red = rgb >> 16 & 0xFF;
-        int green = rgb >> 8 & 0xFF;
-        int blue = rgb & 0xFF;
-        Matrix4f matrix = pose.last().pose();
+        float bottom = -wallHeight + 0.5f + SCREEN_MARGIN;
         VertexConsumer consumer = buffers.getBuffer(RenderType.textBackground());
-        vertex(consumer, matrix, left, top, red, green, blue);
-        vertex(consumer, matrix, left, bottom, red, green, blue);
-        vertex(consumer, matrix, right, bottom, red, green, blue);
-        vertex(consumer, matrix, right, top, red, green, blue);
+        Matrix4f matrix = pose.last().pose();
+        float cellWidth = (wallWidth - (2.0f * SCREEN_MARGIN)) / surface.width();
+        float cellHeight = (wallHeight - (2.0f * SCREEN_MARGIN)) / surface.height();
+        for (int row = 0; row < surface.height(); row++) {
+            for (int column = 0; column < surface.width(); column++) {
+                int rgb = surface.paletteColor(surface.backgroundAt(column, row));
+                int red = rgb >> 16 & 0xFF;
+                int green = rgb >> 8 & 0xFF;
+                int blue = rgb & 0xFF;
+                float cellLeft = left - column * cellWidth;
+                float cellRight = cellLeft - cellWidth;
+                float cellTop = top - row * cellHeight;
+                float cellBottom = cellTop - cellHeight;
+                vertex(consumer, matrix, cellLeft, cellTop, red, green, blue);
+                vertex(consumer, matrix, cellLeft, cellBottom, red, green, blue);
+                vertex(consumer, matrix, cellRight, cellBottom, red, green, blue);
+                vertex(consumer, matrix, cellRight, cellTop, red, green, blue);
+            }
+        }
     }
 
     private static void vertex(VertexConsumer consumer, Matrix4f matrix, float x, float y,
@@ -69,32 +80,26 @@ public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<Mon
                 .endVertex();
     }
 
-    private static void drawText(PoseStack pose, MultiBufferSource buffers,
-                                 MonitorBlockEntity.WallRenderState wall) {
+    private static void drawText(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface) {
         pose.pushPose();
         pose.scale(-FONT_SCALE, -FONT_SCALE, FONT_SCALE);
 
         Font font = Minecraft.getInstance().font;
-        int foreground = 0xFF000000 | wall.foregroundColor();
+        float wallWidth = (float) surface.width() / MonitorBlockEntity.MAX_LINE_LEN;
+        float wallHeight = (float) surface.height() / MonitorBlockEntity.MAX_LINES;
         float left = -(0.5f - SCREEN_MARGIN) / FONT_SCALE;
         float top = -(0.5f - SCREEN_MARGIN) / FONT_SCALE;
-        float tilePitchX = 1.0f / FONT_SCALE;
-        float tilePitchY = 1.0f / FONT_SCALE;
-        List<String> lines = wall.lines();
+        float cellPitchX = (wallWidth - (2.0f * SCREEN_MARGIN)) / FONT_SCALE / surface.width();
+        float cellPitchY = (wallHeight - (2.0f * SCREEN_MARGIN)) / FONT_SCALE / surface.height();
 
-        for (int row = 0; row < wall.height() * MonitorBlockEntity.MAX_LINES; row++) {
-            String line = row < lines.size() ? lines.get(row) : "";
-            int tileRow = row / MonitorBlockEntity.MAX_LINES;
-            int localRow = row % MonitorBlockEntity.MAX_LINES;
-            for (int tileColumn = 0; tileColumn < wall.width(); tileColumn++) {
-                int start = tileColumn * MonitorBlockEntity.MAX_LINE_LEN;
-                if (start >= line.length()) break;
-                String part = line.substring(start,
-                        Math.min(line.length(), start + MonitorBlockEntity.MAX_LINE_LEN));
-                if (part.isBlank()) continue;
-                float x = left + tileColumn * tilePitchX;
-                float y = top + tileRow * tilePitchY + localRow * LINE_HEIGHT;
-                font.drawInBatch(part, x, y, foreground, false, pose.last().pose(), buffers,
+        for (int row = 0; row < surface.height(); row++) {
+            for (int column = 0; column < surface.width(); column++) {
+                char character = surface.characterAt(column, row);
+                if (character == ' ') continue;
+                int foreground = 0xFF000000 | surface.paletteColor(surface.foregroundAt(column, row));
+                float x = left + column * cellPitchX;
+                float y = top + row * Math.max(LINE_HEIGHT, cellPitchY);
+                font.drawInBatch(String.valueOf(character), x, y, foreground, false, pose.last().pose(), buffers,
                         Font.DisplayMode.POLYGON_OFFSET, 0, LightTexture.FULL_BRIGHT);
             }
         }

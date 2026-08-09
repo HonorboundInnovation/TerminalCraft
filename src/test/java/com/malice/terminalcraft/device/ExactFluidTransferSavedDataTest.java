@@ -3,7 +3,6 @@ package com.malice.terminalcraft.device;
 import net.minecraft.SharedConstants;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.templates.FluidTank;
@@ -21,8 +20,7 @@ public final class ExactFluidTransferSavedDataTest {
     private ExactFluidTransferSavedDataTest() {}
 
     public static void main(String[] args) {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
         roundTripPreservesReplayAndExactEscrow();
         malformedAndOversizedEntriesAreSkippedIndividually();
         oversizedCollectionsLoadToDeterministicBounds();

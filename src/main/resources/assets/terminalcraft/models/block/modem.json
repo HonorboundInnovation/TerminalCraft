@@ -1,9 +1,9 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "particle": "terminalcraft:block/modem",
-    "all": "terminalcraft:block/modem",
-    "side": "terminalcraft:block/modem_side"
+    "particle": "terminalcraft:block/modem_custom",
+    "all": "terminalcraft:block/modem_custom",
+    "side": "terminalcraft:block/modem_custom"
   },
   "elements": [
     {

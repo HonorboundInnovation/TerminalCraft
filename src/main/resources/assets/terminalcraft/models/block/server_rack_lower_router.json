@@ -1,8 +1,8 @@
 {
   "textures": {
-    "face": "terminalcraft:block/router_blade_front",
-    "casing": "terminalcraft:block/network_router_casing",
-    "particle": "terminalcraft:block/network_router_casing"
+    "face": "terminalcraft:block/network_router_face_custom",
+    "casing": "terminalcraft:block/network_router_face_custom",
+    "particle": "terminalcraft:block/network_router_face_custom"
   },
   "elements": [
     {

@@ -1,0 +1,27 @@
+{
+  "variants": {
+    "facing=north": {
+      "model": "terminalcraft:block/block_state_sensor"
+    },
+    "facing=south": {
+      "model": "terminalcraft:block/block_state_sensor",
+      "y": 180
+    },
+    "facing=east": {
+      "model": "terminalcraft:block/block_state_sensor",
+      "y": 90
+    },
+    "facing=west": {
+      "model": "terminalcraft:block/block_state_sensor",
+      "y": 270
+    },
+    "facing=up": {
+      "model": "terminalcraft:block/block_state_sensor",
+      "x": 270
+    },
+    "facing=down": {
+      "model": "terminalcraft:block/block_state_sensor",
+      "x": 90
+    }
+  }
+}

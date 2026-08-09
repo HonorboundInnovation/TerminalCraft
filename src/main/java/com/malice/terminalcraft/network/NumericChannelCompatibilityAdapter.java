@@ -10,7 +10,7 @@ import java.util.UUID;
  * claim acknowledgement or durable delivery.</p>
  */
 public final class NumericChannelCompatibilityAdapter {
-    public static final String PROTOCOL = "terminalcraft:rednet-channel";
+    public static final String PROTOCOL = RednetProtocol.CHANNEL.id();
     public static final String BROADCAST_DESTINATION = "*";
 
     private NumericChannelCompatibilityAdapter() {}

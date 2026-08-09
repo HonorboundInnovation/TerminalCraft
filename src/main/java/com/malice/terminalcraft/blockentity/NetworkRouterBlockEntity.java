@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.blockentity;
 
 import com.malice.terminalcraft.network.RednetNetworkName;
+import com.malice.terminalcraft.network.RednetNetwork;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -19,11 +20,16 @@ import java.util.Map;
 
 /** Persistent logical-network assignments for the six interfaces of a standalone RedNet router. */
 public class NetworkRouterBlockEntity extends BlockEntity {
+    private java.util.UUID routerId = java.util.UUID.randomUUID();
     private final EnumMap<Direction, String> interfaceNetworks = new EnumMap<>(Direction.class);
     private final EnumSet<Direction> disabledInterfaces = EnumSet.noneOf(Direction.class);
 
     public NetworkRouterBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.NETWORK_ROUTER_BLOCK_ENTITY.get(), pos, state);
+    }
+
+    public java.util.UUID getRouterId() {
+        return routerId;
     }
 
     /** Empty means automatic legacy routing for this face. */
@@ -76,6 +82,7 @@ public class NetworkRouterBlockEntity extends BlockEntity {
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
         PersistedDataVersions.stampCurrent(tag);
+        tag.putUUID("RouterId", routerId);
         CompoundTag interfaces = new CompoundTag();
         interfaceNetworks.forEach((face, network) -> interfaces.putString(face.getName(), network));
         if (!interfaces.isEmpty()) tag.put("Interfaces", interfaces);
@@ -87,6 +94,7 @@ public class NetworkRouterBlockEntity extends BlockEntity {
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
+        if (tag.hasUUID("RouterId")) routerId = tag.getUUID("RouterId");
         interfaceNetworks.clear();
         disabledInterfaces.clear();
         if (tag.contains("Interfaces", Tag.TAG_COMPOUND)) {
@@ -111,13 +119,21 @@ public class NetworkRouterBlockEntity extends BlockEntity {
     public void onLoad() {
         super.onLoad();
         if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            RednetNetwork.registerRouter(serverLevel, routerId, worldPosition);
             com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
         }
+    }
+
+    public static void serverTick(net.minecraft.world.level.Level level, BlockPos pos,
+                                  BlockState state, NetworkRouterBlockEntity router) {
+        if (level.isClientSide) return;
+        RednetNetwork.registerRouter(level, router.routerId, pos);
     }
 
     @Override
     public void setRemoved() {
         if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            RednetNetwork.unregisterRouter(serverLevel, routerId);
             com.malice.terminalcraft.network.WiredNetworkTopology.remove(serverLevel, worldPosition);
         }
         super.setRemoved();

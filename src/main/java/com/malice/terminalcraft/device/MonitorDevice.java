@@ -19,6 +19,12 @@ public interface MonitorDevice {
     /** Replaces one zero-based screen row without scrolling the remaining rows. */
     void setLine(int row, String text);
 
+    /** Optional persistent character-cell surface; null retains the legacy endpoint-local model. */
+    default TerminalBuffer terminalSurface() { return null; }
+
+    /** Updates legacy text from an authoritative character-cell surface without resetting cells. */
+    default void setLineFromSurface(int row, String text) { setLine(row, text); }
+
     /** 24-bit RGB foreground color used by the world renderer. */
     int foregroundColor();
 

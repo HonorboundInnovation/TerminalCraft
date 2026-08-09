@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build a route, service, and reliable-probe incident report.
-# The probe prints its message UUID; query it later with: modem delivery <uuid>
+# The probe message UUID is captured for immediate and later delivery diagnostics.
 # Usage: bash rednet-health-probe.sh <host> <port> <reply-port>
 if [ -z "$3" ]; then
   echo 'usage: rednet-health-probe.sh <host> <port> <reply-port>'
@@ -14,7 +14,9 @@ else
   if modem route "$1" >> /home/player/audits/rednet-health.txt; then
     echo route=reachable >> /home/player/audits/rednet-health.txt
     modem open "$3" >> /home/player/audits/rednet-health.txt
-    modem probe "$1" "$2" "$3" 'terminalcraft-health-check' >> /home/player/audits/rednet-health.txt
+    MESSAGE_ID=$(modem probe "$1" "$2" "$3" 'terminalcraft-health-check')
+    echo message_id=$MESSAGE_ID >> /home/player/audits/rednet-health.txt
+    modem delivery "$MESSAGE_ID" >> /home/player/audits/rednet-health.txt
   else
     echo route=unreachable >> /home/player/audits/rednet-health.txt
   fi

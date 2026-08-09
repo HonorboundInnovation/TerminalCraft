@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {"item": "terminalcraft:sensor_array"},
+    {"item": "minecraft:observer"}
+  ],
+  "result": {"item": "terminalcraft:machine_sensor"}
+}

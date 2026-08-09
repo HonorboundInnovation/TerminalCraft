@@ -100,6 +100,17 @@ public class VirtualFileSystem {
                 "monitor demo any\n";
         writeRawIfMissing("/home/player/programs/monitor_wall_auto.sh", adaptive);
 
+        String screensaver =
+                "#!/bin/bash\n" +
+                "# Runs one shared animated canvas across the complete connected monitor wall.\n" +
+                "monitor screensaver start any\n";
+        writeRawIfMissing("/home/player/programs/geometric_screensaver.sh", screensaver);
+        String colorScreensaver =
+                "#!/bin/bash\n" +
+                "# Runs the full-color shared animated canvas across the complete connected wall.\n" +
+                "monitor screensaver color any\n";
+        writeRawIfMissing("/home/player/programs/geometric_screensaver_color.sh", colorScreensaver);
+
         // Upgrade only recognizable stock versions. Player-created replacements are preserved.
         installOrUpgradeBundledProgram("/home/player/programs/monitor_demo.sh", adaptive,
                 "# General 2x2 monitor-wall smoke test");

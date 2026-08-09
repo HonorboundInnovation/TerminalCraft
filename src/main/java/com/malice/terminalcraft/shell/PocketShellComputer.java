@@ -129,6 +129,14 @@ public class PocketShellComputer implements ShellComputer {
         return RednetNetwork.receive(getLevel(), modemId(), max).stream().map(RednetNetwork.PendingMessage::format).toList();
     }
 
+    @Override
+    public boolean monitorRemote(String service, String encodedRequest) {
+        if (!(getLevel() instanceof ServerLevel) || modemOpenChannels().isEmpty()) return false;
+        return RednetNetwork.transmitService(getLevel(), modemId(), getBlockPos(), service, 0,
+                encodedRequest, true, PocketTerminalItem.MODEM_RANGE,
+                com.malice.terminalcraft.network.MonitorRemoteRequest.PROTOCOL);
+    }
+
     private UUID modemId() { return PocketTerminalItem.getOrCreateModemId(getStack()); }
     private static int clampChannel(int channel) { return Math.max(0, Math.min(65535, channel)); }
 }

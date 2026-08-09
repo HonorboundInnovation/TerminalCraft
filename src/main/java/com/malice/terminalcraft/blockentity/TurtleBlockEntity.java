@@ -149,6 +149,50 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     }
 
     @Override
+    public boolean hasBundledCable(String side) {
+        return findBundledCable(side) != null;
+    }
+
+    @Override
+    public int bundledSignal(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getSignal(channel);
+    }
+
+    @Override
+    public int bundledOutput(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getLocalOutput(channel);
+    }
+
+    @Override
+    public boolean setBundledOutput(String side, int channel, int strength) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        if (cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                || strength < 0 || strength > 15) return false;
+        cable.setLocalOutput(channel, strength);
+        return true;
+    }
+
+    @Nullable
+    private BundledCableBlockEntity findBundledCable(String side) {
+        if (level == null) return null;
+        if (side == null || side.isBlank() || "any".equalsIgnoreCase(side)) {
+            for (Direction direction : Direction.values()) {
+                BlockEntity blockEntity = level.getBlockEntity(worldPosition.relative(direction));
+                if (blockEntity instanceof BundledCableBlockEntity cable) return cable;
+            }
+            return null;
+        }
+        Direction direction = parseSide(side);
+        if (direction == null) return null;
+        BlockEntity blockEntity = level.getBlockEntity(worldPosition.relative(direction));
+        return blockEntity instanceof BundledCableBlockEntity cable ? cable : null;
+    }
+
+    @Override
     public List<String> listPeripherals() {
         List<String> found = new ArrayList<>();
         if (level == null) {
@@ -399,6 +443,36 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     }
 
     @Override
+    public String monitorScreensaver(String side, String action) {
+        MonitorBlockEntity monitor = findMonitor(side);
+        return monitor == null ? "" : MonitorScreensaver.command(monitor, action);
+    }
+
+    @Override
+    public boolean monitorRegisterService(String service, int port) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.registerMonitorService(service, port);
+    }
+
+    @Override
+    public boolean monitorUnregisterService(String service) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.unregisterMonitorService(service);
+    }
+
+    @Override
+    public List<String> monitorServices() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.monitorServices();
+    }
+
+    @Override
+    public boolean monitorRemote(String service, String encodedRequest) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.transmitMonitorService(service, encodedRequest);
+    }
+
+    @Override
     public boolean hasModem() {
         return findModem(null) != null;
     }
@@ -536,6 +610,30 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     }
 
     @Override
+    public boolean modemRegisterSensorService(String service, int port) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.registerSensorService(service, port);
+    }
+
+    @Override
+    public boolean modemUnregisterSensorService(String service) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.unregisterSensorService(service);
+    }
+
+    @Override
+    public List<String> modemSensorServices() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.sensorServices();
+    }
+
+    @Override
+    public boolean modemTransmitSensorService(String service, String operation, String channel, int replyPort) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.transmitSensorService(service, operation, channel, replyPort);
+    }
+
+    @Override
     public List<String> modemServices(int maximum) {
         ModemBlockEntity modem = findModem(null);
         return modem == null ? List.of() : modem.visibleServices(maximum);
@@ -551,6 +649,24 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     public List<String> modemReceive(int max) {
         ModemBlockEntity modem = findModem(null);
         return modem == null ? List.of() : modem.receiveMessages(max);
+    }
+
+    @Override
+    public List<String> modemStatus() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.statusDiagnostics();
+    }
+
+    @Override
+    public boolean modemAutomaticSetup() {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.automaticSetup();
+    }
+
+    @Override
+    public boolean modemSetAutomaticSetup(boolean enabled) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.setAutomaticSetup(enabled);
     }
 
     @Nullable

@@ -1,6 +1,6 @@
 {
   "textures": {
-    "face": "terminalcraft:block/terminal_front"
+    "face": "terminalcraft:block/terminal_front_custom"
   },
   "elements": [
     {

@@ -2,6 +2,7 @@ package com.malice.terminalcraft.blockentity;
 
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.registry.ModRegistries;
+import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
@@ -78,6 +79,7 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        PersistedDataVersions.stampCurrent(tag);
         int mask = 0;
         for (Direction face : faces) mask |= 1 << face.ordinal();
         tag.putInt("FaceMask", mask);
@@ -90,17 +92,37 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
         faces.clear();
         int mask = tag.getInt("FaceMask");
         for (Direction face : Direction.values()) {
-            if ((mask & 1 << face.ordinal()) != 0) faces.add(face);
+            if ((mask & 1 << face.ordinal()) != 0 && !faces.contains(face.getOpposite())) faces.add(face);
         }
         int[] stored = tag.getIntArray("FacePower");
         for (int i = 0; i < power.length; i++) {
-            power[i] = i < stored.length ? Math.max(0, Math.min(15, stored[i])) : 0;
+            Direction face = Direction.values()[i];
+            power[i] = faces.contains(face) && i < stored.length
+                    ? Math.max(0, Math.min(15, stored[i])) : 0;
         }
         // Legacy one-face worlds have no block-entity payload; retain the blockstate face.
         if (faces.isEmpty() && getBlockState().hasProperty(RedAlloyWireBlock.FACE)) {
             Direction legacyFace = getBlockState().getValue(RedAlloyWireBlock.FACE);
             faces.add(legacyFace);
             power[legacyFace.ordinal()] = getBlockState().getValue(RedAlloyWireBlock.POWER);
+        }
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        if (level == null || level.isClientSide) return;
+
+        // A chunk can be saved after support disappears while it is unloaded.
+        // Reuse the normal face-removal path so corrupt/stale multipart state
+        // cannot resurrect an unsupported face or retain stale power on reload.
+        for (Direction face : Set.copyOf(faces)) {
+            if (!RedAlloyWireBlock.canFaceSurvive(level, worldPosition, face)) {
+                RedAlloyWireBlock.removeFace(level, worldPosition, face, true);
+            }
+        }
+        if (level.getBlockEntity(worldPosition) == this && !faces.isEmpty()) {
+            RedAlloyWireBlock.recomputeAt(level, worldPosition);
         }
     }
 

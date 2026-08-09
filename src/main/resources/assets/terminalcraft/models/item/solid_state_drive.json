@@ -1,0 +1,237 @@
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
+  "textures": {
+    "particle": "#drive",
+    "drive": "terminalcraft:item/solid_state_drive"
+  },
+  "elements": [
+    {
+      "from": [
+        1,
+        2,
+        1
+      ],
+      "to": [
+        15,
+        14,
+        5
+      ],
+      "faces": {
+        "down": {
+          "texture": "#drive"
+        },
+        "up": {
+          "texture": "#drive"
+        },
+        "north": {
+          "texture": "#drive"
+        },
+        "south": {
+          "texture": "#drive"
+        },
+        "west": {
+          "texture": "#drive"
+        },
+        "east": {
+          "texture": "#drive"
+        }
+      }
+    },
+    {
+      "from": [
+        2,
+        3,
+        0
+      ],
+      "to": [
+        14,
+        13,
+        1
+      ],
+      "faces": {
+        "down": {
+          "texture": "#drive"
+        },
+        "up": {
+          "texture": "#drive"
+        },
+        "north": {
+          "texture": "#drive"
+        },
+        "south": {
+          "texture": "#drive"
+        },
+        "west": {
+          "texture": "#drive"
+        },
+        "east": {
+          "texture": "#drive"
+        }
+      }
+    },
+    {
+      "from": [
+        2,
+        1,
+        1
+      ],
+      "to": [
+        14,
+        2,
+        5
+      ],
+      "faces": {
+        "down": {
+          "texture": "#drive"
+        },
+        "up": {
+          "texture": "#drive"
+        },
+        "north": {
+          "texture": "#drive"
+        },
+        "south": {
+          "texture": "#drive"
+        },
+        "west": {
+          "texture": "#drive"
+        },
+        "east": {
+          "texture": "#drive"
+        }
+      }
+    },
+    {
+      "from": [
+        4,
+        2,
+        5
+      ],
+      "to": [
+        12,
+        4,
+        7
+      ],
+      "faces": {
+        "down": {
+          "texture": "#drive"
+        },
+        "up": {
+          "texture": "#drive"
+        },
+        "north": {
+          "texture": "#drive"
+        },
+        "south": {
+          "texture": "#drive"
+        },
+        "west": {
+          "texture": "#drive"
+        },
+        "east": {
+          "texture": "#drive"
+        }
+      }
+    }
+  ],
+  "display": {
+    "thirdperson_righthand": {
+      "rotation": [
+        10,
+        -45,
+        170
+      ],
+      "translation": [
+        0,
+        1.5,
+        -2.75
+      ],
+      "scale": [
+        0.55,
+        0.55,
+        0.55
+      ]
+    },
+    "thirdperson_lefthand": {
+      "rotation": [
+        10,
+        -45,
+        170
+      ],
+      "translation": [
+        0,
+        1.5,
+        -2.75
+      ],
+      "scale": [
+        0.55,
+        0.55,
+        0.55
+      ]
+    },
+    "firstperson_righthand": {
+      "rotation": [
+        0,
+        -45,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.4,
+        0.4,
+        0.4
+      ]
+    },
+    "firstperson_lefthand": {
+      "rotation": [
+        0,
+        -45,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.4,
+        0.4,
+        0.4
+      ]
+    },
+    "gui": {
+      "rotation": [
+        30,
+        225,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.7,
+        0.7,
+        0.7
+      ]
+    },
+    "ground": {
+      "translation": [
+        0,
+        2,
+        0
+      ],
+      "scale": [
+        0.25,
+        0.25,
+        0.25
+      ]
+    }
+  }
+}

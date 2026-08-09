@@ -40,6 +40,7 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 def sophisticatedModsDir = providers.gradleProperty('terminalcraft.sophisticatedModsDir').orNull
 def storageDrawersModsDir = providers.gradleProperty('terminalcraft.storageDrawersModsDir').orNull
 def refinedStorageModsDir = providers.gradleProperty('terminalcraft.refinedStorageModsDir').orNull
+def appliedEnergisticsModsDir = providers.gradleProperty('terminalcraft.appliedEnergisticsModsDir').orNull
 
 // Optional-mod GameTests link their public API types and are compiled only for the matching
 // focused profile. Production/minimal runtime remains free of test-class linkage to absent mods.
@@ -52,6 +53,9 @@ sourceSets.main.java {
     }
     if (refinedStorageModsDir == null || refinedStorageModsDir.isBlank()) {
         exclude 'com/malice/terminalcraft/device/RefinedStorageBridgeGameTests.java'
+    }
+    if (appliedEnergisticsModsDir == null || appliedEnergisticsModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/AppliedEnergisticsBridgeGameTests.java'
     }
 }
 repositories {
@@ -66,6 +70,9 @@ repositories {
     if (refinedStorageModsDir != null && !refinedStorageModsDir.isBlank()) {
         flatDir { dirs refinedStorageModsDir }
     }
+    if (appliedEnergisticsModsDir != null && !appliedEnergisticsModsDir.isBlank()) {
+        flatDir { dirs appliedEnergisticsModsDir }
+    }
 }
 
 dependencies {
@@ -77,6 +84,8 @@ dependencies {
     compileOnly fg.deobf("curse.maven:sophisticated-backpacks-422301:7853013")
     compileOnly fg.deobf("curse.maven:storage-drawers-223852:6994481")
     compileOnly fg.deobf("maven.modrinth:refined-storage:1.12.4")
+    compileOnly fg.deobf("curse.maven:create-328085:7178761")
+    compileOnly fg.deobf("curse.maven:applied-energistics-2-223794:7148487")
 
     // Optional local focused profile. No Sophisticated artifact is bundled or required by default.
     if (sophisticatedModsDir != null && !sophisticatedModsDir.isBlank()) {
@@ -111,6 +120,17 @@ dependencies {
             throw new GradleException("Expected exactly one refinedstorage-1.12.4.jar in ${refinedStorageModsDir}, found ${matches.size()}")
         }
         runtimeOnly fg.deobf("terminalcraft.focused:refinedstorage:1.12.4")
+    }
+
+    // Optional focused Applied Energistics 2 15.4.10 runtime; never bundled or required by default.
+    if (appliedEnergisticsModsDir != null && !appliedEnergisticsModsDir.isBlank()) {
+        def matches = fileTree(appliedEnergisticsModsDir) {
+            include 'appliedenergistics2-forge-15.4.10.jar'
+        }.files.toList().sort()
+        if (matches.size() != 1) {
+            throw new GradleException("Expected exactly one appliedenergistics2-forge-15.4.10.jar in ${appliedEnergisticsModsDir}, found ${matches.size()}")
+        }
+        runtimeOnly fg.deobf("terminalcraft.focused:appliedenergistics2-forge:15.4.10")
     }
 
 }
@@ -151,11 +171,23 @@ publishing {
 
 tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 
+tasks.withType(JavaExec).configureEach {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
 def headlessTests = [
         shellSelfTest: ['Run BashShell headless self-test', 'com.malice.terminalcraft.shell.BashShellSelfTest'],
         shellCharacterizationTest: ['Run external BashShell compatibility characterization tests', 'com.malice.terminalcraft.shell.BashShellCharacterizationTest'],
         shellArchitectureExtractionTest: ['Run composed host-service and shell command-module tests', 'com.malice.terminalcraft.shell.ShellArchitectureExtractionTest'],
+        bashShellSurfaceTest: ['Run shared shell character-cell surface tests', 'com.malice.terminalcraft.shell.BashShellSurfaceTest'],
         bundledWireShellCommandTest: ['Run bundled-control cable shell bridge tests', 'com.malice.terminalcraft.shell.BundledWireShellCommandTest'],
+        plcProgramTest: ['Run bounded PLC compiler and scan-cycle tests', 'com.malice.terminalcraft.plc.PlcProgramTest'],
+        sensorModelTest: ['Run universal sensor channel and PLC normalization tests', 'com.malice.terminalcraft.sensor.SensorModelTest'],
+        nasModelTest: ['Run tiered NAS media capacity and progression tests', 'com.malice.terminalcraft.item.NasModelTest'],
+        plcLadderModelTest: ['Run source-preserving PLC ladder projection tests', 'com.malice.terminalcraft.client.PlcLadderModelTest'],
+        wireInteractionSupportTest: ['Run wire wrench-interaction compatibility tests', 'com.malice.terminalcraft.block.WireInteractionSupportTest'],
         serverShellCommandTest: ['Run server rack shell command tests', 'com.malice.terminalcraft.shell.ServerShellCommandTest'],
         serverJobSchedulerTest: ['Run persistent bounded server job scheduler tests', 'com.malice.terminalcraft.server.ServerJobSchedulerTest'],
         commandSubmissionGuardTest: ['Run authoritative command packet admission tests', 'com.malice.terminalcraft.network.CommandSubmissionGuardTest'],
@@ -171,6 +203,8 @@ def headlessTests = [
         wiredSubnetModelTest: ['Run deterministic wired subnet and router-interface model tests', 'com.malice.terminalcraft.network.WiredSubnetModelTest'],
         rednetHostDirectoryTest: ['Run RedNet host-name and directory tests', 'com.malice.terminalcraft.network.RednetHostDirectoryTest'],
         rednetNetworkNameTest: ['Run RedNet logical network-name validation tests', 'com.malice.terminalcraft.network.RednetNetworkNameTest'],
+        rednetAutoConfigurationTest: ['Run beginner-friendly RedNet automatic setup tests', 'com.malice.terminalcraft.network.RednetAutoConfigurationTest'],
+        rednetDhcpServerTest: ['Run bounded RedNet DHCP-equivalent lease tests', 'com.malice.terminalcraft.network.RednetDhcpServerTest'],
         rednetServiceDirectoryTest: ['Run RedNet named-service directory tests', 'com.malice.terminalcraft.network.RednetServiceDirectoryTest'],
         rednetRuntimeScopeTest: ['Run RedNet logical-server and dimension isolation tests', 'com.malice.terminalcraft.network.RednetRuntimeScopeTest'],
         rednetShellCommandTest: ['Run RedNet named-host shell command tests', 'com.malice.terminalcraft.shell.RednetShellCommandTest'],
@@ -182,13 +216,18 @@ def headlessTests = [
         deviceAuthorizationTest: ['Run central device authorization decision tests', 'com.malice.terminalcraft.device.DeviceAuthorizationTest'],
         deviceApiCharacterizationTest: ['Run unified device API model and lifecycle characterization tests', 'com.malice.terminalcraft.device.DeviceApiCharacterizationTest'],
         deviceEventRuntimeTest: ['Run bounded device event subscription runtime tests', 'com.malice.terminalcraft.device.DeviceEventRuntimeTest'],
+        deviceEventWaitTest: ['Run bounded cooperative event-wait tests', 'com.malice.terminalcraft.device.DeviceEventWaitTest'],
+        deviceEventSchedulerBridgeTest: ['Run scheduler-backed device event-wait tests', 'com.malice.terminalcraft.server.DeviceEventSchedulerBridgeTest'],
         deviceInvocationBudgetTest: ['Run shared logical-tick device invocation budget tests', 'com.malice.terminalcraft.device.DeviceInvocationBudgetTest'],
         terminalHostDeviceEndpointTest: ['Run read-only TerminalHost device adapter characterization tests', 'com.malice.terminalcraft.device.TerminalHostDeviceEndpointTest'],
         deviceShellCommandTest: ['Run unified device shell command characterization tests', 'com.malice.terminalcraft.device.DeviceShellCommandTest'],
         integratedStorageShellCommandTest: ['Run Sophisticated Storage and Storage Drawers shell program tests', 'com.malice.terminalcraft.device.IntegratedStorageShellCommandTest'],
         monitorDeviceEndpointTest: ['Run monitor Device API adapter characterization tests', 'com.malice.terminalcraft.device.MonitorDeviceEndpointTest'],
+        monitorScreensaverTest: ['Run global geometric monitor-wall screensaver tests', 'com.malice.terminalcraft.blockentity.MonitorScreensaverTest'],
+        monitorWidgetsTest: ['Run bounded monitor widget rendering tests', 'com.malice.terminalcraft.device.MonitorWidgetsTest'],
         textEditorBufferTest: ['Run GUI script editor buffer tests', 'com.malice.terminalcraft.client.TextEditorBufferTest'],
         terminalBufferTest: ['Run ComputerCraft-compatible terminal buffer tests', 'com.malice.terminalcraft.device.TerminalBufferTest'],
+        terminalUiLayoutTest: ['Run bounded terminal viewport and widget layout tests', 'com.malice.terminalcraft.device.TerminalUiLayoutTest'],
         peripheralDeviceEndpointTest: ['Run modem and disk-drive Device API adapter tests', 'com.malice.terminalcraft.device.PeripheralDeviceEndpointTest'],
         genericCapabilityDeviceEndpointTest: ['Run generic Forge capability Device API adapter tests', 'com.malice.terminalcraft.device.GenericCapabilityDeviceEndpointTest'],
         genericItemStorageTest: ['Run generic item storage query and pagination tests', 'com.malice.terminalcraft.device.GenericItemStorageTest'],
@@ -210,6 +249,9 @@ def headlessTests = [
         exactFluidTransferServiceTest: ['Run exact fluid transfer service authority and result-mapping tests', 'com.malice.terminalcraft.device.ExactFluidTransferServiceTest'],
         exactFluidAccessContractTest: ['Run public exact fluid transfer and escrow access contract tests', 'com.malice.terminalcraft.device.ExactFluidAccessContractTest'],
         optionalIntegrationsTest: ['Run optional integration registry absence-safety tests', 'com.malice.terminalcraft.integration.OptionalIntegrationsTest'],
+        optionalMutationPolicyContextTest: ['Run caller-aware optional mutation policy tests', 'com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistryTest'],
+        monitorRemoteRequestTest: ['Run bounded remote-monitor protocol tests', 'com.malice.terminalcraft.network.MonitorRemoteRequestTest'],
+        wirelessDisplayLinkChannelTest: ['Run wireless display-link channel contract tests', 'com.malice.terminalcraft.blockentity.WirelessDisplayLinkChannelTest'],
         terminalChunkTicketPolicyTest: ['Run bounded terminal chunk-ticket policy tests', 'com.malice.terminalcraft.world.TerminalChunkTicketPolicyTest']
 ]
 

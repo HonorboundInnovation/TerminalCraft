@@ -53,6 +53,9 @@ public final class TerminalCraftMod {
             event.accept(com.malice.terminalcraft.registry.ModRegistries.NETWORK_ROUTER_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.FLOPPY_DISK.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.POCKET_TERMINAL.get());
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_ITEM.get());
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.WIRELESS_DISPLAY_LINK_ITEM.get());
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.VIDEO_CABLE_ITEM.get());
         }
     }
 
@@ -102,12 +105,16 @@ public final class TerminalCraftMod {
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerTick(final net.minecraftforge.event.TickEvent.ServerTickEvent event) {
         if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+            com.malice.terminalcraft.blockentity.MonitorScreensaver.tick(event.getServer());
+            com.malice.terminalcraft.blockentity.DisplayTransportRuntime.tick(event.getServer());
             com.malice.terminalcraft.world.TerminalChunkLoader.reconcile(event.getServer());
         }
     }
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerStopped(final net.minecraftforge.event.server.ServerStoppedEvent event) {
+        com.malice.terminalcraft.blockentity.MonitorScreensaver.clear(event.getServer());
+        com.malice.terminalcraft.blockentity.DisplayTransportRuntime.clear(event.getServer());
         com.malice.terminalcraft.device.ServerDeviceManager.clear(event.getServer());
         com.malice.terminalcraft.network.RednetNetwork.clear(event.getServer());
         com.malice.terminalcraft.network.WiredNetworkTopology.clear(event.getServer());
@@ -128,6 +135,12 @@ public final class TerminalCraftMod {
                 net.minecraft.client.gui.screens.MenuScreens.register(
                         com.malice.terminalcraft.registry.ModRegistries.TERMINAL_MENU.get(),
                         com.malice.terminalcraft.client.TerminalScreen::new);
+                net.minecraft.client.gui.screens.MenuScreens.register(
+                        com.malice.terminalcraft.registry.ModRegistries.DISPLAY_DIAGNOSTICS_MENU.get(),
+                        com.malice.terminalcraft.client.DisplayDiagnosticsScreen::new);
+                net.minecraft.client.gui.screens.MenuScreens.register(
+                        com.malice.terminalcraft.registry.ModRegistries.PLC_PROGRAMMING_MENU.get(),
+                        com.malice.terminalcraft.client.PlcProgrammingScreen::new);
                 net.minecraft.client.renderer.blockentity.BlockEntityRenderers.register(
                         com.malice.terminalcraft.registry.ModRegistries.MONITOR_BLOCK_ENTITY.get(),
                         com.malice.terminalcraft.client.MonitorBlockEntityRenderer::new);

@@ -31,13 +31,15 @@ A prepared floppy can also carry scripts between computers. The deployment examp
 
 ## Safety rules used by these examples
 
-- No command substitution, arithmetic expansion, functions, arrays, globbing, or external operating-system programs.
-- No reliance on `exit` to abort a script; current `exit` is not a control-flow terminator.
+- Command substitution and signed-integer arithmetic use TerminalCraft's explicit depth, output,
+  expression-size, and overflow bounds. Functions, arrays, globbing, and external programs remain unavailable.
+- `exit`, `break`, and `continue` are real control-flow operations in 1.0.18.
 - Required-argument checks wrap the operation in `if`/`else`.
 - Destructive or mutating storage work simulates first where the API supports simulation.
 - Exact transfers and crafting submissions require caller-generated operation UUIDs. Preserve an operation UUID for retries of the same logical request; never reuse it for a different request.
 - A successful storage command can still report a partial result. Read the result, especially JSON output.
-- RedNet probes are asynchronous. The script records the returned message UUID, but TerminalCraft has no command substitution to automatically feed it into `modem delivery`.
+- RedNet probes are asynchronous. Scripts can capture their message UUID with `$(...)` and feed it
+  into `modem delivery`; an acknowledgement still proves transport receipt rather than application completion.
 - Event subscriptions and jobs return UUIDs that must be recorded and used in later commands.
 - Event queues, network queues, scheduler work, scripts, loops, and diagnostics are bounded.
 
@@ -45,7 +47,8 @@ A prepared floppy can also carry scripts between computers. The deployment examp
 
 | Script | Purpose | Arguments / important output |
 |---|---|---|
-| `safe-turtle-tunnel.sh` | Excavates up to 16 tunnel steps, records every stage, and disables later iterations after the first failure | Writes `/home/player/tunnel-run.log` |
+| `safe-turtle-tunnel.sh` | Excavates up to 16 tunnel steps and stops immediately after the first failure | Writes `/home/player/tunnel-run.log` |
+| `production-cell-check.sh` | Exercises one visible storage/wire/monitor control-plane workflow | `<storage> <item-id> <wire-side> <channel>` |
 | `storage-audit-json.sh` | Captures bounded storage metadata and one aggregate query page in JSON | `<device-selector> [namespace]` |
 | `safe-storage-extract.sh` | Simulates and then performs one extraction, preserving both structured results | `<device> <item-id> <count>` |
 | `exact-item-transfer.sh` | Runs/reconciles an idempotent exact item transfer | `<operation-uuid> <source-uuid> <destination-uuid> <item-id> <count>` |
@@ -66,7 +69,9 @@ Run:
 bash /home/player/bin/safe-turtle-tunnel.sh
 ```
 
-The script uses an `ACTIVE` flag because TerminalCraft does not currently provide Bash `break`, arithmetic counters, or a terminating `exit`. Every loop iteration checks the flag. A failed dig, movement, or ceiling operation writes a specific failure stage and prevents later iterations from changing the world.
+The script uses `break` to stop at the first failed stage and records the completed-step count with
+bounded arithmetic. A failed dig, movement, or ceiling operation writes a specific failure stage
+and prevents later iterations from changing the world.
 
 Review the log:
 
@@ -144,11 +149,16 @@ Submit a request:
 bash /home/player/bin/crafting-submit.sh <device-uuid> <fresh-operation-uuid> minecraft:iron_ingot 32
 ```
 
-The output contains a stable TerminalCraft job UUID. Because command substitution is unavailable, copy that UUID into later commands:
+The output contains a stable TerminalCraft job UUID. Capture it directly or copy it into later commands:
 
 ```sh
 device call <device-uuid> crafting.status <job-uuid>
 device call <device-uuid> crafting.cancel <job-uuid>
+```
+
+```sh
+JOB=$(device call <device-uuid> crafting.submit <operation-uuid> minecraft:iron_ingot 32)
+device call <device-uuid> crafting.status "$JOB"
 ```
 
 Reusing the operation UUID with the same request performs idempotent replay/reconciliation. Reusing it for different output or amount is a conflict.
@@ -169,6 +179,11 @@ The script configures:
 - reply port 81;
 - named `status` service;
 - computer label and monitor status.
+
+For a first network, the script is optional: newly placed modems already open channel 42, receive
+a stable `node-...` hostname, and renew a bounded RedNet lease. Check that profile with `modem
+status`, send a smoke test with `modem send 'hello network'`, and opt into explicit commissioning
+only when a named service or segmented logical network is needed.
 
 Probe it from another reachable node:
 
@@ -207,6 +222,14 @@ device events unsubscribe <subscription-uuid>
 ```
 
 Subscriptions are caller-owned, bounded, best-effort, and do not survive logical-server restart.
+
+For server-rack continuations, use the programmatic `DeviceEventWaitAccess` surface rather than a
+wall-clock shell sleep. Start a wait with the current logical game tick and a timeout of at most
+1,200 ticks, persist the returned `wait_id` in the scheduler continuation, and return
+`ServerJobScheduler.StepResult.waitUntil(wake_at, version, continuation)`. Poll the token when the
+job is selected again. `DeviceEventSchedulerBridge` installs the publication wake callback so a
+matching event makes the queued job eligible before its timeout; all normal fairness, cancellation,
+and per-tick execution budgets remain authoritative.
 
 ## 7. Server-rack job batch
 
@@ -274,22 +297,21 @@ The report intentionally uses bounded listings. It contains operational metadata
 Use these patterns:
 
 ```sh
-# Required arguments: wrap all real work in else because exit does not abort.
+# Required arguments: exit immediately when invocation is invalid.
 if [ -z "$1" ]; then
   echo 'usage: script.sh <argument>'
-else
-  echo "using $1"
+  exit 2
 fi
+echo "using $1"
 
-# Failure-aware state without break/arithmetic.
-ACTIVE=yes
+# Failure-aware state with bounded arithmetic and loop control.
+FAILED=0
 for step in 1 2 3 4; do
-  if [ "$ACTIVE" = yes ]; then
-    if some-command; then
-      echo step=$step,status=ok
-    else
-      ACTIVE=no
-    fi
+  if some-command; then
+    echo step=$step,status=ok
+  else
+    FAILED=$((FAILED + 1))
+    break
   fi
 done
 

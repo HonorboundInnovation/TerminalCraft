@@ -39,6 +39,7 @@ public final class TextEditorBuffer {
     }
 
     public void markSaved() { dirty = false; }
+    public void markDirty() { dirty = true; }
 
     public void selectAll() { anchor = 0; cursor = text.length(); }
 

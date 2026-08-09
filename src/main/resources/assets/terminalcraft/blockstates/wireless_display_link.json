@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "terminalcraft:block/wireless_display_link" }
+  }
+}

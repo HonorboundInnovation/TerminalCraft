@@ -5,7 +5,6 @@ import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.device.GenericCraftingService;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 
@@ -17,8 +16,7 @@ public final class RefinedStorageCraftingServiceTest {
     private RefinedStorageCraftingServiceTest() {}
 
     public static void main(String[] args) {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
+        com.malice.terminalcraft.testsupport.HeadlessMinecraftBootstrap.initialize();
         DeviceCallContext alice = new DeviceCallContext(UUID.randomUUID(), "alice",
                 Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
 

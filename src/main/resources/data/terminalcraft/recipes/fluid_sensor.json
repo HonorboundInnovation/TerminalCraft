@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {"item": "terminalcraft:sensor_array"},
+    {"item": "minecraft:bucket"}
+  ],
+  "result": {"item": "terminalcraft:fluid_sensor"}
+}

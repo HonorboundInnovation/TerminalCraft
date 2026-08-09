@@ -77,8 +77,9 @@ public final class ServerDeviceManager {
         return state(level.getServer()).registry.publishEvent(binding.deviceId, type, gameTime, payload);
     }
 
-    private static void ensureRegistered(BlockEntity owner, UUID deviceId, String address,
-                                         java.util.function.Supplier<DeviceEndpoint> endpointFactory) {
+    /** Registers a custom endpoint while retaining the same lifecycle and UUID collision rules. */
+    public static void ensureRegistered(BlockEntity owner, UUID deviceId, String address,
+                                        java.util.function.Supplier<DeviceEndpoint> endpointFactory) {
         Objects.requireNonNull(owner, "owner");
         Objects.requireNonNull(deviceId, "deviceId");
         Objects.requireNonNull(address, "address");

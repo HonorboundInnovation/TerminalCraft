@@ -5,9 +5,12 @@ import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.network.chat.Component;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.Level;
@@ -114,16 +117,14 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
     @SuppressWarnings("deprecation")
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
         if (UPDATING.get()) return 0;
-        return level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire
-                ? wire.maximumPower() : state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getDirectSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
         if (UPDATING.get()) return 0;
-        if (level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) return wire.power(direction);
-        return direction == state.getValue(FACE) ? state.getValue(POWER) : 0;
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
@@ -159,6 +160,19 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
             return false;
         }
         return super.onDestroyedByPlayer(state, level, pos, player, willHarvest, fluid);
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
+                                 InteractionHand hand, BlockHitResult hit) {
+        if (!WireInteractionSupport.isWrench(player.getItemInHand(hand))) return InteractionResult.PASS;
+        if (!level.isClientSide) {
+            Direction face = targetedFace(level, pos, player.getEyePosition(), hit.getLocation());
+            if (face == null) face = state.getValue(FACE);
+            player.displayClientMessage(Component.literal(diagnostic(level, pos, face)), false);
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
     }
 
     /** Finds the first occupied face slab intersected by a world-space ray. */
@@ -231,6 +245,46 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         return level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire ? wire.power(face) : 0;
     }
 
+    /**
+     * Returns the signal exposed toward an adjacent block. A mounted surface wire only emits in
+     * the plane of one of its occupied faces; it must not leak through its support or outward
+     * normal. Multipart spaces use the strongest face that can legally emit toward the requested
+     * direction. Both vanilla weak and direct queries use this same directional contract.
+     */
+    private static int outputPower(BlockGetter level, BlockPos pos, BlockState state,
+                                   Direction direction) {
+        if (direction == null) return 0;
+        if (level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) {
+            int maximum = 0;
+            for (Direction face : wire.faces()) {
+                if (isOutputDirection(face, direction)) maximum = Math.max(maximum, wire.power(face));
+            }
+            return maximum;
+        }
+        return state.hasProperty(FACE) && isOutputDirection(state.getValue(FACE), direction)
+                ? state.getValue(POWER) : 0;
+    }
+
+    private static boolean isOutputDirection(Direction face, Direction direction) {
+        return face != null && direction != null && face.getAxis() != direction.getAxis();
+    }
+
+    /** Bounded player-facing inspection for one selected multipart face. */
+    public static String diagnostic(BlockGetter level, BlockPos pos, Direction face) {
+        if (!(level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) || !wire.hasFace(face)) {
+            return "Red Alloy Wire: unavailable";
+        }
+        BlockState rendered = renderState(level, pos, face);
+        String connections = java.util.Arrays.stream(planeDirections(face))
+                .filter(direction -> isConnected(rendered, direction))
+                .map(direction -> direction.getName().toLowerCase(java.util.Locale.ROOT))
+                .collect(java.util.stream.Collectors.joining(","));
+        if (connections.isEmpty()) connections = "none";
+        return "Red Alloy Wire face=" + face.getName().toLowerCase(java.util.Locale.ROOT)
+                + " power=" + wire.power(face) + " faces=" + wire.faceCount()
+                + " links=" + connections;
+    }
+
     /** State used by the renderer for one occupied face, including that face's four connection arms. */
     public static BlockState renderState(BlockGetter level, BlockPos pos, Direction face) {
         BlockState state = ModRegistries.RED_ALLOY_WIRE_BLOCK.get().defaultBlockState()
@@ -239,8 +293,12 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         Node node = new Node(pos, face);
         Set<Node> neighbors = connectedNodes(accessor, node);
         for (Direction direction : Direction.values()) {
-            boolean connected = direction.getAxis() != face.getAxis()
-                    && neighbors.stream().anyMatch(next -> armDirection(node, next) == direction);
+            if (direction.getAxis() == face.getAxis()) continue;
+            BlockPos neighborPos = pos.relative(direction);
+            boolean device = accessor.getBlockState(neighborPos)
+                    .canRedstoneConnectTo(accessor, neighborPos, direction);
+            boolean connected = device
+                    || neighbors.stream().anyMatch(next -> armDirection(node, next) == direction);
             state = state.setValue(CableShapeSupport.property(direction), connected);
         }
         return state;
@@ -257,6 +315,7 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         Direction startFace = startWire.faces().stream().findFirst().orElse(null);
         if (startFace == null) return;
 
+        Set<BlockPos> changedPositions = new HashSet<>();
         UPDATING.set(true);
         try {
             Set<Node> component = collectComponent(level, new Node(start, startFace));
@@ -279,7 +338,6 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
                     pending.addLast(next);
                 }
             }
-            Set<BlockPos> changedPositions = new HashSet<>();
             for (Node node : component) {
                 if (level.getBlockEntity(node.pos()) instanceof RedAlloyWireBlockEntity wire) {
                     wire.setPower(node.face(), powers.getOrDefault(node, 0));
@@ -288,10 +346,15 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
             }
             for (BlockPos pos : changedPositions) {
                 if (level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) syncPrimaryState(level, pos, wire);
-                level.updateNeighborsAt(pos, ModRegistries.RED_ALLOY_WIRE_BLOCK.get());
             }
         } finally {
             UPDATING.set(false);
+        }
+        // Notify only after feedback suppression is released. Vanilla devices commonly sample
+        // their neighbor synchronously from neighborChanged; notifying inside the guarded section
+        // made a newly powered wire report zero to those receivers.
+        for (BlockPos pos : changedPositions) {
+            level.updateNeighborsAt(pos, ModRegistries.RED_ALLOY_WIRE_BLOCK.get());
         }
     }
 
@@ -374,10 +437,10 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         Direction primary = wire.hasFace(level.getBlockState(pos).getValue(FACE))
                 ? level.getBlockState(pos).getValue(FACE) : wire.faces().iterator().next();
         BlockState rendered = renderState(level, pos, primary).setValue(POWER, wire.maximumPower());
-        if (level.getBlockState(pos) != rendered) level.setBlock(pos, rendered, Block.UPDATE_CLIENTS);
+        if (!level.getBlockState(pos).equals(rendered)) level.setBlock(pos, rendered, Block.UPDATE_CLIENTS);
     }
 
-    private static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
+    public static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
         BlockPos support = pos.relative(face.getOpposite());
         return level.getBlockState(support).isFaceSturdy(level, support, face);
     }

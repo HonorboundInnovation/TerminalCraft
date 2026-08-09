@@ -1,5 +1,6 @@
 package com.malice.terminalcraft.shell;
 
+import com.malice.terminalcraft.device.TerminalBuffer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -10,6 +11,9 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public interface ShellComputer extends TerminalHost {
     BashShell getShell();
+
+    /** Shared bounded character-cell view used by passive terminal-screen clients. */
+    default TerminalBuffer terminalSurface() { return getShell().terminalSurface(); }
 
     void markShellChanged();
 

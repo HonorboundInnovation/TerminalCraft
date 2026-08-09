@@ -25,7 +25,11 @@ public final class OptionalIntegrations {
             new Definition("storage_drawers_metadata", "storagedrawers",
                     "com.malice.terminalcraft.integration.storagedrawers.StorageDrawersIntegration"),
             new Definition("refined_storage_bridge", "refinedstorage",
-                    "com.malice.terminalcraft.integration.refinedstorage.RefinedStorageIntegration")
+                    "com.malice.terminalcraft.integration.refinedstorage.RefinedStorageIntegration"),
+            new Definition("applied_energistics_bridge", "ae2",
+                    "com.malice.terminalcraft.integration.appliedenergistics.AppliedEnergisticsIntegration"),
+            new Definition("create_monitor_display_target", "create",
+                    "com.malice.terminalcraft.integration.create.CreateMonitorIntegration")
     );
     private static final Set<String> INITIALIZED = new HashSet<>();
 

@@ -1,5 +1,7 @@
 package com.malice.terminalcraft.device;
 
+import net.minecraft.nbt.CompoundTag;
+
 /** Focused headless regression coverage for ComputerCraft-compatible terminal semantics. */
 public final class TerminalBufferTest {
     private TerminalBufferTest() {}
@@ -54,6 +56,50 @@ public final class TerminalBufferTest {
         expectFailure(() -> terminal.setTextScale(2.25), "invalid scale increment");
         terminal.setPaletteColor(4, 0x123456);
         assertEquals(0x123456, terminal.paletteColor(4), "palette mutation");
+
+        TerminalBuffer revisioned = new TerminalBuffer(3, 2);
+        long initialRevision = revisioned.revision();
+        TerminalBuffer.SurfaceDelta initial = revisioned.deltaSince(0, 16);
+        assertTrue(initial.complete(), "initial surface delta is complete");
+        assertEquals(6, initial.cells().size(), "initial surface includes every cell");
+        assertEquals(initialRevision, initial.toRevision(), "initial surface revision");
+        TerminalBuffer.SurfaceDelta pageOne = revisioned.deltaSince(0, 2, 0);
+        TerminalBuffer.SurfaceDelta pageTwo = revisioned.deltaSince(0, 2, pageOne.nextOffset());
+        TerminalBuffer.SurfaceDelta pageThree = revisioned.deltaSince(0, 2, pageTwo.nextOffset());
+        assertTrue(!pageOne.complete() && !pageTwo.complete() && pageThree.complete(),
+                "large initial surfaces paginate to a complete acknowledgement");
+        assertEquals(6, pageOne.totalCells(), "paged delta reports total changed cells");
+        assertEquals(2, pageThree.cells().size(), "final page contains the remaining cells");
+        revisioned.setCursor(2, 2);
+        revisioned.write("XY");
+        TerminalBuffer.SurfaceDelta capped = revisioned.deltaSince(initialRevision, 1);
+        assertTrue(!capped.complete(), "oversized delta reports an incomplete transfer");
+        assertEquals(initialRevision, capped.toRevision(), "incomplete delta does not advance acknowledgement");
+        TerminalBuffer.SurfaceDelta update = revisioned.deltaSince(initialRevision, 2);
+        assertTrue(update.complete(), "bounded cell delta is complete");
+        assertEquals(2, update.cells().size(), "delta contains only changed cells");
+        assertEquals(4, update.cursorX(), "delta carries cursor metadata");
+        assertEquals(2, update.cursorY(), "delta carries cursor metadata row");
+
+        revisioned.setCursorBlink(true);
+        revisioned.setTextColor(2);
+        revisioned.setBackgroundColor(3);
+        revisioned.setTextScale(2.5);
+        revisioned.setPaletteColor(4, 0x123456);
+        CompoundTag saved = revisioned.save(new CompoundTag());
+        TerminalBuffer restored = new TerminalBuffer(3, 2);
+        assertTrue(restored.load(saved), "valid surface NBT loads");
+        assertEquals(revisioned.revision(), restored.revision(), "surface revision persists");
+        assertEquals(revisioned.line(2), restored.line(2), "surface text persists");
+        assertEquals(revisioned.foregroundLine(2), restored.foregroundLine(2), "cell foreground persists");
+        assertEquals(revisioned.backgroundLine(2), restored.backgroundLine(2), "cell background persists");
+        assertTrue(restored.cursorBlink(), "cursor blink persists");
+        assertEquals(2.5, restored.textScale(), "text scale persists");
+        assertEquals(0x123456, restored.paletteColor(4), "palette persists");
+        CompoundTag malformed = new CompoundTag();
+        malformed.putInt("Width", 99);
+        malformed.putInt("Height", 2);
+        assertTrue(!restored.load(malformed), "malformed surface NBT is rejected");
 
         System.out.println("Terminal buffer tests: OK");
     }

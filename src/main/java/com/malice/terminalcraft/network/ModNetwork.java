@@ -4,6 +4,10 @@ import com.malice.terminalcraft.Config;
 import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.TerminalCraftMod;
 import com.malice.terminalcraft.menu.TerminalMenu;
+import com.malice.terminalcraft.menu.DisplayDiagnosticsMenu;
+import com.malice.terminalcraft.menu.PlcProgrammingMenu;
+import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.plc.PlcProgram;
 import com.malice.terminalcraft.shell.BashShell;
 import com.malice.terminalcraft.shell.PocketShellComputer;
 import com.malice.terminalcraft.shell.ShellComputer;
@@ -39,6 +43,9 @@ public final class ModNetwork {
     static final int SHELL_SYNC_PACKET_ID = 1;
     static final int EDITOR_ACTION_PACKET_ID = 2;
     static final int EDITOR_RESULT_PACKET_ID = 3;
+    static final int DISPLAY_CONFIG_PACKET_ID = 4;
+    static final int PLC_ACTION_PACKET_ID = 5;
+    static final int PLC_RESULT_PACKET_ID = 6;
 
     private static final int MAX_COMMAND_PACKET_LENGTH = 4096;
     private static final CommandSubmissionGuard COMMAND_GUARD = new CommandSubmissionGuard();
@@ -80,6 +87,30 @@ public final class ModNetwork {
                 EditorResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                DISPLAY_CONFIG_PACKET_ID,
+                DisplayConfigPacket.class,
+                DisplayConfigPacket::encode,
+                DisplayConfigPacket::decode,
+                DisplayConfigPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                PLC_ACTION_PACKET_ID,
+                PlcActionPacket.class,
+                PlcActionPacket::encode,
+                PlcActionPacket::decode,
+                PlcActionPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
+        CHANNEL.registerMessage(
+                PLC_RESULT_PACKET_ID,
+                PlcResultPacket.class,
+                PlcResultPacket::encode,
+                PlcResultPacket::decode,
+                PlcResultPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_CLIENT)
+        );
         registered = true;
     }
 
@@ -95,6 +126,183 @@ public final class ModNetwork {
 
     public static void sendEditorClose(int containerId) {
         CHANNEL.sendToServer(new EditorActionPacket(containerId, EditorAction.CLOSE, ""));
+    }
+
+    public static void sendDisplayConfig(int containerId, net.minecraft.core.BlockPos position,
+                                         String channel, boolean source) {
+        CHANNEL.sendToServer(new DisplayConfigPacket(containerId, position, channel, source));
+    }
+
+    public static void sendPlcCompile(int containerId, String source) {
+        sendPlcAction(containerId, PlcAction.COMPILE, source, -1);
+    }
+
+    public static void sendPlcAction(int containerId, PlcAction action) {
+        sendPlcAction(containerId, action, "", -1);
+    }
+
+    public static void sendPlcSlot(int containerId, PlcAction action, int slot, String source) {
+        sendPlcAction(containerId, action, source, slot);
+    }
+
+    private static void sendPlcAction(int containerId, PlcAction action, String source, int slot) {
+        CHANNEL.sendToServer(new PlcActionPacket(containerId, action, source, slot));
+    }
+
+    /** Server-side channel edit from the display diagnostics screen. */
+    public static final class DisplayConfigPacket {
+        private static final int MAX_CHANNEL_LENGTH = 48;
+        private final int containerId;
+        private final net.minecraft.core.BlockPos position;
+        private final String channel;
+        private final boolean source;
+
+        private DisplayConfigPacket(int containerId, net.minecraft.core.BlockPos position,
+                                    String channel, boolean source) {
+            this.containerId = containerId;
+            this.position = position;
+            this.channel = channel == null ? "" : channel;
+            this.source = source;
+        }
+
+        public static void encode(DisplayConfigPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.containerId);
+            buffer.writeBlockPos(packet.position);
+            buffer.writeUtf(packet.channel, MAX_CHANNEL_LENGTH);
+            buffer.writeBoolean(packet.source);
+        }
+
+        public static DisplayConfigPacket decode(FriendlyByteBuf buffer) {
+            return new DisplayConfigPacket(buffer.readVarInt(), buffer.readBlockPos(),
+                    buffer.readUtf(MAX_CHANNEL_LENGTH), buffer.readBoolean());
+        }
+
+        public static void handle(DisplayConfigPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof DisplayDiagnosticsMenu menu)
+                        || menu.containerId != packet.containerId || !menu.targetPosition().equals(packet.position)) return;
+                menu.configureLink(player, packet.channel, packet.source);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    public enum PlcAction { COMPILE, RUN, STOP, RESET, SAVE_SLOT, LOAD_SLOT, CLEAR_SLOT, ACK_ALARM }
+
+    /** Server-authoritative PLC programming and commissioning action. */
+    public static final class PlcActionPacket {
+        private static final int MAX_SOURCE_LENGTH = PlcProgram.MAX_SOURCE_CHARS;
+        private final int containerId;
+        private final PlcAction action;
+        private final String source;
+        private final int slot;
+
+        private PlcActionPacket(int containerId, PlcAction action, String source, int slot) {
+            this.containerId = containerId;
+            this.action = action == null ? PlcAction.COMPILE : action;
+            this.source = source == null ? "" : source;
+            this.slot = slot;
+        }
+
+        public static void encode(PlcActionPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.containerId);
+            buffer.writeEnum(packet.action);
+            buffer.writeUtf(packet.source, MAX_SOURCE_LENGTH);
+            buffer.writeVarInt(packet.slot);
+        }
+
+        public static PlcActionPacket decode(FriendlyByteBuf buffer) {
+            return new PlcActionPacket(buffer.readVarInt(), buffer.readEnum(PlcAction.class),
+                    buffer.readUtf(MAX_SOURCE_LENGTH), buffer.readVarInt());
+        }
+
+        public static void handle(PlcActionPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof PlcProgrammingMenu menu)
+                        || menu.containerId != packet.containerId || !menu.stillValid(player)) return;
+                if (!(player.level().getBlockEntity(menu.targetPosition())
+                        instanceof ProgrammableLogicControllerBlockEntity plc)) return;
+                if (!plc.canControl(player)) {
+                    sendPlcResult(player, menu.containerId, false, "PLC is owned by another operator");
+                    return;
+                }
+                boolean success;
+                String message;
+                switch (packet.action) {
+                    case COMPILE -> {
+                        success = plc.loadProgram(packet.source);
+                        message = success ? "Program compiled and loaded" : plc.compileError();
+                    }
+                    case RUN -> {
+                        plc.start();
+                        success = plc.compileError().isEmpty() && plc.isRunning();
+                        message = success ? "Controller running" : "Controller could not start";
+                    }
+                    case STOP -> { plc.stop(); success = true; message = "Controller stopped"; }
+                    case RESET -> { plc.resetController(); success = true; message = "Controller reset"; }
+                    case ACK_ALARM -> { plc.acknowledgeAlarm(); success = true; message = "Alarm acknowledged"; }
+                    case SAVE_SLOT -> {
+                        success = validSlot(packet.slot) && plc.loadProgram(packet.source)
+                                && plc.saveProgramSlot(packet.slot);
+                        message = success ? "Saved program slot " + packet.slot : plc.compileError();
+                    }
+                    case LOAD_SLOT -> {
+                        success = validSlot(packet.slot) && plc.loadProgramSlot(packet.slot);
+                        message = success ? "Loaded program slot " + packet.slot : "Program slot is empty";
+                    }
+                    case CLEAR_SLOT -> {
+                        success = validSlot(packet.slot) && plc.clearProgramSlot(packet.slot);
+                        message = success ? "Cleared program slot " + packet.slot : "Invalid program slot";
+                    }
+                    default -> { success = false; message = "Unknown PLC action"; }
+                }
+                plc.getLevel().sendBlockUpdated(plc.getBlockPos(), plc.getBlockState(), plc.getBlockState(), 3);
+                sendPlcResult(player, menu.containerId, success,
+                        message == null || message.isBlank() ? "PLC action failed" : message);
+            });
+            context.setPacketHandled(true);
+        }
+
+        private static boolean validSlot(int slot) { return slot >= 0 && slot <= 3; }
+    }
+
+    private static void sendPlcResult(ServerPlayer player, int containerId, boolean success, String message) {
+        CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                new PlcResultPacket(containerId, success, message));
+    }
+
+    public static final class PlcResultPacket {
+        private final int containerId;
+        private final boolean success;
+        private final String message;
+
+        private PlcResultPacket(int containerId, boolean success, String message) {
+            this.containerId = containerId;
+            this.success = success;
+            this.message = message == null ? "" : message;
+        }
+
+        public static void encode(PlcResultPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.containerId);
+            buffer.writeBoolean(packet.success);
+            buffer.writeUtf(packet.message, 512);
+        }
+
+        public static PlcResultPacket decode(FriendlyByteBuf buffer) {
+            return new PlcResultPacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readUtf(512));
+        }
+
+        public static void handle(PlcResultPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
+                    () -> () -> com.malice.terminalcraft.client.PlcProgrammingScreen.applyResult(
+                            packet.containerId, packet.success, packet.message)));
+            context.setPacketHandled(true);
+        }
     }
 
     public static boolean syncShellTo(ServerPlayer player, BashShell shell) {

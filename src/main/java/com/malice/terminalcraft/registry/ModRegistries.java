@@ -9,9 +9,17 @@ import com.malice.terminalcraft.block.NetworkCableBlock;
 import com.malice.terminalcraft.block.NetworkRouterBlock;
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.block.RefinedStorageBridgeBlock;
+import com.malice.terminalcraft.block.AppliedEnergisticsBridgeBlock;
 import com.malice.terminalcraft.block.TerminalBlock;
 import com.malice.terminalcraft.block.ServerRackBlock;
 import com.malice.terminalcraft.block.TurtleBlock;
+import com.malice.terminalcraft.block.ProgrammableLogicControllerBlock;
+import com.malice.terminalcraft.block.WirelessDisplayLinkBlock;
+import com.malice.terminalcraft.block.VideoCableBlock;
+import com.malice.terminalcraft.block.SensorArrayBlock;
+import com.malice.terminalcraft.block.StandaloneSensorBlock;
+import com.malice.terminalcraft.block.NetworkAccessStorageBlock;
+import com.malice.terminalcraft.block.MaterializerBlock;
 import com.malice.terminalcraft.blockentity.DiskDriveBlockEntity;
 import com.malice.terminalcraft.blockentity.BundledCableBlockEntity;
 import com.malice.terminalcraft.blockentity.ModemBlockEntity;
@@ -20,9 +28,20 @@ import com.malice.terminalcraft.blockentity.NetworkRouterBlockEntity;
 import com.malice.terminalcraft.blockentity.NetworkCableBlockEntity;
 import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
 import com.malice.terminalcraft.blockentity.RefinedStorageBridgeBlockEntity;
+import com.malice.terminalcraft.blockentity.AppliedEnergisticsBridgeBlockEntity;
 import com.malice.terminalcraft.blockentity.TerminalBlockEntity;
 import com.malice.terminalcraft.blockentity.ServerRackBlockEntity;
 import com.malice.terminalcraft.blockentity.TurtleBlockEntity;
+import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.blockentity.WirelessDisplayLinkBlockEntity;
+import com.malice.terminalcraft.blockentity.VideoCableBlockEntity;
+import com.malice.terminalcraft.blockentity.SensorArrayBlockEntity;
+import com.malice.terminalcraft.blockentity.StandaloneSensorBlockEntity;
+import com.malice.terminalcraft.blockentity.NetworkAccessStorageBlockEntity;
+import com.malice.terminalcraft.blockentity.MaterializerBlockEntity;
+import com.malice.terminalcraft.sensor.SensorKind;
+import com.malice.terminalcraft.item.SolidStateDriveItem;
+import com.malice.terminalcraft.item.SolidStateDriveTier;
 import com.malice.terminalcraft.item.FloppyDiskItem;
 import com.malice.terminalcraft.item.BundledCableItem;
 import com.malice.terminalcraft.item.PocketTerminalItem;
@@ -31,6 +50,8 @@ import com.malice.terminalcraft.item.RackModuleItem;
 import com.malice.terminalcraft.item.RedAlloyWireItem;
 import com.malice.terminalcraft.server.RackModuleType;
 import com.malice.terminalcraft.menu.TerminalMenu;
+import com.malice.terminalcraft.menu.DisplayDiagnosticsMenu;
+import com.malice.terminalcraft.menu.PlcProgrammingMenu;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.MenuType;
@@ -73,6 +94,39 @@ public final class ModRegistries {
     public static final RegistryObject<Block> SERVER_RACK_BLOCK = BLOCKS.register("server_rack", ServerRackBlock::new);
     public static final RegistryObject<Block> REFINED_STORAGE_BRIDGE_BLOCK = BLOCKS.register(
             "refined_storage_bridge", RefinedStorageBridgeBlock::new);
+    public static final RegistryObject<Block> APPLIED_ENERGISTICS_BRIDGE_BLOCK = BLOCKS.register(
+            "applied_energistics_bridge", AppliedEnergisticsBridgeBlock::new);
+    public static final RegistryObject<Block> PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK = BLOCKS.register(
+            "programmable_logic_controller", ProgrammableLogicControllerBlock::new);
+    public static final RegistryObject<Block> WIRELESS_DISPLAY_LINK_BLOCK = BLOCKS.register(
+            "wireless_display_link", WirelessDisplayLinkBlock::new);
+    public static final RegistryObject<Block> VIDEO_CABLE_BLOCK = BLOCKS.register("video_cable", VideoCableBlock::new);
+    public static final RegistryObject<Block> SENSOR_ARRAY_BLOCK = BLOCKS.register("sensor_array", SensorArrayBlock::new);
+    public static final RegistryObject<Block> REDSTONE_SENSOR_BLOCK = BLOCKS.register("redstone_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.REDSTONE));
+    public static final RegistryObject<Block> BLOCK_STATE_SENSOR_BLOCK = BLOCKS.register("block_state_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.BLOCK_STATE));
+    public static final RegistryObject<Block> INVENTORY_SENSOR_BLOCK = BLOCKS.register("inventory_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.INVENTORY));
+    public static final RegistryObject<Block> FLUID_SENSOR_BLOCK = BLOCKS.register("fluid_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.FLUID));
+    public static final RegistryObject<Block> ENERGY_SENSOR_BLOCK = BLOCKS.register("energy_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.ENERGY));
+    public static final RegistryObject<Block> ENTITY_SENSOR_BLOCK = BLOCKS.register("entity_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.ENTITY));
+    public static final RegistryObject<Block> MACHINE_SENSOR_BLOCK = BLOCKS.register("machine_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.MACHINE));
+    public static final RegistryObject<Block> ENVIRONMENT_SENSOR_BLOCK = BLOCKS.register("environment_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.ENVIRONMENT));
+    public static final RegistryObject<Block> NETWORK_SENSOR_BLOCK = BLOCKS.register("network_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.NETWORK));
+    public static final RegistryObject<Block> KINETIC_SENSOR_BLOCK = BLOCKS.register("kinetic_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.KINETIC));
+    public static final RegistryObject<Block> CHEMICAL_SENSOR_BLOCK = BLOCKS.register("chemical_sensor",
+            () -> new StandaloneSensorBlock(SensorKind.CHEMICAL));
+    public static final RegistryObject<Block> NETWORK_ACCESS_STORAGE_BLOCK = BLOCKS.register(
+            "network_access_storage", NetworkAccessStorageBlock::new);
+    public static final RegistryObject<Block> MATERIALIZER_BLOCK = BLOCKS.register("materializer", MaterializerBlock::new);
 
     // Items
     public static final RegistryObject<Item> TERMINAL_ITEM = ITEMS.register("terminal",
@@ -98,6 +152,39 @@ public final class ModRegistries {
     public static final RegistryObject<Item> REFINED_STORAGE_BRIDGE_ITEM = ITEMS.register(
             "refined_storage_bridge",
             () -> new BlockItem(REFINED_STORAGE_BRIDGE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> APPLIED_ENERGISTICS_BRIDGE_ITEM = ITEMS.register(
+            "applied_energistics_bridge",
+            () -> new BlockItem(APPLIED_ENERGISTICS_BRIDGE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> PROGRAMMABLE_LOGIC_CONTROLLER_ITEM = ITEMS.register(
+            "programmable_logic_controller",
+            () -> new BlockItem(PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> WIRELESS_DISPLAY_LINK_ITEM = ITEMS.register("wireless_display_link",
+            () -> new BlockItem(WIRELESS_DISPLAY_LINK_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> VIDEO_CABLE_ITEM = ITEMS.register("video_cable",
+            () -> new BlockItem(VIDEO_CABLE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> SENSOR_ARRAY_ITEM = ITEMS.register("sensor_array",
+            () -> new BlockItem(SENSOR_ARRAY_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> REDSTONE_SENSOR_ITEM = sensorItem("redstone_sensor", REDSTONE_SENSOR_BLOCK);
+    public static final RegistryObject<Item> BLOCK_STATE_SENSOR_ITEM = sensorItem("block_state_sensor", BLOCK_STATE_SENSOR_BLOCK);
+    public static final RegistryObject<Item> INVENTORY_SENSOR_ITEM = sensorItem("inventory_sensor", INVENTORY_SENSOR_BLOCK);
+    public static final RegistryObject<Item> FLUID_SENSOR_ITEM = sensorItem("fluid_sensor", FLUID_SENSOR_BLOCK);
+    public static final RegistryObject<Item> ENERGY_SENSOR_ITEM = sensorItem("energy_sensor", ENERGY_SENSOR_BLOCK);
+    public static final RegistryObject<Item> ENTITY_SENSOR_ITEM = sensorItem("entity_sensor", ENTITY_SENSOR_BLOCK);
+    public static final RegistryObject<Item> MACHINE_SENSOR_ITEM = sensorItem("machine_sensor", MACHINE_SENSOR_BLOCK);
+    public static final RegistryObject<Item> ENVIRONMENT_SENSOR_ITEM = sensorItem("environment_sensor", ENVIRONMENT_SENSOR_BLOCK);
+    public static final RegistryObject<Item> NETWORK_SENSOR_ITEM = sensorItem("network_sensor", NETWORK_SENSOR_BLOCK);
+    public static final RegistryObject<Item> KINETIC_SENSOR_ITEM = sensorItem("kinetic_sensor", KINETIC_SENSOR_BLOCK);
+    public static final RegistryObject<Item> CHEMICAL_SENSOR_ITEM = sensorItem("chemical_sensor", CHEMICAL_SENSOR_BLOCK);
+    public static final RegistryObject<Item> NETWORK_ACCESS_STORAGE_ITEM = ITEMS.register("network_access_storage",
+            () -> new BlockItem(NETWORK_ACCESS_STORAGE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> MATERIALIZER_ITEM = ITEMS.register("materializer",
+            () -> new BlockItem(MATERIALIZER_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> SOLID_STATE_DRIVE_ITEM = ITEMS.register("solid_state_drive",
+            () -> new SolidStateDriveItem(SolidStateDriveTier.BASIC));
+    public static final RegistryObject<Item> ADVANCED_SOLID_STATE_DRIVE_ITEM = ITEMS.register("advanced_solid_state_drive",
+            () -> new SolidStateDriveItem(SolidStateDriveTier.ADVANCED));
+    public static final RegistryObject<Item> QUANTUM_SOLID_STATE_DRIVE_ITEM = ITEMS.register("quantum_solid_state_drive",
+            () -> new SolidStateDriveItem(SolidStateDriveTier.QUANTUM));
     public static final RegistryObject<Item> SERVER_BLADE = ITEMS.register("server_blade",
             () -> new RackModuleItem(RackModuleType.SERVER));
     public static final RegistryObject<Item> ROUTER_BLADE = ITEMS.register("router_blade",
@@ -110,6 +197,10 @@ public final class ModRegistries {
             BLOCK_ENTITIES.register("refined_storage_bridge",
                     () -> BlockEntityType.Builder.of(RefinedStorageBridgeBlockEntity::new,
                             REFINED_STORAGE_BRIDGE_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<AppliedEnergisticsBridgeBlockEntity>> APPLIED_ENERGISTICS_BRIDGE_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("applied_energistics_bridge",
+                    () -> BlockEntityType.Builder.of(AppliedEnergisticsBridgeBlockEntity::new,
+                            APPLIED_ENERGISTICS_BRIDGE_BLOCK.get()).build(null));
     public static final RegistryObject<BlockEntityType<NetworkCableBlockEntity>> NETWORK_CABLE_BLOCK_ENTITY =
             BLOCK_ENTITIES.register("network_cable",
                     () -> BlockEntityType.Builder.of(NetworkCableBlockEntity::new, NETWORK_CABLE_BLOCK.get()).build(null));
@@ -140,9 +231,41 @@ public final class ModRegistries {
     public static final RegistryObject<BlockEntityType<DiskDriveBlockEntity>> DISK_DRIVE_BLOCK_ENTITY =
             BLOCK_ENTITIES.register("disk_drive",
                     () -> BlockEntityType.Builder.of(DiskDriveBlockEntity::new, DISK_DRIVE_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<ProgrammableLogicControllerBlockEntity>>
+            PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK_ENTITY = BLOCK_ENTITIES.register("programmable_logic_controller",
+                    () -> BlockEntityType.Builder.of(ProgrammableLogicControllerBlockEntity::new,
+                            PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<WirelessDisplayLinkBlockEntity>> WIRELESS_DISPLAY_LINK_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("wireless_display_link",
+                    () -> BlockEntityType.Builder.of(WirelessDisplayLinkBlockEntity::new,
+                            WIRELESS_DISPLAY_LINK_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<VideoCableBlockEntity>> VIDEO_CABLE_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("video_cable",
+                    () -> BlockEntityType.Builder.of(VideoCableBlockEntity::new, VIDEO_CABLE_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<SensorArrayBlockEntity>> SENSOR_ARRAY_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("sensor_array",
+                    () -> BlockEntityType.Builder.of(SensorArrayBlockEntity::new, SENSOR_ARRAY_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<StandaloneSensorBlockEntity>> STANDALONE_SENSOR_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("standalone_sensor",
+                    () -> BlockEntityType.Builder.of(StandaloneSensorBlockEntity::new,
+                            REDSTONE_SENSOR_BLOCK.get(), BLOCK_STATE_SENSOR_BLOCK.get(), INVENTORY_SENSOR_BLOCK.get(),
+                            FLUID_SENSOR_BLOCK.get(), ENERGY_SENSOR_BLOCK.get(), ENTITY_SENSOR_BLOCK.get(),
+                            MACHINE_SENSOR_BLOCK.get(), ENVIRONMENT_SENSOR_BLOCK.get(), NETWORK_SENSOR_BLOCK.get(),
+                            KINETIC_SENSOR_BLOCK.get(), CHEMICAL_SENSOR_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<NetworkAccessStorageBlockEntity>> NETWORK_ACCESS_STORAGE_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("network_access_storage",
+                    () -> BlockEntityType.Builder.of(NetworkAccessStorageBlockEntity::new,
+                            NETWORK_ACCESS_STORAGE_BLOCK.get()).build(null));
+    public static final RegistryObject<BlockEntityType<MaterializerBlockEntity>> MATERIALIZER_BLOCK_ENTITY =
+            BLOCK_ENTITIES.register("materializer",
+                    () -> BlockEntityType.Builder.of(MaterializerBlockEntity::new, MATERIALIZER_BLOCK.get()).build(null));
 
     public static final RegistryObject<MenuType<TerminalMenu>> TERMINAL_MENU = MENUS.register("terminal",
             () -> IForgeMenuType.create(TerminalMenu::fromNetwork));
+    public static final RegistryObject<MenuType<DisplayDiagnosticsMenu>> DISPLAY_DIAGNOSTICS_MENU = MENUS.register(
+            "display_diagnostics", () -> IForgeMenuType.create(DisplayDiagnosticsMenu::fromNetwork));
+    public static final RegistryObject<MenuType<PlcProgrammingMenu>> PLC_PROGRAMMING_MENU = MENUS.register(
+            "plc_programming", () -> IForgeMenuType.create(PlcProgrammingMenu::fromNetwork));
 
     public static final RegistryObject<CreativeModeTab> TERMINAL_TAB = CREATIVE_TABS.register("main",
             () -> CreativeModeTab.builder()
@@ -160,6 +283,27 @@ public final class ModRegistries {
                         output.accept(NETWORK_ROUTER_ITEM.get());
                         output.accept(SERVER_RACK_ITEM.get());
                         output.accept(REFINED_STORAGE_BRIDGE_ITEM.get());
+                        output.accept(APPLIED_ENERGISTICS_BRIDGE_ITEM.get());
+                        output.accept(PROGRAMMABLE_LOGIC_CONTROLLER_ITEM.get());
+                        output.accept(WIRELESS_DISPLAY_LINK_ITEM.get());
+                        output.accept(VIDEO_CABLE_ITEM.get());
+                        output.accept(SENSOR_ARRAY_ITEM.get());
+                        output.accept(REDSTONE_SENSOR_ITEM.get());
+                        output.accept(BLOCK_STATE_SENSOR_ITEM.get());
+                        output.accept(INVENTORY_SENSOR_ITEM.get());
+                        output.accept(FLUID_SENSOR_ITEM.get());
+                        output.accept(ENERGY_SENSOR_ITEM.get());
+                        output.accept(ENTITY_SENSOR_ITEM.get());
+                        output.accept(MACHINE_SENSOR_ITEM.get());
+                        output.accept(ENVIRONMENT_SENSOR_ITEM.get());
+                        output.accept(NETWORK_SENSOR_ITEM.get());
+                        output.accept(KINETIC_SENSOR_ITEM.get());
+                        output.accept(CHEMICAL_SENSOR_ITEM.get());
+                        output.accept(NETWORK_ACCESS_STORAGE_ITEM.get());
+                        output.accept(MATERIALIZER_ITEM.get());
+                        output.accept(SOLID_STATE_DRIVE_ITEM.get());
+                        output.accept(ADVANCED_SOLID_STATE_DRIVE_ITEM.get());
+                        output.accept(QUANTUM_SOLID_STATE_DRIVE_ITEM.get());
                         output.accept(SERVER_BLADE.get());
                         output.accept(ROUTER_BLADE.get());
                         output.accept(FLOPPY_DISK.get());
@@ -168,6 +312,10 @@ public final class ModRegistries {
                     .build());
 
     private ModRegistries() {}
+
+    private static RegistryObject<Item> sensorItem(String name, RegistryObject<Block> block) {
+        return ITEMS.register(name, () -> new BlockItem(block.get(), new Item.Properties()));
+    }
 
     public static void register(IEventBus modBus) {
         BLOCKS.register(modBus);

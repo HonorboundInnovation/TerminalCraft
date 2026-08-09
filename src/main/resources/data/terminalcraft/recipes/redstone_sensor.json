@@ -1,0 +1,8 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {"item": "terminalcraft:sensor_array"},
+    {"item": "minecraft:redstone"}
+  ],
+  "result": {"item": "terminalcraft:redstone_sensor"}
+}

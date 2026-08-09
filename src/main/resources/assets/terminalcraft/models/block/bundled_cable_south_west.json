@@ -1,7 +1,7 @@
 {
   "textures": {
-    "particle": "terminalcraft:block/bundled_cable",
-    "wire": "terminalcraft:block/bundled_cable"
+    "particle": "terminalcraft:block/bundled_cable_custom",
+    "wire": "terminalcraft:block/bundled_cable_custom"
   },
   "elements": [
     {

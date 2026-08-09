@@ -131,13 +131,13 @@ public class BundledCableBlock extends BaseEntityBlock {
     @Override
     @SuppressWarnings("deprecation")
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getDirectSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
@@ -345,9 +345,24 @@ public class BundledCableBlock extends BaseEntityBlock {
         }
     }
 
-    private static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
+    /** Returns whether the support block still carries a mounted bundled face. */
+    public static boolean canFaceSurvive(LevelReader level, BlockPos pos, Direction face) {
         BlockPos support = pos.relative(face.getOpposite());
         return level.getBlockState(support).isFaceSturdy(level, support, face);
+    }
+
+    /** Exposes channel zero only through the plane of an occupied mounted face. */
+    private static int outputPower(BlockGetter level, BlockPos pos, BlockState state,
+                                   Direction direction) {
+        if (direction == null) return 0;
+        if (level.getBlockEntity(pos) instanceof BundledCableBlockEntity cable) {
+            for (Direction face : cable.faces()) {
+                if (face.getAxis() != direction.getAxis()) return state.getValue(POWER);
+            }
+            return 0;
+        }
+        return state.hasProperty(FACE) && state.getValue(FACE).getAxis() != direction.getAxis()
+                ? state.getValue(POWER) : 0;
     }
 
     private static boolean canAttachDevice(BlockState state) {

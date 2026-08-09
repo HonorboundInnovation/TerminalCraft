@@ -1,7 +1,7 @@
 {
   "textures": {
-    "particle": "terminalcraft:block/red_alloy_wire",
-    "wire": "terminalcraft:block/red_alloy_wire"
+    "particle": "terminalcraft:block/red_alloy_wire_custom",
+    "wire": "terminalcraft:block/red_alloy_wire_custom"
   },
   "elements": [
     {

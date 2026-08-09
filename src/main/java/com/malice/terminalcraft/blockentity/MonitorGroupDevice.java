@@ -32,6 +32,11 @@ final class MonitorGroupDevice implements MonitorDevice {
 
     Group group() { return discover(origin); }
 
+    @Override
+    public com.malice.terminalcraft.device.TerminalBuffer terminalSurface() {
+        return new MonitorWallSurface(group());
+    }
+
     @Override public int maxLines() { return group().height() * MonitorBlockEntity.MAX_LINES; }
     @Override public int maxLineLength() { return group().width() * MonitorBlockEntity.MAX_LINE_LEN; }
     @Override public String title() { return group().anchor().getTitle(); }
@@ -94,7 +99,99 @@ final class MonitorGroupDevice implements MonitorDevice {
         }
     }
 
+    @Override
+    public void setLineFromSurface(int row, String text) {
+        Group group = group();
+        if (row < 0 || row >= group.height() * MonitorBlockEntity.MAX_LINES)
+            throw new IllegalArgumentException("monitor row is outside the wall");
+        String safe = text == null ? "" : text;
+        if (safe.length() > group.width() * MonitorBlockEntity.MAX_LINE_LEN)
+            throw new IllegalArgumentException("monitor line exceeds wall width");
+        int tileRow = row / MonitorBlockEntity.MAX_LINES;
+        int localRow = row % MonitorBlockEntity.MAX_LINES;
+        for (int tileColumn = 0; tileColumn < group.width(); tileColumn++) {
+            MonitorBlockEntity tile = group.at(tileColumn, tileRow);
+            if (tile == null) continue;
+            int start = tileColumn * MonitorBlockEntity.MAX_LINE_LEN;
+            String part = start >= safe.length() ? "" : safe.substring(start,
+                    Math.min(safe.length(), start + MonitorBlockEntity.MAX_LINE_LEN));
+            tile.setLineFromSurface(localRow, part);
+        }
+    }
+
     @Override public void clear() { for (MonitorBlockEntity tile : group().tiles()) tile.clear(); }
+
+    /**
+     * Applies one complete global frame to the wall, preserving the wall's logical canvas instead
+     * of rendering a separate copy on each physical tile. Tile mutations are batched so one frame
+     * emits at most one output event per tile.
+     */
+    void renderFrame(List<String> frame) {
+        Group group = group();
+        int width = maxLineLength();
+        int height = maxLines();
+        if (frame == null || frame.size() > height) {
+            throw new IllegalArgumentException("screensaver frame exceeds wall height");
+        }
+        for (String line : frame) {
+            if (line != null && line.length() > width) {
+                throw new IllegalArgumentException("screensaver frame exceeds wall width");
+            }
+        }
+        for (int tileRow = 0; tileRow < group.height(); tileRow++) {
+            for (int tileColumn = 0; tileColumn < group.width(); tileColumn++) {
+                MonitorBlockEntity tile = group.at(tileColumn, tileRow);
+                if (tile == null) continue;
+                List<String> localLines = new ArrayList<>(MonitorBlockEntity.MAX_LINES);
+                for (int localRow = 0; localRow < MonitorBlockEntity.MAX_LINES; localRow++) {
+                    int globalRow = tileRow * MonitorBlockEntity.MAX_LINES + localRow;
+                    String line = globalRow < frame.size() && frame.get(globalRow) != null
+                            ? frame.get(globalRow) : "";
+                    int start = tileColumn * MonitorBlockEntity.MAX_LINE_LEN;
+                    localLines.add(start >= line.length() ? ""
+                            : line.substring(start, Math.min(line.length(), start + MonitorBlockEntity.MAX_LINE_LEN)));
+                }
+                tile.replaceLinesQuietly(localLines);
+            }
+        }
+        for (MonitorBlockEntity tile : group.tiles()) tile.publishOutputChanged();
+    }
+
+    /** Applies one global frame with per-cell foreground/background palette indexes. */
+    void renderColorFrame(MonitorScreensaver.ColorFrame frame, int[] palette) {
+        Group group = group();
+        int width = maxLineLength();
+        int height = maxLines();
+        if (frame == null || frame.height() > height || frame.width() > width) {
+            throw new IllegalArgumentException("colored screensaver frame exceeds wall bounds");
+        }
+        for (int tileRow = 0; tileRow < group.height(); tileRow++) {
+            for (int tileColumn = 0; tileColumn < group.width(); tileColumn++) {
+                MonitorBlockEntity tile = group.at(tileColumn, tileRow);
+                if (tile == null) continue;
+                List<String> localLines = new ArrayList<>(MonitorBlockEntity.MAX_LINES);
+                List<String> localForeground = new ArrayList<>(MonitorBlockEntity.MAX_LINES);
+                List<String> localBackground = new ArrayList<>(MonitorBlockEntity.MAX_LINES);
+                for (int localRow = 0; localRow < MonitorBlockEntity.MAX_LINES; localRow++) {
+                    int globalRow = tileRow * MonitorBlockEntity.MAX_LINES + localRow;
+                    String line = globalRow < frame.height() ? frame.lines().get(globalRow) : "";
+                    String foreground = globalRow < frame.height() ? frame.foreground().get(globalRow) : "";
+                    String background = globalRow < frame.height() ? frame.background().get(globalRow) : "";
+                    int start = tileColumn * MonitorBlockEntity.MAX_LINE_LEN;
+                    localLines.add(slice(line, start, MonitorBlockEntity.MAX_LINE_LEN));
+                    localForeground.add(slice(foreground, start, MonitorBlockEntity.MAX_LINE_LEN));
+                    localBackground.add(slice(background, start, MonitorBlockEntity.MAX_LINE_LEN));
+                }
+                tile.replaceSurfaceQuietly(localLines, localForeground, localBackground, palette);
+            }
+        }
+        for (MonitorBlockEntity tile : group.tiles()) tile.publishOutputChanged();
+    }
+
+    private static String slice(String value, int start, int length) {
+        if (value == null || start >= value.length()) return "";
+        return value.substring(start, Math.min(value.length(), start + length));
+    }
 
     static Group discover(MonitorBlockEntity start) {
         Level level = start.getLevel();

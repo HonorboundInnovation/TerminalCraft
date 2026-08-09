@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.nio.charset.StandardCharsets;
@@ -34,10 +35,20 @@ public final class RednetNetwork {
     private static final Map<RednetRuntimeScope, RednetTrafficQuota> TRAFFIC_QUOTAS = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope, RednetQueueBudget> QUEUE_BUDGETS = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope, RejectionCounter> REJECTIONS = new ConcurrentHashMap<>();
+    private static final Map<RednetRuntimeScope, RednetDhcpServer> DHCP_SERVERS = new ConcurrentHashMap<>();
+    private static final Map<RednetRuntimeScope, Map<UUID, RouterRecord>> ROUTERS = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope.Endpoint, List<NetworkEnvelope>> ACK_CONTROLS =
             new ConcurrentHashMap<>();
     public static final long DEFAULT_ACK_TIMEOUT_TICKS = 20;
     public static final int DEFAULT_MAX_RETRIES = 2;
+
+    /** Lightweight registration of live router blocks for lease authority and diagnostics. */
+    private record RouterRecord(UUID routerId, BlockPos position) {
+        private RouterRecord {
+            if (routerId == null || position == null) throw new IllegalArgumentException("router identity required");
+            position = position.immutable();
+        }
+    }
 
     /** Saturating, aggregate rejection diagnostics for one logical RedNet scope. */
     public record RejectionDiagnostics(long malformed, long rateLimited,
@@ -76,8 +87,119 @@ public final class RednetNetwork {
 
     private RednetNetwork() {}
 
+    /** Returns the stable automatic host name used when a modem has no explicit hostname. */
+    public static String automaticHostname(UUID modemId) {
+        return RednetAutoConfiguration.hostname(modemId);
+    }
+
+    /** Registers a live router as a DHCP-equivalent lease authority in its dimension. */
+    public static void registerRouter(Level level, UUID routerId, BlockPos position) {
+        if (level == null || level.isClientSide || routerId == null || position == null) return;
+        ROUTERS.computeIfAbsent(scope(level), ignored -> new ConcurrentHashMap<>())
+                .put(routerId, new RouterRecord(routerId, position));
+    }
+
+    public static void unregisterRouter(Level level, UUID routerId) {
+        if (level == null || level.isClientSide || routerId == null) return;
+        Map<UUID, RouterRecord> routers = ROUTERS.get(scope(level));
+        if (routers != null) routers.remove(routerId);
+    }
+
+    public static int routerCount(Level level) {
+        if (level == null || level.isClientSide) return 0;
+        Map<UUID, RouterRecord> routers = ROUTERS.get(scope(level));
+        return routers == null ? 0 : routers.size();
+    }
+
+    /**
+     * Renews the modem's bounded in-world address lease. The physical subnet identity is derived
+     * from the cable topology; a live router on that subnet becomes the lease authority.
+     */
+    public static java.util.Optional<RednetLease> ensureLease(Level level, UUID modemId, BlockPos position,
+                                                                boolean wireless) {
+        return ensureLease(level, modemId, position, wireless, "");
+    }
+
+    /** Renews a lease using an explicit logical-network name when advanced mode selected one. */
+    public static java.util.Optional<RednetLease> ensureLease(Level level, UUID modemId, BlockPos position,
+                                                                boolean wireless, String configuredNetwork) {
+        if (level == null || level.isClientSide || modemId == null || position == null) {
+            return java.util.Optional.empty();
+        }
+        String identity = "wireless:" + level.dimension().location();
+        List<WiredNetworkTopology.Subnet> subnets = List.of();
+        if (!wireless && level instanceof ServerLevel serverLevel) {
+            subnets = WiredNetworkTopology.modemSubnets(serverLevel, position);
+            if (!subnets.isEmpty()) identity = "wired:" + subnets.get(0).id().displayName();
+            else identity = "wired:" + serverLevel.dimension().location();
+        }
+        if (configuredNetwork != null && !configuredNetwork.isBlank()) {
+            identity = "logical:" + configuredNetwork;
+        }
+        UUID routerId = level instanceof ServerLevel serverLevel
+                ? routerFor(serverLevel, subnets) : null;
+        RednetDhcpServer allocator = DHCP_SERVERS.computeIfAbsent(scope(level), ignored -> new RednetDhcpServer());
+        return java.util.Optional.ofNullable(allocator.ensure(modemId, identity, routerId, level.getGameTime()));
+    }
+
+    public static java.util.Optional<RednetLease> lease(Level level, UUID modemId) {
+        if (level == null || level.isClientSide || modemId == null) return java.util.Optional.empty();
+        RednetDhcpServer allocator = DHCP_SERVERS.get(scope(level));
+        return allocator == null ? java.util.Optional.empty()
+                : java.util.Optional.ofNullable(allocator.lease(modemId));
+    }
+
+    public static void releaseLease(Level level, UUID modemId) {
+        if (level == null || level.isClientSide || modemId == null) return;
+        RednetDhcpServer allocator = DHCP_SERVERS.get(scope(level));
+        if (allocator != null) allocator.release(modemId);
+    }
+
+    /** Describes the built-in framing/protocol contract without exposing runtime payloads. */
+    public static List<String> protocolDiagnostics() {
+        return List.of(
+                "envelope version=" + NetworkEnvelope.CURRENT_VERSION
+                        + " max_hops=" + NetworkEnvelope.MAX_HOPS
+                        + " max_payload=" + NetworkEnvelope.MAX_PAYLOAD_LENGTH,
+                "channel protocol=" + RednetProtocol.CHANNEL.id()
+                        + " version=" + RednetProtocol.CHANNEL.version()
+                        + " payload=" + RednetProtocol.CHANNEL.payloadType(),
+                "control protocol=" + RednetProtocol.CONTROL.id()
+                        + " version=" + RednetProtocol.CONTROL.version()
+                        + " payload=" + RednetProtocol.CONTROL.payloadType());
+    }
+
+    private static UUID routerFor(ServerLevel level, List<WiredNetworkTopology.Subnet> subnets) {
+        if (subnets.isEmpty()) return null;
+        Map<UUID, RouterRecord> registered = ROUTERS.get(scope(level));
+        if (registered == null || registered.isEmpty()) return null;
+        Set<WiredNetworkTopology.SubnetId> subnetIds = subnets.stream()
+                .map(WiredNetworkTopology.Subnet::id).collect(java.util.stream.Collectors.toSet());
+        return registered.values().stream()
+                .sorted(java.util.Comparator.comparing(record -> record.routerId().toString()))
+                .filter(record -> WiredNetworkTopology.routerAttachments(level, record.position()).stream()
+                        .anyMatch(attachment -> attachment.enabled() && subnetIds.contains(attachment.subnet())))
+                .map(RouterRecord::routerId)
+                .findFirst().orElse(null);
+    }
+
     public static boolean registerHost(Level level, UUID modemId, String hostname) {
         return registerHostDetailed(level, modemId, hostname).accepted();
+    }
+
+    /** Registers the deterministic automatic alias unless an explicit alias already exists. */
+    public static boolean ensureAutomaticHost(Level level, UUID modemId) {
+        if (level == null || level.isClientSide || modemId == null) return false;
+        if (!hostname(level, modemId).isEmpty()) return true;
+        String compact = modemId.toString().replace("-", "");
+        String[] candidates = {
+                RednetAutoConfiguration.hostname(modemId),
+                "node-" + compact.toLowerCase(java.util.Locale.ROOT)
+        };
+        for (String candidate : candidates) {
+            if (registerHost(level, modemId, candidate)) return true;
+        }
+        return false;
     }
 
     /** Registers or renames a host while preserving a machine-readable failure reason. */
@@ -395,6 +517,9 @@ public final class RednetNetwork {
         if (level == null || level.isClientSide || modemId == null) return;
         RednetRuntimeScope currentScope = scope(level);
         Object server = currentScope.serverIdentity();
+        DHCP_SERVERS.forEach((runtimeScope, allocator) -> {
+            if (runtimeScope.belongsTo(server)) allocator.release(modemId);
+        });
         for (Map.Entry<RednetRuntimeScope, List<Subscription>> entry : SUBS.entrySet()) {
             if (!entry.getKey().belongsTo(server)) continue;
             List<Subscription> list = entry.getValue();
@@ -858,6 +983,8 @@ public final class RednetNetwork {
                 .forEach(RednetNetwork::removeApplicationQueue);
         // Queue ownership operations release their reservations before aggregate budgets disappear.
         QUEUE_BUDGETS.keySet().removeIf(scope -> scope.belongsTo(server));
+        DHCP_SERVERS.keySet().removeIf(scope -> scope.belongsTo(server));
+        ROUTERS.keySet().removeIf(scope -> scope.belongsTo(server));
     }
 
     /** Resolves one exact directed subscription through the typed interface and route boundary. */

@@ -1,0 +1,172 @@
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
+  "textures": {
+    "particle": "terminalcraft:block/energy_sensor_custom",
+    "side": "terminalcraft:block/energy_sensor_custom",
+    "front": "terminalcraft:block/energy_sensor_custom",
+    "accent": "terminalcraft:block/energy_sensor_custom"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        1,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#side"
+        },
+        "up": {
+          "texture": "#side"
+        },
+        "north": {
+          "texture": "#side"
+        },
+        "south": {
+          "texture": "#side"
+        },
+        "west": {
+          "texture": "#side"
+        },
+        "east": {
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        1,
+        1,
+        1
+      ],
+      "to": [
+        15,
+        15,
+        15
+      ],
+      "faces": {
+        "down": {
+          "texture": "#side"
+        },
+        "up": {
+          "texture": "#accent"
+        },
+        "north": {
+          "texture": "#side"
+        },
+        "south": {
+          "texture": "#side"
+        },
+        "west": {
+          "texture": "#side"
+        },
+        "east": {
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        3,
+        3,
+        0
+      ],
+      "to": [
+        13,
+        13,
+        2
+      ],
+      "faces": {
+        "down": {
+          "texture": "#front"
+        },
+        "up": {
+          "texture": "#accent"
+        },
+        "north": {
+          "texture": "#front"
+        },
+        "south": {
+          "texture": "#front"
+        },
+        "west": {
+          "texture": "#front"
+        },
+        "east": {
+          "texture": "#front"
+        }
+      }
+    },
+    {
+      "from": [
+        4,
+        5,
+        2
+      ],
+      "to": [
+        6,
+        11,
+        4
+      ],
+      "faces": {
+        "down": {
+          "texture": "#accent"
+        },
+        "up": {
+          "texture": "#accent"
+        },
+        "north": {
+          "texture": "#accent"
+        },
+        "south": {
+          "texture": "#accent"
+        },
+        "west": {
+          "texture": "#accent"
+        },
+        "east": {
+          "texture": "#accent"
+        }
+      }
+    },
+    {
+      "from": [
+        10,
+        5,
+        2
+      ],
+      "to": [
+        12,
+        11,
+        4
+      ],
+      "faces": {
+        "down": {
+          "texture": "#accent"
+        },
+        "up": {
+          "texture": "#accent"
+        },
+        "north": {
+          "texture": "#accent"
+        },
+        "south": {
+          "texture": "#accent"
+        },
+        "west": {
+          "texture": "#accent"
+        },
+        "east": {
+          "texture": "#accent"
+        }
+      }
+    }
+  ]
+}

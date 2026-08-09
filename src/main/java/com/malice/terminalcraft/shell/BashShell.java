@@ -6,6 +6,7 @@ import com.malice.terminalcraft.device.DeviceShellCommand;
 import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.device.IntegratedStorageShellCommand;
 import com.malice.terminalcraft.device.StorageShellCommand;
+import com.malice.terminalcraft.device.TerminalBuffer;
 
 import com.malice.terminalcraft.Config;
 import net.minecraft.nbt.CompoundTag;
@@ -39,6 +40,7 @@ public class BashShell implements ShellCommandModule.Context {
     private enum ControlSignal { NONE, BREAK, CONTINUE, EXIT }
 
     private final VirtualFileSystem vfs = new VirtualFileSystem();
+    private final TerminalBuffer terminalSurface = new TerminalBuffer(40, 16);
     private final Map<String, String> env = new LinkedHashMap<>();
     private final Deque<String> commandHistory = new ArrayDeque<>();
     private final List<String> output = new ArrayList<>();
@@ -99,6 +101,11 @@ public class BashShell implements ShellCommandModule.Context {
         return Collections.unmodifiableList(new ArrayList<>(output));
     }
 
+    /** Server-authoritative bounded character-cell view of the visible shell screen. */
+    public synchronized TerminalBuffer terminalSurface() {
+        return terminalSurface;
+    }
+
     public synchronized String getCwd() {
         return cwd;
     }
@@ -135,6 +142,17 @@ public class BashShell implements ShellCommandModule.Context {
     @Override
     public synchronized TerminalHostServices hostServices() {
         return host == null ? null : host.services();
+    }
+
+    @Override
+    public synchronized TerminalHost worldHost() {
+        return host;
+    }
+
+    @Override
+    public synchronized String readFile(String path) {
+        if (path == null || path.isBlank()) return null;
+        return vfs.readFile(vfs.resolve(cwd, path));
     }
 
     @Override
@@ -1398,6 +1416,9 @@ public class BashShell implements ShellCommandModule.Context {
         commandRegistry.install(new HostIdentityCommandModule(), this);
         commandRegistry.install(new OperationsCommandModule(), this);
         commandRegistry.install(new ModemCommandModule(), this);
+        commandRegistry.install(new PlcShellCommandModule(), this);
+        commandRegistry.install(new SensorCommandModule(), this);
+        commandRegistry.install(new DisplayLinkShellCommandModule(), this);
     }
 
     private void dispatch(String cmd, List<String> args) {
@@ -1491,6 +1512,8 @@ public class BashShell implements ShellCommandModule.Context {
         println("  selftest             Run built-in shell tests");
         println("  redstone / rs        Read/write redstone (get|set|sides)");
         println("  wire / bundled       Read/write 16-channel bundled cable");
+        println("  plc                  Program and control an adjacent PLC");
+        println("  displaylink          Pair and configure wireless display links");
         println("  server / jobs        Submit/list/status/cancel server-rack jobs");
         println("  peripheral           List adjacent peripherals");
         println("  device               List/info/call unified devices");
@@ -2669,6 +2692,10 @@ public class BashShell implements ShellCommandModule.Context {
             println("monitor read [side]");
             println("monitor size [side]          # detect connected wall geometry");
             println("monitor demo [side]          # adaptive test for any rectangular wall");
+            println("monitor bar [side] <row> <label> <0-100> [width]");
+            println("monitor led [side] <row> <label> <on|off>");
+            println("monitor spark [side] <row> <label> <values...>");
+            println("monitor screensaver [start|color|stop|status] [side]");
             println("monitor service [list|add <name> <port>|remove <name>]");
             println("monitor remote <service> clear|write|set|title|color ...");
             lastExitCode = 0;
@@ -2718,6 +2745,10 @@ public class BashShell implements ShellCommandModule.Context {
             cmdRemoteMonitor(args);
             return;
         }
+        if ("screensaver".equals(op) || "saver".equals(op)) {
+            cmdMonitorScreensaver(args);
+            return;
+        }
         if ("size".equals(op) || "dimensions".equals(op) || "geometry".equals(op)) {
             String side = args.size() > 1 ? args.get(1) : "any";
             if (args.size() > 2 || !isSideToken(side.toLowerCase(Locale.ROOT))) {
@@ -2746,6 +2777,70 @@ public class BashShell implements ShellCommandModule.Context {
             }
             renderAdaptiveMonitorDemo(side);
             return;
+        }
+        if ("bar".equals(op) || "gauge".equals(op)) {
+            int index = 1;
+            String side = "any";
+            if (index < args.size() && isSideToken(args.get(index).toLowerCase(Locale.ROOT))) side = args.get(index++);
+            if (args.size() - index < 3 || args.size() - index > 4) {
+                println("monitor: usage: monitor bar [side] <row> <label> <0-100> [width]"); lastExitCode = 1; return;
+            }
+            try {
+                int row = Integer.parseInt(args.get(index++));
+                String label = args.get(index++);
+                int value = Integer.parseInt(args.get(index++));
+                int width = index < args.size() ? Integer.parseInt(args.get(index)) : 12;
+                if (!host.monitorSetLine(side, row, com.malice.terminalcraft.device.MonitorWidgets.bar(label, value, width))) {
+                    println("monitor: row outside screen or monitor not found"); lastExitCode = 1; return;
+                }
+                lastExitCode = 0; return;
+            } catch (NumberFormatException invalid) {
+                println("monitor: row, value, and width must be integers"); lastExitCode = 1; return;
+            }
+        }
+        if ("led".equals(op)) {
+            int index = 1;
+            String side = "any";
+            if (index < args.size() && isSideToken(args.get(index).toLowerCase(Locale.ROOT))) side = args.get(index++);
+            if (args.size() - index != 3) {
+                println("monitor: usage: monitor led [side] <row> <label> <on|off>"); lastExitCode = 1; return;
+            }
+            try {
+                int row = Integer.parseInt(args.get(index++));
+                boolean on = switch (args.get(index + 1).toLowerCase(Locale.ROOT)) {
+                    case "on", "true", "1" -> true;
+                    case "off", "false", "0" -> false;
+                    default -> throw new IllegalArgumentException("state must be on or off");
+                };
+                if (!host.monitorSetLine(side, row, com.malice.terminalcraft.device.MonitorWidgets.led(args.get(index), on))) {
+                    println("monitor: row outside screen or monitor not found"); lastExitCode = 1; return;
+                }
+                lastExitCode = 0; return;
+            } catch (NumberFormatException invalid) {
+                println("monitor: row must be an integer"); lastExitCode = 1; return;
+            } catch (IllegalArgumentException invalid) {
+                println("monitor: " + invalid.getMessage()); lastExitCode = 1; return;
+            }
+        }
+        if ("spark".equals(op) || "sparkline".equals(op)) {
+            int index = 1;
+            String side = "any";
+            if (index < args.size() && isSideToken(args.get(index).toLowerCase(Locale.ROOT))) side = args.get(index++);
+            if (args.size() - index < 3) {
+                println("monitor: usage: monitor spark [side] <row> <label> <values...>"); lastExitCode = 1; return;
+            }
+            try {
+                int row = Integer.parseInt(args.get(index++));
+                String label = args.get(index++);
+                List<Integer> values = new ArrayList<>();
+                while (index < args.size()) values.add(Integer.parseInt(args.get(index++)));
+                if (!host.monitorSetLine(side, row, com.malice.terminalcraft.device.MonitorWidgets.sparkline(label, values))) {
+                    println("monitor: row outside screen or monitor not found"); lastExitCode = 1; return;
+                }
+                lastExitCode = 0; return;
+            } catch (NumberFormatException invalid) {
+                println("monitor: spark values must be integers"); lastExitCode = 1; return;
+            }
         }
         if ("clear".equals(op)) {
             String side = args.size() > 1 ? args.get(1) : "any";
@@ -2839,6 +2934,24 @@ public class BashShell implements ShellCommandModule.Context {
             return;
         }
         lastExitCode = 0;
+    }
+
+    private void cmdMonitorScreensaver(List<String> args) {
+        String action = args.size() > 1 ? args.get(1).toLowerCase(Locale.ROOT) : "start";
+        String side = args.size() > 2 ? args.get(2) : "any";
+        if (args.size() > 3 || !isSideToken(side.toLowerCase(Locale.ROOT))) {
+            println("monitor: usage: monitor screensaver [start|color|stop|status] [side]");
+            lastExitCode = 1;
+            return;
+        }
+        String result = host.monitorScreensaver(side, action);
+        if (result == null || result.isBlank()) {
+            println("monitor: no monitor wall found on side '" + side + "'");
+            lastExitCode = 1;
+            return;
+        }
+        println(result);
+        lastExitCode = result.startsWith("usage:") ? 1 : 0;
     }
 
     private void cmdRemoteMonitor(List<String> args) {
@@ -3192,6 +3305,7 @@ public class BashShell implements ShellCommandModule.Context {
             }
         }
         trimOutput();
+        syncTerminalSurface();
     }
 
     private void trimOutput() {
@@ -3225,6 +3339,7 @@ public class BashShell implements ShellCommandModule.Context {
             histTag.add(StringTag.valueOf(h));
         }
         tag.put("History", histTag);
+        tag.put("Surface", terminalSurface.save(new CompoundTag()));
         tag.put("Vfs", vfs.save());
         tag.putBoolean("DiskMounted", diskMounted);
         tag.putBoolean("EditorActive", editor.active);
@@ -3276,6 +3391,9 @@ public class BashShell implements ShellCommandModule.Context {
             output.add(PersistedDataLimits.truncate(outTag.getString(i),
                     PersistedDataLimits.MAX_OUTPUT_LINE_CHARS));
         }
+        boolean loadedSurface = tag.contains("Surface", Tag.TAG_COMPOUND)
+                && terminalSurface.load(tag.getCompound("Surface"));
+        if (!loadedSurface) syncTerminalSurface();
 
         commandHistory.clear();
         ListTag histTag = tag.getList("History", Tag.TAG_STRING);
@@ -3324,6 +3442,25 @@ public class BashShell implements ShellCommandModule.Context {
             editor.cursor = 0;
         }
         ensureBooted();
+    }
+
+    private void syncTerminalSurface() {
+        int first = Math.max(0, output.size() - terminalSurface.height());
+        for (int row = 0; row < terminalSurface.height(); row++) {
+            String source = first + row < output.size() ? output.get(first + row) : "";
+            for (int column = 0; column < terminalSurface.width(); column++) {
+                char value = column < source.length() ? source.charAt(column) : ' ';
+                if (terminalSurface.characterAt(column, row) != value) {
+                    terminalSurface.setCell(column, row, value,
+                            terminalSurface.foregroundAt(column, row),
+                            terminalSurface.backgroundAt(column, row));
+                }
+            }
+        }
+        String last = output.isEmpty() ? "" : output.get(output.size() - 1);
+        terminalSurface.setCursor(Math.min(terminalSurface.width() + 1, last.length() + 1),
+                terminalSurface.height());
+        terminalSurface.setCursorBlink(true);
     }
 
     /** Simple in-memory hierarchical filesystem. */

@@ -5,6 +5,7 @@ import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.device.DeviceIdentity;
 import com.malice.terminalcraft.device.MonitorDevice;
 import com.malice.terminalcraft.device.ServerDeviceManager;
+import com.malice.terminalcraft.device.TerminalBuffer;
 import com.malice.terminalcraft.device.DeviceValue;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -40,9 +41,12 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
     private int foregroundColor = 0x66FF99;
     private int backgroundColor = 0x050A05;
     private String registeredWallSignature = "";
+    private final TerminalBuffer terminalSurface =
+            new com.malice.terminalcraft.device.TerminalBuffer(MAX_LINE_LEN, MAX_LINES);
 
     public MonitorBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.MONITOR_BLOCK_ENTITY.get(), pos, state);
+        syncLegacyPaletteToSurface();
     }
 
     public UUID getDeviceId() {
@@ -78,6 +82,11 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         return Collections.unmodifiableList(new ArrayList<>(lines));
     }
 
+    @Override
+    public TerminalBuffer terminalSurface() {
+        return terminalSurface;
+    }
+
     public String getTitle() {
         return title;
     }
@@ -89,12 +98,13 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
     public WallRenderState wallRenderState() {
         MonitorGroupDevice.Group group = MonitorGroupDevice.discover(this);
         MonitorBlockEntity palette = group.anchor();
+        TerminalBuffer surface = new MonitorWallSurface(group);
         return new WallRenderState(group.anchor() == this, group.width(), group.height(),
-                new MonitorGroupDevice(this).lines(), palette.foregroundColor(), palette.backgroundColor());
+                new MonitorGroupDevice(this).lines(), palette.foregroundColor(), palette.backgroundColor(), surface);
     }
 
     public record WallRenderState(boolean anchor, int width, int height, List<String> lines,
-                                  int foregroundColor, int backgroundColor) {}
+                                  int foregroundColor, int backgroundColor, TerminalBuffer surface) {}
 
     /** Public wall geometry boundary used by optional display integrations. */
     public int wallColumns() {
@@ -151,11 +161,25 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
     public void setPalette(int foreground, int background) {
         foregroundColor = foreground & 0xFFFFFF;
         backgroundColor = background & 0xFFFFFF;
+        syncLegacyPaletteToSurface();
         setChangedAndSync();
     }
 
     @Override
     public void setLine(int row, String text) {
+        if (row < 0 || row >= MAX_LINES) {
+            throw new IllegalArgumentException("monitor row must be from 0 to " + (MAX_LINES - 1));
+        }
+        String safe = sanitize(text);
+        while (lines.size() <= row) lines.add("");
+        lines.set(row, safe);
+        terminalSurface.setLine(row, safe);
+        trimTrailingBlankLines();
+        setChangedAndSync();
+    }
+
+    @Override
+    public void setLineFromSurface(int row, String text) {
         if (row < 0 || row >= MAX_LINES) {
             throw new IllegalArgumentException("monitor row must be from 0 to " + (MAX_LINES - 1));
         }
@@ -174,6 +198,7 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
     @Override
     public void clear() {
         lines.clear();
+        terminalSurface.clear();
         setChangedAndSync();
     }
 
@@ -184,6 +209,8 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         while (lines.size() > MAX_LINES) {
             lines.remove(0);
         }
+        terminalSurface.clear();
+        for (int row = 0; row < lines.size(); row++) terminalSurface.setLine(row, lines.get(row));
         setChangedAndSync();
     }
 
@@ -197,7 +224,62 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
                 }
             }
         }
+        terminalSurface.clear();
+        for (int row = 0; row < lines.size(); row++) terminalSurface.setLine(row, lines.get(row));
         setChangedAndSync();
+    }
+
+    /** Replaces the local tile surface without publishing one event per row. */
+    void replaceLinesQuietly(List<String> newLines) {
+        lines.clear();
+        if (newLines != null) {
+            for (String line : newLines) {
+                lines.add(sanitize(line));
+                if (lines.size() >= MAX_LINES) break;
+            }
+        }
+        terminalSurface.clear();
+        for (int row = 0; row < lines.size(); row++) terminalSurface.setLine(row, lines.get(row));
+    }
+
+    /** Replaces a local tile's text, per-cell colors, and palette without publishing row events. */
+    void replaceSurfaceQuietly(List<String> newLines, List<String> foreground,
+                               List<String> background, int[] surfacePalette) {
+        if (surfacePalette == null || surfacePalette.length != TerminalBuffer.PALETTE_SIZE) {
+            throw new IllegalArgumentException("monitor surface palette must contain 16 colors");
+        }
+        lines.clear();
+        if (newLines != null) {
+            for (String line : newLines) {
+                lines.add(sanitize(line));
+                if (lines.size() >= MAX_LINES) break;
+            }
+        }
+        for (int color = 0; color < surfacePalette.length; color++) {
+            terminalSurface.setPaletteColor(color, surfacePalette[color]);
+        }
+        terminalSurface.clear();
+        for (int row = 0; row < MAX_LINES; row++) {
+            String text = row < lines.size() ? lines.get(row) : "";
+            String foregroundRow = foreground != null && row < foreground.size() ? foreground.get(row) : "";
+            String backgroundRow = background != null && row < background.size() ? background.get(row) : "";
+            for (int column = 0; column < MAX_LINE_LEN; column++) {
+                char character = column < text.length() ? text.charAt(column) : ' ';
+                terminalSurface.setCell(column, row, character,
+                        colorAt(foregroundRow, column), colorAt(backgroundRow, column));
+            }
+        }
+    }
+
+    /** Publishes one batched output event after a multi-tile surface update. */
+    void publishOutputChanged() {
+        setChangedAndSync();
+    }
+
+    private static int colorAt(String colors, int column) {
+        if (colors == null || column < 0 || column >= colors.length()) return 0;
+        int color = Character.digit(colors.charAt(column), 16);
+        return color < 0 ? 0 : color;
     }
 
 
@@ -227,6 +309,7 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         };
         int column = tileColumn * MAX_LINE_LEN + Math.min(MAX_LINE_LEN - 1, Math.max(0, (int) (horizontal * MAX_LINE_LEN)));
         int row = tileRow * MAX_LINES + Math.min(MAX_LINES - 1, Math.max(0, (int) ((1.0 - localY) * MAX_LINES)));
+        DisplayTransportRuntime.handleTouch(group.anchor(), column, row, player);
         ServerDeviceManager.publishEvent(group.anchor(), "touch", level.getGameTime(),
                 (DeviceValue.MapValue) DeviceValue.map(java.util.Map.of(
                         "x", DeviceValue.of(column),
@@ -324,6 +407,9 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
             list.add(StringTag.valueOf(line));
         }
         tag.put("Lines", list);
+        CompoundTag surface = new CompoundTag();
+        terminalSurface.save(surface);
+        tag.put("Surface", surface);
     }
 
     @Override
@@ -342,6 +428,20 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
             for (int i = 0; i < list.size() && i < MAX_LINES; i++) {
                 lines.add(sanitize(list.getString(i)));
             }
+        }
+        CompoundTag surface = tag.contains("Surface", Tag.TAG_COMPOUND) ? tag.getCompound("Surface") : null;
+        if (surface == null || !terminalSurface.load(surface)) {
+            terminalSurface.clear();
+            syncLegacyPaletteToSurface();
+            for (int row = 0; row < lines.size(); row++) terminalSurface.setLine(row, lines.get(row));
+            terminalSurface.setCursor(1, 1);
+        } else {
+            // Legacy monitor palette fields remain the compatibility source of truth for line
+            // APIs. Keep the active surface slots in sync after loading older snapshots whose
+            // Surface palette predates the palette bridge.
+            syncLegacyPaletteToSurface();
+            lines.clear();
+            lines.addAll(terminalSurface.lines());
         }
     }
 
@@ -364,5 +464,10 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         if (tag != null) {
             load(tag);
         }
+    }
+
+    private void syncLegacyPaletteToSurface() {
+        terminalSurface.setPaletteColor(terminalSurface.textColor(), foregroundColor);
+        terminalSurface.setPaletteColor(terminalSurface.backgroundColor(), backgroundColor);
     }
 }

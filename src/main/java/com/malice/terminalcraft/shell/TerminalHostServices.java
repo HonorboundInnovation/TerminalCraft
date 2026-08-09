@@ -97,9 +97,18 @@ public record TerminalHostServices(
                     @Override public boolean registerService(String service, int port) { return host.modemRegisterService(service, port); }
                     @Override public boolean unregisterService(String service) { return host.modemUnregisterService(service); }
                     @Override public List<String> localServices() { return host.modemLocalServices(); }
+                    @Override public boolean registerSensorService(String service, int port) { return host.modemRegisterSensorService(service, port); }
+                    @Override public boolean unregisterSensorService(String service) { return host.modemUnregisterSensorService(service); }
+                    @Override public List<String> sensorServices() { return host.modemSensorServices(); }
+                    @Override public boolean transmitSensorService(String service, String operation, String channel, int replyPort) {
+                        return host.modemTransmitSensorService(service, operation, channel, replyPort);
+                    }
                     @Override public List<String> services(int maximum) { return host.modemServices(maximum); }
                     @Override public boolean transmitService(String service, int replyPort, String message) { return host.modemTransmitService(service, replyPort, message); }
                     @Override public List<String> receive(int maximum) { return host.modemReceive(maximum); }
+                    @Override public List<String> status() { return host.modemStatus(); }
+                    @Override public boolean automaticSetup() { return host.modemAutomaticSetup(); }
+                    @Override public boolean setAutomaticSetup(boolean enabled) { return host.modemSetAutomaticSetup(enabled); }
                 },
                 new BundledWire() {
                     @Override public boolean available(String side) { return host.hasBundledCable(side); }
@@ -185,9 +194,16 @@ public record TerminalHostServices(
         boolean registerService(String service, int port);
         boolean unregisterService(String service);
         List<String> localServices();
+        default boolean registerSensorService(String service, int port) { return false; }
+        default boolean unregisterSensorService(String service) { return false; }
+        default List<String> sensorServices() { return List.of(); }
+        default boolean transmitSensorService(String service, String operation, String channel, int replyPort) { return false; }
         List<String> services(int maximum);
         boolean transmitService(String service, int replyPort, String message);
         List<String> receive(int maximum);
+        default List<String> status() { return List.of(); }
+        default boolean automaticSetup() { return false; }
+        default boolean setAutomaticSetup(boolean enabled) { return false; }
     }
 
     public interface BundledWire {

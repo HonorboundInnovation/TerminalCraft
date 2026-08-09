@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 
 /** Bounded registry for currently discovered endpoints. Lifecycle owners register and invalidate devices. */
 public final class DeviceRegistry implements DeviceAccess {
@@ -125,6 +126,71 @@ public final class DeviceRegistry implements DeviceAccess {
     public synchronized boolean unsubscribeEvents(DeviceCallContext context, UUID subscriptionId) {
         if (!DeviceAuthorization.allows(context, DeviceAuthorization.Action.DISCOVER)) return false;
         return eventRuntime.unsubscribe(context.principal(), subscriptionId);
+    }
+
+    public synchronized DeviceResult beginEventWait(DeviceCallContext context, UUID subscriptionId,
+                                                     long gameTime, long timeoutTicks) {
+        return beginEventWait(context, subscriptionId, gameTime, timeoutTicks, null);
+    }
+
+    /** Starts an event wait without blocking; the callback is reserved for scheduler wakeups. */
+    public synchronized DeviceResult beginEventWait(DeviceCallContext context, UUID subscriptionId,
+                                                     long gameTime, long timeoutTicks,
+                                                     LongConsumer wakeup) {
+        DeviceResult authorization = DeviceAuthorization.require(
+                Objects.requireNonNull(context, "context"), DeviceCallContext.READ);
+        if (!authorization.isSuccess()) return authorization;
+        try {
+            Optional<DeviceEventWaitResult> result = eventRuntime.beginWait(context.principal(),
+                    Objects.requireNonNull(subscriptionId, "subscriptionId"), gameTime,
+                    timeoutTicks, wakeup);
+            return result.map(DeviceRegistry::waitValue)
+                    .map(DeviceResult::success)
+                    .orElseGet(() -> DeviceResult.failure(DeviceErrorCode.NOT_FOUND,
+                            "event subscription not found", false));
+        } catch (IllegalArgumentException exception) {
+            return DeviceResult.failure(DeviceErrorCode.INVALID_ARGUMENT, exception.getMessage(), false);
+        } catch (IllegalStateException exception) {
+            return DeviceResult.failure(DeviceErrorCode.CAPACITY_EXCEEDED, exception.getMessage(), false);
+        }
+    }
+
+    public synchronized Optional<DeviceEventWaitResult> pollEventWait(DeviceCallContext context,
+                                                                       UUID waitId,
+                                                                       long gameTime) {
+        if (!DeviceAuthorization.allows(context, DeviceAuthorization.Action.DISCOVER)) {
+            return Optional.empty();
+        }
+        try {
+            return eventRuntime.pollWait(context.principal(), Objects.requireNonNull(waitId, "waitId"), gameTime);
+        } catch (IllegalArgumentException exception) {
+            return Optional.empty();
+        }
+    }
+
+    public synchronized boolean cancelEventWait(DeviceCallContext context, UUID waitId) {
+        if (!DeviceAuthorization.allows(context, DeviceAuthorization.Action.DISCOVER)) return false;
+        return eventRuntime.cancelWait(context.principal(), Objects.requireNonNull(waitId, "waitId"));
+    }
+
+    private static DeviceValue waitValue(DeviceEventWaitResult result) {
+        Map<String, DeviceValue> value = new LinkedHashMap<>();
+        value.put("wait_id", DeviceValue.of(result.waitId().toString()));
+        value.put("subscription_id", DeviceValue.of(result.subscriptionId().toString()));
+        value.put("status", DeviceValue.of(result.status().name().toLowerCase()));
+        value.put("wake_at", DeviceValue.of(result.wakeAt()));
+        value.put("dropped", DeviceValue.of(result.dropped()));
+        result.event().ifPresent(event -> value.put("event", eventValue(event)));
+        return DeviceValue.map(value);
+    }
+
+    private static DeviceValue eventValue(DeviceEvent event) {
+        return DeviceValue.map(Map.of(
+                "sequence", DeviceValue.of(event.sequence()),
+                "source", DeviceValue.of(event.sourceDeviceId().toString()),
+                "type", DeviceValue.of(event.type()),
+                "game_time", DeviceValue.of(event.gameTime()),
+                "payload", event.payload()));
     }
 
     /** Returns a caller-bound view; permission checks remain authoritative in this registry. */
@@ -302,7 +368,7 @@ public final class DeviceRegistry implements DeviceAccess {
     private record Poll(DeviceEventBatch batch, long cursor) {}
 
     private static final class BoundAccess implements DeviceAccess, AddressAwareDeviceAccess,
-            DeviceEventSubscriptionAccess {
+            DeviceEventSubscriptionAccess, DeviceEventWaitAccess {
         private final DeviceRegistry registry;
         private final DeviceCallContext context;
         private long eventCursor;
@@ -343,6 +409,19 @@ public final class DeviceRegistry implements DeviceAccess {
         }
         @Override public boolean unsubscribeEvents(UUID subscriptionId) {
             return registry.unsubscribeEvents(context, subscriptionId);
+        }
+        @Override public DeviceResult beginEventWait(UUID subscriptionId, long gameTime, long timeoutTicks) {
+            return registry.beginEventWait(context, subscriptionId, gameTime, timeoutTicks);
+        }
+        @Override public DeviceResult beginEventWait(UUID subscriptionId, long gameTime,
+                                                     long timeoutTicks, LongConsumer wakeup) {
+            return registry.beginEventWait(context, subscriptionId, gameTime, timeoutTicks, wakeup);
+        }
+        @Override public Optional<DeviceEventWaitResult> pollEventWait(UUID waitId, long gameTime) {
+            return registry.pollEventWait(context, waitId, gameTime);
+        }
+        @Override public boolean cancelEventWait(UUID waitId) {
+            return registry.cancelEventWait(context, waitId);
         }
     }
 

@@ -147,6 +147,24 @@ public final class ServerJobScheduler {
         return true;
     }
 
+    /**
+     * Makes a queued cooperative job eligible immediately after an external logical event.
+     * Event runtimes call this from their same-server-thread wake callback; it never executes the
+     * job and therefore cannot bypass the normal tick budget or cancellation check.
+     */
+    public synchronized boolean wake(UUID id, DeviceCallContext caller, long gameTime) {
+        if (gameTime < 0) throw new IllegalArgumentException("game time must not be negative");
+        Job job = jobs.get(id);
+        if (job == null || !DeviceAuthorization.owns(caller, job.context.principal())
+                || job.state != State.QUEUED) return false;
+        long effectiveWake = Math.max(job.submittedAt, gameTime);
+        if (job.eligibleAt <= effectiveWake) return true;
+        jobs.put(id, new Job(job.id, job.process, job.context, job.command, job.state,
+                job.exitCode, job.lastError, job.submittedAt, effectiveWake,
+                job.startedAt, job.finishedAt, job.continuationVersion, job.continuation));
+        return true;
+    }
+
     public synchronized Job get(UUID id) {
         return jobs.get(id);
     }

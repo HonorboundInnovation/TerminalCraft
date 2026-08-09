@@ -9,12 +9,28 @@ TerminalCraft is a Forge mod for **Minecraft 1.20.1** that adds programmable, Ba
 - **Terminal computers** with a persistent Bash-inspired shell and virtual filesystem.
 - **Pocket terminals** that retain their state on the item.
 - **Turtles** with programmable movement, inspection, digging, placing, and device access.
-- **Monitor walls** for local scripts, typed RedNet publication from pocket terminals, and optional Create Display Links.
+- **Monitor walls** for local scripts, animated full-wall geometric screensavers, typed RedNet publication from pocket terminals, wireless display links, routed video cables, and optional Create Display Links.
 - **Floppy disks and disk drives** with mountable, persistent storage.
 - **RedNet networking** with wireless modems, physical network cable, routers, named hosts and services, typed routes, bounded queues, and reliable-delivery diagnostics.
 - **Redstone automation** through red alloy wire and 16-channel bundled control cable.
+- **Programmable Logic Controllers** with editor-backed scan programs, timers, counters, latches,
+  vanilla redstone I/O, bundled 16-channel I/O, and monitor dashboards reachable by direct,
+  wireless, or video-cable display paths; live watch tables, force controls, alarms, ownership, and
+  program slots. PLCs also support 0–15 analog signals, linear scaling, bounded PID loops, a
+  draggable ladder projection, persisted trend history, and owner-authorized remote programming.
+- **Display transport** with paired wireless display links and six-direction routed video cable
+  components, diagnostics/configuration GUIs, fault-contained rendering, and remote mirroring.
+- **Monitor widgets and terminal ergonomics** including bars, LEDs, sparklines, and Ctrl+R history
+  search/Ctrl+L input clearing.
 - **Server racks and scheduled jobs** for bounded, persistent automation workloads.
 - **Generic Forge device access** for adjacent item, fluid, and energy capabilities.
+- **Universal Sensor Arrays** with 16 configurable channels for redstone, block state, inventory,
+  fluid, energy, entity, machine, environment, network, kinetic, and future chemical telemetry.
+  Channels expose quality state, calibration, terminal commands, PLC `SENSOR` inputs, device events,
+  and optional typed RedNet telemetry services. Each family is also available as its own one-channel
+  sensor block for compact builds and dedicated PLC inputs.
+- **Network Access Storage** with eight portable, tiered solid-state drive bays for bounded electronic
+  item and fluid storage, plus a read-only **Materializer** output block for players and automation.
 - **Optional integrations** for Create, Sophisticated Storage, Sophisticated Backpacks, Storage Drawers, and Refined Storage. These mods are not required for TerminalCraft to start.
 
 ## Shell overview
@@ -29,7 +45,7 @@ env  history  whoami  uname  date  test  source  bash
 It also exposes gameplay-oriented command families for:
 
 ```text
-redstone  wire  peripheral  device  storage  turtle  monitor  modem
+redstone  wire  plc  peripheral  device  storage  turtle  monitor  modem  sensor
 mount  umount  disk  server/jobs  auth/authorization
 ```
 
@@ -37,14 +53,14 @@ Scripts support variables, exit status, pipes, redirection, command chaining, an
 
 ## Complete documentation
 
-Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual. For production-style examples, failure-aware automation, exact transfers, RedNet operations, events, and jobs, see the **[Advanced Script Cookbook](docs/ADVANCED_SCRIPT_COOKBOOK.md)**. Version history is maintained in the **[changelog](docs/CHANGELOG.md)**, with additional context in the **[1.0.19 release notes](docs/RELEASE_NOTES_1.0.19.md)**.
+Read **[The TerminalCraft Guide](docs/TERMINALCRAFT_GUIDE.md)** for the complete player and administrator manual. For production-style examples, failure-aware automation, exact transfers, RedNet operations, events, and jobs, see the **[Advanced Script Cookbook](docs/ADVANCED_SCRIPT_COOKBOOK.md)**. Version history is maintained in the **[changelog](docs/CHANGELOG.md)**, with additional context in the **[1.0.38 release notes](docs/RELEASE_NOTES_1.0.38.md)**.
 
 The full guide includes:
 
 - every major block, item, and crafting recipe;
 - the virtual filesystem and complete shell language subset;
 - scripting limits and differences from GNU Bash;
-- turtles, monitors, disks, redstone, bundled cable, and RedNet;
+- turtles, monitors, disks, redstone, PLCs, bundled cable, and RedNet;
 - devices, storage, exact transfers, events, jobs, and authorization;
 - optional integrations, server configuration, and troubleshooting;
 - a library of practical, source-controlled [sample scripts](examples/scripts).
@@ -87,7 +103,7 @@ On Windows:
 The built mod JAR is written to:
 
 ```text
-build/libs/terminalcraft-1.20.1-47.4.10-1.0.19.jar
+build/libs/terminalcraft-1.20.1-47.4.10-1.0.38.jar
 ```
 
 ForgeGradle will download the required development dependencies during the first build.

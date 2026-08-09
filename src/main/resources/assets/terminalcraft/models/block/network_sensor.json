@@ -1,0 +1,365 @@
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
+  "textures": {
+    "particle": "terminalcraft:block/network_sensor_custom",
+    "side": "terminalcraft:block/network_sensor_custom",
+    "front": "terminalcraft:block/network_sensor_custom",
+    "port": "terminalcraft:block/network_sensor_custom",
+    "antenna": "terminalcraft:block/network_sensor_custom"
+  },
+  "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        1,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#side"
+        },
+        "up": {
+          "texture": "#side"
+        },
+        "north": {
+          "texture": "#side"
+        },
+        "south": {
+          "texture": "#side"
+        },
+        "west": {
+          "texture": "#side"
+        },
+        "east": {
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        1,
+        1,
+        1
+      ],
+      "to": [
+        15,
+        15,
+        15
+      ],
+      "faces": {
+        "down": {
+          "texture": "#side"
+        },
+        "up": {
+          "texture": "#antenna"
+        },
+        "north": {
+          "texture": "#side"
+        },
+        "south": {
+          "texture": "#side"
+        },
+        "west": {
+          "texture": "#side"
+        },
+        "east": {
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        2,
+        2,
+        0
+      ],
+      "to": [
+        14,
+        14,
+        2
+      ],
+      "faces": {
+        "down": {
+          "texture": "#front"
+        },
+        "up": {
+          "texture": "#front"
+        },
+        "north": {
+          "texture": "#front"
+        },
+        "south": {
+          "texture": "#front"
+        },
+        "west": {
+          "texture": "#front"
+        },
+        "east": {
+          "texture": "#front"
+        }
+      }
+    },
+    {
+      "from": [
+        4,
+        4,
+        0
+      ],
+      "to": [
+        6,
+        6,
+        1
+      ],
+      "faces": {
+        "down": {
+          "texture": "#port"
+        },
+        "up": {
+          "texture": "#port"
+        },
+        "north": {
+          "texture": "#port"
+        },
+        "south": {
+          "texture": "#port"
+        },
+        "west": {
+          "texture": "#port"
+        },
+        "east": {
+          "texture": "#port"
+        }
+      }
+    },
+    {
+      "from": [
+        10,
+        4,
+        0
+      ],
+      "to": [
+        12,
+        6,
+        1
+      ],
+      "faces": {
+        "down": {
+          "texture": "#port"
+        },
+        "up": {
+          "texture": "#port"
+        },
+        "north": {
+          "texture": "#port"
+        },
+        "south": {
+          "texture": "#port"
+        },
+        "west": {
+          "texture": "#port"
+        },
+        "east": {
+          "texture": "#port"
+        }
+      }
+    },
+    {
+      "from": [
+        4,
+        10,
+        0
+      ],
+      "to": [
+        6,
+        12,
+        1
+      ],
+      "faces": {
+        "down": {
+          "texture": "#port"
+        },
+        "up": {
+          "texture": "#port"
+        },
+        "north": {
+          "texture": "#port"
+        },
+        "south": {
+          "texture": "#port"
+        },
+        "west": {
+          "texture": "#port"
+        },
+        "east": {
+          "texture": "#port"
+        }
+      }
+    },
+    {
+      "from": [
+        10,
+        10,
+        0
+      ],
+      "to": [
+        12,
+        12,
+        1
+      ],
+      "faces": {
+        "down": {
+          "texture": "#port"
+        },
+        "up": {
+          "texture": "#port"
+        },
+        "north": {
+          "texture": "#port"
+        },
+        "south": {
+          "texture": "#port"
+        },
+        "west": {
+          "texture": "#port"
+        },
+        "east": {
+          "texture": "#port"
+        }
+      }
+    },
+    {
+      "from": [
+        3,
+        3,
+        15
+      ],
+      "to": [
+        5,
+        5,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#antenna"
+        },
+        "up": {
+          "texture": "#antenna"
+        },
+        "north": {
+          "texture": "#antenna"
+        },
+        "south": {
+          "texture": "#antenna"
+        },
+        "west": {
+          "texture": "#antenna"
+        },
+        "east": {
+          "texture": "#antenna"
+        }
+      }
+    },
+    {
+      "from": [
+        11,
+        3,
+        15
+      ],
+      "to": [
+        13,
+        5,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#antenna"
+        },
+        "up": {
+          "texture": "#antenna"
+        },
+        "north": {
+          "texture": "#antenna"
+        },
+        "south": {
+          "texture": "#antenna"
+        },
+        "west": {
+          "texture": "#antenna"
+        },
+        "east": {
+          "texture": "#antenna"
+        }
+      }
+    },
+    {
+      "from": [
+        3,
+        11,
+        15
+      ],
+      "to": [
+        5,
+        13,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#antenna"
+        },
+        "up": {
+          "texture": "#antenna"
+        },
+        "north": {
+          "texture": "#antenna"
+        },
+        "south": {
+          "texture": "#antenna"
+        },
+        "west": {
+          "texture": "#antenna"
+        },
+        "east": {
+          "texture": "#antenna"
+        }
+      }
+    },
+    {
+      "from": [
+        11,
+        11,
+        15
+      ],
+      "to": [
+        13,
+        13,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#antenna"
+        },
+        "up": {
+          "texture": "#antenna"
+        },
+        "north": {
+          "texture": "#antenna"
+        },
+        "south": {
+          "texture": "#antenna"
+        },
+        "west": {
+          "texture": "#antenna"
+        },
+        "east": {
+          "texture": "#antenna"
+        }
+      }
+    }
+  ]
+}

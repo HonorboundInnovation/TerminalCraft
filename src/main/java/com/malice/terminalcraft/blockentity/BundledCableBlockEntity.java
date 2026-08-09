@@ -183,7 +183,17 @@ public class BundledCableBlockEntity extends BlockEntity {
     @Override
     public void onLoad() {
         super.onLoad();
-        if (level != null && !level.isClientSide) {
+        if (level == null || level.isClientSide) return;
+
+        // A chunk may be saved after support disappears while it is unloaded.
+        // Reuse the normal face-removal path so stale multipart occupancy cannot
+        // resurrect unsupported cable faces or retain their channel state.
+        for (Direction face : Set.copyOf(faces)) {
+            if (!BundledCableBlock.canFaceSurvive(level, worldPosition, face)) {
+                BundledCableBlock.removeFace(level, worldPosition, face, true);
+            }
+        }
+        if (level.getBlockEntity(worldPosition) == this && !faces.isEmpty()) {
             refreshVanillaInput();
             recomputeComponent();
         }

@@ -1,0 +1,6 @@
+{
+  "type":"minecraft:crafting_shaped",
+  "pattern":["IPI","RNR","IGI"],
+  "key":{"I":{"item":"minecraft:iron_ingot"},"P":{"item":"minecraft:piston"},"R":{"item":"minecraft:redstone"},"N":{"item":"terminalcraft:network_access_storage"},"G":{"item":"minecraft:glass_pane"}},
+  "result":{"item":"terminalcraft:materializer"}
+}

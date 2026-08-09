@@ -1,1 +1,107 @@
-{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/iron_block"}}
+{
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
+  "textures": {
+    "particle": "#side",
+    "side": "terminalcraft:block/refined_bridge_face_custom",
+    "front": "terminalcraft:block/refined_bridge_face_custom",
+    "port": "terminalcraft:block/network_cable_custom"
+  },
+  "elements": [
+    {
+      "from": [
+        1,
+        1,
+        1
+      ],
+      "to": [
+        15,
+        15,
+        15
+      ],
+      "faces": {
+        "down": {
+          "texture": "#side"
+        },
+        "up": {
+          "texture": "#side"
+        },
+        "north": {
+          "texture": "#front"
+        },
+        "south": {
+          "texture": "#side"
+        },
+        "west": {
+          "texture": "#side"
+        },
+        "east": {
+          "texture": "#side"
+        }
+      }
+    },
+    {
+      "from": [
+        2,
+        2,
+        0
+      ],
+      "to": [
+        14,
+        14,
+        2
+      ],
+      "faces": {
+        "north": {
+          "texture": "#front"
+        }
+      }
+    },
+    {
+      "from": [
+        6,
+        6,
+        0
+      ],
+      "to": [
+        10,
+        10,
+        1
+      ],
+      "faces": {
+        "north": {
+          "texture": "#port"
+        }
+      }
+    },
+    {
+      "from": [
+        6,
+        15,
+        6
+      ],
+      "to": [
+        10,
+        16,
+        10
+      ],
+      "faces": {
+        "up": {
+          "texture": "#front"
+        },
+        "north": {
+          "texture": "#front"
+        },
+        "south": {
+          "texture": "#front"
+        },
+        "west": {
+          "texture": "#front"
+        },
+        "east": {
+          "texture": "#front"
+        }
+      }
+    }
+  ]
+}

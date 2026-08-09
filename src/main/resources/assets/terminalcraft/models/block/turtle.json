@@ -1,8 +1,8 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "particle": "terminalcraft:block/turtle_front",
-    "front": "terminalcraft:block/turtle_front",
+    "particle": "terminalcraft:block/turtle_front_custom",
+    "front": "terminalcraft:block/turtle_front_custom",
     "back": "terminalcraft:block/turtle_back",
     "side": "terminalcraft:block/turtle_side",
     "side_left": "terminalcraft:block/turtle_side_left",

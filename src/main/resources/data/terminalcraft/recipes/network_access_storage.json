@@ -1,0 +1,6 @@
+{
+  "type":"minecraft:crafting_shaped",
+  "pattern":["IRI","DCD","IRI"],
+  "key":{"I":{"item":"minecraft:iron_ingot"},"R":{"item":"minecraft:redstone"},"D":{"item":"terminalcraft:solid_state_drive"},"C":{"item":"minecraft:comparator"}},
+  "result":{"item":"terminalcraft:network_access_storage"}
+}

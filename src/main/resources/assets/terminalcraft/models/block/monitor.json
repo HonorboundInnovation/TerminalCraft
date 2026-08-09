@@ -1,8 +1,8 @@
 {
   "parent": "minecraft:block/block",
   "textures": {
-    "particle": "terminalcraft:block/monitor_front",
-    "front": "terminalcraft:block/monitor_front",
+    "particle": "terminalcraft:block/monitor_front_custom",
+    "front": "terminalcraft:block/monitor_front_custom",
     "back": "terminalcraft:block/monitor_back",
     "side": "terminalcraft:block/monitor_side",
     "top": "terminalcraft:block/monitor_top",

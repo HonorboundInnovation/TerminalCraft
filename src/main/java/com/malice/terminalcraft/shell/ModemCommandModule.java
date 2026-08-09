@@ -29,6 +29,8 @@ final class ModemCommandModule implements ShellCommandModule {
             context.printLine("modem open|listen <channel>");
             context.printLine("modem close|unlisten <channel>");
             context.printLine("modem channels");
+            context.printLine("modem auto [on|off]");
+            context.printLine("modem status");
             context.printLine("modem hostname [name|clear]");
             context.printLine("modem network [name|clear]");
             context.printLine("modem interfaces");
@@ -41,10 +43,11 @@ final class ModemCommandModule implements ShellCommandModule {
             context.printLine("modem neighbors [max]");
             context.printLine("modem hosts");
             context.printLine("modem service [list|add <name> <channel>|remove <name>]");
+            context.printLine("modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]");
             context.printLine("modem services");
             context.printLine("modem call <service> [replyChannel] <message>");
-            context.printLine("modem send <channel> [replyChannel] <message>");
-            context.printLine("modem sendto <host> <channel> [replyChannel] <message>");
+            context.printLine("modem send [channel] [replyChannel] <message>");
+            context.printLine("modem sendto <host> [channel] [replyChannel] <message>");
             context.printLine("modem recv [max]");
             context.setExitCode(0);
             return;
@@ -110,6 +113,40 @@ final class ModemCommandModule implements ShellCommandModule {
                 }
                 context.printLine(sb.toString());
             }
+            context.setExitCode(0);
+            return;
+        }
+        if ("auto".equals(op) || "automatic".equals(op) || "setup".equals(op)) {
+            if (args.size() == 1) {
+                context.printLine(modem.automaticSetup() ? "automatic setup on" : "automatic setup off");
+                context.setExitCode(0);
+                return;
+            }
+            if (args.size() != 2 || !("on".equalsIgnoreCase(args.get(1))
+                    || "off".equalsIgnoreCase(args.get(1)))) {
+                context.printLine("modem: usage: modem auto [on|off]");
+                context.setExitCode(1);
+                return;
+            }
+            boolean enabled = "on".equalsIgnoreCase(args.get(1));
+            if (!modem.setAutomaticSetup(enabled)) {
+                context.printLine("modem: automatic setup change failed");
+                context.setExitCode(1);
+                return;
+            }
+            context.printLine("automatic setup " + (enabled ? "on" : "off"));
+            context.setExitCode(0);
+            return;
+        }
+        if ("status".equals(op)) {
+            if (args.size() != 1) {
+                context.printLine("modem: usage: modem status");
+                context.setExitCode(1);
+                return;
+            }
+            List<String> status = modem.status();
+            if (status.isEmpty()) context.printLine("(unavailable)");
+            else status.forEach(context::printLine);
             context.setExitCode(0);
             return;
         }
@@ -351,6 +388,65 @@ final class ModemCommandModule implements ShellCommandModule {
             context.setExitCode(1);
             return;
         }
+        if ("sensor".equals(op)) {
+            String action = args.size() > 1 ? args.get(1).toLowerCase(Locale.ROOT) : "list";
+            if ("list".equals(action)) {
+                List<String> registrations = modem.sensorServices();
+                if (registrations.isEmpty()) context.printLine("(none)");
+                else registrations.forEach(context::printLine);
+                context.setExitCode(0);
+                return;
+            }
+            if ("add".equals(action) || "register".equals(action)) {
+                if (args.size() != 4) { fail(context, "modem: usage: modem sensor add <name> <channel>"); return; }
+                int port;
+                try { port = Integer.parseInt(args.get(3)); }
+                catch (NumberFormatException invalid) { fail(context, "modem: channel must be an integer"); return; }
+                if (!modem.registerSensorService(args.get(2), port)) {
+                    fail(context, "modem: sensor service registration failed (adjacent array, channel, or name invalid)");
+                    return;
+                }
+                context.printLine("sensor service " + args.get(2).toLowerCase(Locale.ROOT) + " " + port);
+                context.setExitCode(0);
+                return;
+            }
+            if ("remove".equals(action) || "unregister".equals(action)) {
+                if (args.size() != 3 || !modem.unregisterSensorService(args.get(2))) {
+                    fail(context, "modem: usage: modem sensor remove <name>"); return;
+                }
+                context.printLine("sensor service removed " + args.get(2).toLowerCase(Locale.ROOT));
+                context.setExitCode(0);
+                return;
+            }
+            if ("request".equals(action) || "read".equals(action) || "snapshot".equals(action)) {
+                if (args.size() < 4) {
+                    fail(context, "modem: usage: modem sensor request <service> <list|snapshot|read> [channel] [replyChannel]");
+                    return;
+                }
+                String service = args.get(2);
+                String operation = args.get(3).toLowerCase(Locale.ROOT);
+                String channel = "";
+                int reply = 0;
+                int next = 4;
+                if ("read".equals(operation)) {
+                    if (args.size() <= next) { fail(context, "modem: sensor read requires a channel"); return; }
+                    channel = args.get(next++);
+                }
+                if (args.size() > next) {
+                    try { reply = Integer.parseInt(args.get(next++)); }
+                    catch (NumberFormatException invalid) { fail(context, "modem: reply channel must be an integer"); return; }
+                }
+                if (args.size() != next || !modem.transmitSensorService(service, operation, channel, reply)) {
+                    fail(context, "modem: sensor request failed (service offline, unreachable, or malformed)");
+                    return;
+                }
+                context.printLine("sensor request sent service=" + service + " reply=" + reply);
+                context.setExitCode(0);
+                return;
+            }
+            fail(context, "modem: usage: modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]");
+            return;
+        }
         if ("services".equals(op)) {
             List<String> services = modem.services(128);
             if (services.isEmpty()) context.printLine("(none)");
@@ -389,32 +485,35 @@ final class ModemCommandModule implements ShellCommandModule {
             return;
         }
         if ("sendto".equals(op)) {
-            if (args.size() < 4) {
-                context.printLine("modem: usage: modem sendto <host> <channel> [replyChannel] <message>");
+            if (args.size() < 3) {
+                context.printLine("modem: usage: modem sendto <host> [channel] [replyChannel] <message>");
                 context.setExitCode(1);
                 return;
             }
             String destination = args.get(1);
-            int channel;
+            int channel = com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL;
             int reply = 0;
-            int msgStart;
-            try {
-                channel = Integer.parseInt(args.get(2));
-            } catch (NumberFormatException ex) {
-                context.printLine("modem: channel must be an integer");
+            int msgStart = 2;
+            if (args.size() >= 4) {
+                try {
+                    channel = Integer.parseInt(args.get(2));
+                    msgStart = 3;
+                } catch (NumberFormatException ignored) {
+                    // The omitted-channel form starts the message immediately after the host.
+                }
+                if (msgStart == 3 && args.size() >= 4) {
+                    try {
+                        reply = Integer.parseInt(args.get(3));
+                        msgStart = 4;
+                    } catch (NumberFormatException ignored) {
+                        // The third argument is the first word of the message.
+                    }
+                }
+            }
+            if (args.size() <= msgStart) {
+                context.printLine("modem: message required");
                 context.setExitCode(1);
                 return;
-            }
-            try {
-                reply = Integer.parseInt(args.get(3));
-                msgStart = 4;
-                if (args.size() < 5) {
-                    context.printLine("modem: message required");
-                    context.setExitCode(1);
-                    return;
-                }
-            } catch (NumberFormatException ex) {
-                msgStart = 3;
             }
             String message = String.join(" ", args.subList(msgStart, args.size()));
             if (!modem.transmitTo(destination, channel, reply, message)) {
@@ -427,31 +526,34 @@ final class ModemCommandModule implements ShellCommandModule {
             return;
         }
         if ("send".equals(op) || "transmit".equals(op) || "tx".equals(op)) {
-            if (args.size() < 3) {
-                context.printLine("modem: usage: modem send <channel> [replyChannel] <message>");
+            if (args.size() < 2) {
+                context.printLine("modem: usage: modem send [channel] [replyChannel] <message>");
                 context.setExitCode(1);
                 return;
             }
-            int channel;
+            int channel = com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL;
             int reply = 0;
-            int msgStart;
-            try {
-                channel = Integer.parseInt(args.get(1));
-            } catch (NumberFormatException ex) {
-                context.printLine("modem: channel must be an integer");
+            int msgStart = 1;
+            if (args.size() >= 3) {
+                try {
+                    channel = Integer.parseInt(args.get(1));
+                    msgStart = 2;
+                } catch (NumberFormatException ignored) {
+                    // The omitted-channel form starts the message after the command.
+                }
+                if (msgStart == 2 && args.size() >= 3) {
+                    try {
+                        reply = Integer.parseInt(args.get(2));
+                        msgStart = 3;
+                    } catch (NumberFormatException ignored) {
+                        // The third argument is the first word of the message.
+                    }
+                }
+            }
+            if (args.size() <= msgStart) {
+                context.printLine("modem: message required");
                 context.setExitCode(1);
                 return;
-            }
-            try {
-                reply = Integer.parseInt(args.get(2));
-                msgStart = 3;
-                if (args.size() < 4) {
-                    context.printLine("modem: message required");
-                    context.setExitCode(1);
-                    return;
-                }
-            } catch (NumberFormatException ex) {
-                msgStart = 2;
             }
             String message = String.join(" ", args.subList(msgStart, args.size()));
             if (!modem.transmit(channel, reply, message)) {
@@ -485,7 +587,12 @@ final class ModemCommandModule implements ShellCommandModule {
             context.setExitCode(0);
             return;
         }
-        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|interfaces|topology|diagnostics|neighbors|route|ping|probe|delivery|hosts|service|services|call|send|sendto|recv ...");
+        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|interfaces|topology|diagnostics|neighbors|route|ping|probe|delivery|hosts|service|sensor|services|call|send|sendto|recv ...");
+        context.setExitCode(1);
+    }
+
+    private static void fail(Context context, String message) {
+        context.printLine(message);
         context.setExitCode(1);
     }
 

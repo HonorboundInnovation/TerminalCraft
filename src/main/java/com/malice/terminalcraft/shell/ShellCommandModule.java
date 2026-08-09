@@ -22,6 +22,10 @@ public interface ShellCommandModule {
 
     interface Context {
         TerminalHostServices hostServices();
+        /** Raw world host for command families that expose a specialized controller API. */
+        default TerminalHost worldHost() { return null; }
+        /** Reads a shell/VFS path relative to the active shell's working directory. */
+        default String readFile(String path) { return null; }
         com.malice.terminalcraft.device.DeviceCallContext callerContext();
         void printLine(String line);
         void setExitCode(int exitCode);

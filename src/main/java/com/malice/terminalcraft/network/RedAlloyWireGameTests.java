@@ -11,6 +11,7 @@ import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.gametest.GameTestHolder;
@@ -276,6 +277,36 @@ public final class RedAlloyWireGameTests {
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
         helper.assertTrue(power(helper, wire) == 15,
                 "wire must query a directional source from the source's face toward the receiver");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void outputStaysWithinEachMountedSurfacePlane(GameTestHelper helper) {
+        BlockPos floorWire = new BlockPos(2, 2, 2);
+        BlockPos wallWire = new BlockPos(6, 2, 2);
+        helper.setBlock(floorWire.below(), Blocks.REDSTONE_BLOCK);
+        helper.setBlock(floorWire, wire(Direction.UP));
+        helper.setBlock(wallWire.west(), Blocks.REDSTONE_BLOCK);
+        helper.setBlock(wallWire, wire(Direction.EAST));
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(floorWire));
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wallWire));
+
+        BlockPos floorWorld = helper.absolutePos(floorWire);
+        BlockState floorState = helper.getLevel().getBlockState(floorWorld);
+        int floorEast = floorState.getBlock().getSignal(floorState, helper.getLevel(), floorWorld, Direction.EAST);
+        int floorUp = floorState.getBlock().getSignal(floorState, helper.getLevel(), floorWorld, Direction.UP);
+        int floorDown = floorState.getBlock().getDirectSignal(floorState, helper.getLevel(), floorWorld, Direction.DOWN);
+        helper.assertTrue(floorEast == 15 && floorUp == 0 && floorDown == 0,
+                "a floor-mounted wire must emit horizontally but not through its support or outward normal");
+
+        BlockPos wallWorld = helper.absolutePos(wallWire);
+        BlockState wallState = helper.getLevel().getBlockState(wallWorld);
+        int wallNorth = wallState.getBlock().getDirectSignal(wallState, helper.getLevel(), wallWorld, Direction.NORTH);
+        int wallWest = wallState.getBlock().getSignal(wallState, helper.getLevel(), wallWorld, Direction.WEST);
+        int wallEast = wallState.getBlock().getSignal(wallState, helper.getLevel(), wallWorld, Direction.EAST);
+        helper.assertTrue(wallNorth == 15 && wallWest == 0 && wallEast == 0,
+                "a wall-mounted wire must emit within its wall plane but not through support axes");
         helper.succeed();
     }
 

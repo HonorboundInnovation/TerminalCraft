@@ -117,16 +117,14 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
     @SuppressWarnings("deprecation")
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
         if (UPDATING.get()) return 0;
-        return level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire
-                ? wire.maximumPower() : state.getValue(POWER);
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getDirectSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
         if (UPDATING.get()) return 0;
-        if (level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) return wire.power(direction);
-        return direction == state.getValue(FACE) ? state.getValue(POWER) : 0;
+        return outputPower(level, pos, state, direction);
     }
 
     @Override
@@ -245,6 +243,30 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
 
     public static int power(BlockGetter level, BlockPos pos, Direction face) {
         return level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire ? wire.power(face) : 0;
+    }
+
+    /**
+     * Returns the signal exposed toward an adjacent block. A mounted surface wire only emits in
+     * the plane of one of its occupied faces; it must not leak through its support or outward
+     * normal. Multipart spaces use the strongest face that can legally emit toward the requested
+     * direction. Both vanilla weak and direct queries use this same directional contract.
+     */
+    private static int outputPower(BlockGetter level, BlockPos pos, BlockState state,
+                                   Direction direction) {
+        if (direction == null) return 0;
+        if (level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire) {
+            int maximum = 0;
+            for (Direction face : wire.faces()) {
+                if (isOutputDirection(face, direction)) maximum = Math.max(maximum, wire.power(face));
+            }
+            return maximum;
+        }
+        return state.hasProperty(FACE) && isOutputDirection(state.getValue(FACE), direction)
+                ? state.getValue(POWER) : 0;
+    }
+
+    private static boolean isOutputDirection(Direction face, Direction direction) {
+        return face != null && direction != null && face.getAxis() != direction.getAxis();
     }
 
     /** Bounded player-facing inspection for one selected multipart face. */

@@ -1,7 +1,7 @@
 {
   "textures": {
-    "particle": "terminalcraft:block/network_cable",
-    "cable": "terminalcraft:block/network_cable"
+    "particle": "terminalcraft:block/network_cable_custom",
+    "cable": "terminalcraft:block/network_cable_custom"
   },
   "elements": [
     {

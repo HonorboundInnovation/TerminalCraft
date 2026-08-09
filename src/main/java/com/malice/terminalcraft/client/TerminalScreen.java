@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.client;
 
 import com.malice.terminalcraft.Config;
+import com.malice.terminalcraft.device.TerminalBuffer;
 import com.malice.terminalcraft.menu.TerminalMenu;
 import com.malice.terminalcraft.network.ModNetwork;
 import com.malice.terminalcraft.shell.BashShell;
@@ -27,10 +28,13 @@ import java.util.List;
  * hotkeys cannot fire while the player is typing in the terminal.
  */
 public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
-    private static final int PANEL_WIDTH = 320;
-    private static final int PANEL_HEIGHT = 200;
-    private static final int LINE_HEIGHT = 10;
-    private static final int MAX_VISIBLE_LINES = 16;
+    private static final int PANEL_WIDTH = 440;
+    private static final int PANEL_HEIGHT = 270;
+    private static final int HEADER_HEIGHT = 24;
+    private static final int FOOTER_HEIGHT = 26;
+    private static final int SIDE_RAIL_WIDTH = 106;
+    private static final int LINE_HEIGHT = 11;
+    private static final int MAX_VISIBLE_LINES = 18;
 
     private EditBox input;
     private int scrollOffset = 0;
@@ -48,6 +52,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     private int editorNoticeTicks;
     private boolean editorRequestPending;
     private boolean awaitingEditorClose;
+    private boolean surfaceMode;
 
     public TerminalScreen(TerminalMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -61,13 +66,12 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         this.leftPos = (this.width - this.imageWidth) / 2;
         this.topPos = (this.height - this.imageHeight) / 2;
 
-        // Prompt ">" is drawn at leftPos+6; place the field after the glyph so the
-        // blinking caret is not jammed against it when the input is empty.
-        int promptX = leftPos + 6;
+        // Prompt ">" is drawn in the output column; keep the input away from the status rail.
+        int promptX = outputLeft() + 2;
         int inputX = promptX + this.font.width(">") + 4;
-        int inputRight = leftPos + imageWidth - 8;
+        int inputRight = outputRight() - 6;
         int inputWidth = Math.max(20, inputRight - inputX);
-        input = new EditBox(this.font, inputX, topPos + imageHeight - 18, inputWidth, 12,
+        input = new EditBox(this.font, inputX, footerTop() + 5, inputWidth, 12,
                 Component.literal("command"));
         input.setMaxLength(Config.maxCommandLength);
         input.setBordered(false);
@@ -128,27 +132,17 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             renderEditor(graphics);
             return;
         }
-        int x = leftPos;
-        int y = topPos;
-        int textColor = Config.crtTextColor & 0xFFFFFF;
-
-        graphics.fill(x - 2, y - 2, x + imageWidth + 2, y + imageHeight + 2, 0xFF1A1A1A);
-        graphics.fill(x, y, x + imageWidth, y + imageHeight, 0xFF0A0F0A);
-        graphics.fill(x, y, x + imageWidth, y + 14, 0xFF102010);
-
-        BashShell shellForTitle = menu.getShell();
-        String title;
-        if (shellForTitle.isEditorActive()) {
-            title = "TerminalCraft editor";
-        } else if (menu.isPocket()) {
-            title = "TerminalCraft pocket";
-        } else {
-            title = "TerminalCraft bash";
+        if (surfaceMode) {
+            renderSurface(graphics);
+            return;
         }
-        graphics.drawString(font, title, x + 6, y + 3, 0x66FF99, false);
+        int textColor = Config.crtTextColor & 0xFFFFFF;
+        BashShell shellForTitle = menu.getShell();
+        String title = menu.isPocket() ? "POCKET TERMINAL" : "TERMINAL NODE";
+        renderFrame(graphics, title, shellForTitle.isEditorActive() ? "EDITOR" : "BASH");
 
-        BashShell shell = menu.getShell();
-        int outputWidth = imageWidth - 12;
+        BashShell shell = shellForTitle;
+        int outputWidth = outputRight() - outputLeft() - 4;
         List<VisualLine> lines = wrapOutputLines(shell.getOutputLines(), outputWidth);
         int total = lines.size();
         int maxScroll = Math.max(0, total - MAX_VISIBLE_LINES);
@@ -156,27 +150,27 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         int start = Math.max(0, total - MAX_VISIBLE_LINES - scrollOffset);
         int end = Math.min(total, start + MAX_VISIBLE_LINES);
 
-        int textY = y + 18;
+        int textY = contentTop() + 4;
         for (int i = start; i < end; i++) {
             VisualLine line = lines.get(i);
-            graphics.drawString(font, line.text(), x + 6, textY,
+            graphics.drawString(font, line.text(), outputLeft() + 2, textY,
                     outputColor(line.source(), textColor), false);
             textY += LINE_HEIGHT;
         }
 
         // Subtle CRT scanlines
         if (Config.crtScanlines) {
-            for (int sy = y + 16; sy < y + imageHeight - 22; sy += 2) {
-                graphics.fill(x + 2, sy, x + imageWidth - 2, sy + 1, 0x14000000);
+            for (int sy = contentTop(); sy < footerTop(); sy += 2) {
+                graphics.fill(outputLeft(), sy, outputRight(), sy + 1, 0x14000000);
             }
         }
 
-        graphics.fill(x + 4, y + imageHeight - 20, x + imageWidth - 4, y + imageHeight - 4, 0xFF051005);
         String promptGlyph = shell.isEditorActive() ? ":" : ">";
         int promptColor = shell.isEditorActive()
                 ? 0x88CCFF
                 : ((textColor & 0xFEFEFE) >> 1 | 0x002200);
-        graphics.drawString(font, promptGlyph, x + 6, y + imageHeight - 16, promptColor, false);
+        graphics.drawString(font, promptGlyph, outputLeft() + 2, footerTop() + 8, promptColor, false);
+        renderStatusRail(graphics, shell, false);
     }
 
     @Override
@@ -197,6 +191,22 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             this.onClose();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_F6) {
+            surfaceMode = !surfaceMode;
+            scrollOffset = 0;
+            return true;
+        }
+
+        if (keyCode == GLFW.GLFW_KEY_R && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            reverseSearchHistory();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_L && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            input.setValue("");
+            historyIndex = -1;
+            historyBuffer = "";
             return true;
         }
 
@@ -464,6 +474,21 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         input.moveCursorToEnd();
     }
 
+    /** Bash-style Ctrl+R search over the local shell history without sending a command. */
+    private void reverseSearchHistory() {
+        if (localHistory.isEmpty()) localHistory.addAll(menu.getShell().getCommandHistory());
+        String query = input == null ? "" : input.getValue();
+        for (int index = localHistory.size() - 1; index >= 0; index--) {
+            String candidate = localHistory.get(index);
+            if (query.isBlank() || candidate.contains(query)) {
+                input.setValue(candidate);
+                input.moveCursorToEnd();
+                historyIndex = index;
+                return;
+            }
+        }
+    }
+
     private void updateEditorMode() {
         boolean shellActive = menu.getShell().isEditorActive();
         if (!shellActive) awaitingEditorClose = false;
@@ -555,6 +580,97 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
                 + "   Ctrl+S Save   Ctrl+Shift+S Save & Close   Ctrl+Z/Y Undo/Redo";
         graphics.drawString(font, status, left + 10, bottom - 31, 0xFF9FB3C2, false);
     }
+
+    /** Passive rendering of the server-synchronized character-cell surface. */
+    private void renderSurface(GuiGraphics graphics) {
+        TerminalBuffer surface = menu.getComputer().terminalSurface();
+        if (surface == null) {
+            surfaceMode = false;
+            return;
+        }
+        BashShell shell = menu.getShell();
+        renderFrame(graphics, menu.isPocket() ? "POCKET TERMINAL" : "TERMINAL NODE", "SURFACE // F6 LOG");
+        int areaLeft = outputLeft() + 4;
+        int areaTop = contentTop() + 4;
+        int areaRight = outputRight() - 4;
+        int areaBottom = footerTop() - 4;
+        int cellWidth = Math.max(1, (areaRight - areaLeft) / surface.width());
+        int cellHeight = Math.max(1, (areaBottom - areaTop) / surface.height());
+        int renderedWidth = cellWidth * surface.width();
+        int renderedHeight = cellHeight * surface.height();
+        graphics.enableScissor(areaLeft, areaTop, areaLeft + renderedWidth, areaTop + renderedHeight);
+        for (int row = 0; row < surface.height(); row++) {
+            for (int column = 0; column < surface.width(); column++) {
+                int cellLeft = areaLeft + column * cellWidth;
+                int cellTop = areaTop + row * cellHeight;
+                int background = 0xFF000000 | surface.paletteColor(surface.backgroundAt(column, row));
+                graphics.fill(cellLeft, cellTop, cellLeft + cellWidth, cellTop + cellHeight, background);
+                char character = surface.characterAt(column, row);
+                if (character != ' ') {
+                    int foreground = 0xFF000000 | surface.paletteColor(surface.foregroundAt(column, row));
+                    graphics.drawString(font, String.valueOf(character), cellLeft, cellTop,
+                            foreground, false);
+                }
+            }
+        }
+        if (surface.cursorBlink() && surface.cursorX() >= 1 && surface.cursorX() <= surface.width()
+                && surface.cursorY() >= 1 && surface.cursorY() <= surface.height()
+                && (System.currentTimeMillis() / 500L) % 2 == 0) {
+            int cursorLeft = areaLeft + (surface.cursorX() - 1) * cellWidth;
+            int cursorTop = areaTop + (surface.cursorY() - 1) * cellHeight;
+            graphics.fill(cursorLeft, cursorTop, cursorLeft + 1, cursorTop + cellHeight, 0xFFFFFFFF);
+        }
+        graphics.disableScissor();
+        graphics.drawString(font, ">", outputLeft() + 2, footerTop() + 8, 0x66FF99, false);
+        renderStatusRail(graphics, shell, true);
+    }
+
+    private void renderFrame(GuiGraphics graphics, String title, String mode) {
+        int x = leftPos;
+        int y = topPos;
+        graphics.fill(x - 4, y - 4, x + imageWidth + 4, y + imageHeight + 4, 0xFF080A09);
+        graphics.fill(x - 2, y - 2, x + imageWidth + 2, y + imageHeight + 2, 0xFF3A403C);
+        graphics.fill(x, y, x + imageWidth, y + imageHeight, 0xFF0B110E);
+        graphics.fill(x, y, x + imageWidth, y + HEADER_HEIGHT, 0xFF17251D);
+        graphics.fill(x, y + HEADER_HEIGHT - 2, x + imageWidth, y + HEADER_HEIGHT,
+                0xFF3B8A58);
+        graphics.fill(outputLeft(), contentTop(), outputRight(), footerTop(), 0xFF050A07);
+        graphics.fill(outputLeft(), footerTop(), outputRight(), y + imageHeight - 8, 0xFF0B1A11);
+        graphics.fill(railLeft(), contentTop(), x + imageWidth - 10, footerTop(), 0xFF101A16);
+        graphics.fill(railLeft(), contentTop(), railLeft() + 1, footerTop(), 0xFF2C6042);
+        graphics.drawString(font, title, x + 12, y + 6, 0xFFB8F5C8, false);
+        graphics.drawString(font, "// " + mode, x + imageWidth - 92, y + 6, 0xFF6FAD82, false);
+        graphics.fill(x + imageWidth - 24, y + 7, x + imageWidth - 18, y + 13, 0xFF55E684);
+    }
+
+    private void renderStatusRail(GuiGraphics graphics, BashShell shell, boolean surface) {
+        int left = railLeft() + 8;
+        int top = contentTop() + 10;
+        int text = 0xFFB8D6C0;
+        graphics.drawString(font, "STATUS", left, top, 0xFF7AE39A, false);
+        graphics.fill(left, top + 15, left + 6, top + 21,
+                shell.getLastExitCode() == 0 ? 0xFF55E684 : 0xFFE26666);
+        graphics.drawString(font, "ONLINE", left + 10, top + 14, text, false);
+        drawStatusRow(graphics, "MODE", surface ? "SURFACE" : shell.isEditorActive() ? "EDITOR" : "BASH", top + 34, text);
+        drawStatusRow(graphics, "DIR", fitToWidth(shell.getCwd(), 70), top + 54, text);
+        drawStatusRow(graphics, "EXIT", Integer.toString(shell.getLastExitCode()), top + 74, text);
+        drawStatusRow(graphics, "HISTORY", Integer.toString(shell.getCommandHistory().size()), top + 94, text);
+        drawStatusRow(graphics, "VIEW", surface ? "F6 LOG" : "F6 SURFACE", top + 114, 0xFF7FADCE);
+        graphics.drawString(font, "↑↓ history", left, top + 151, 0xFF718A79, false);
+        graphics.drawString(font, "PgUp/PgDn", left, top + 163, 0xFF718A79, false);
+        graphics.drawString(font, "ESC close", left, top + 175, 0xFF718A79, false);
+    }
+
+    private void drawStatusRow(GuiGraphics graphics, String label, String value, int y, int color) {
+        graphics.drawString(font, label, railLeft() + 8, y, 0xFF718A79, false);
+        graphics.drawString(font, fitToWidth(value, SIDE_RAIL_WIDTH - 20), railLeft() + 8, y + 9, color, false);
+    }
+
+    private int outputLeft() { return leftPos + 10; }
+    private int outputRight() { return leftPos + imageWidth - SIDE_RAIL_WIDTH; }
+    private int railLeft() { return outputRight() + 8; }
+    private int contentTop() { return topPos + HEADER_HEIGHT + 5; }
+    private int footerTop() { return topPos + imageHeight - FOOTER_HEIGHT; }
 
     private boolean editorKeyPressed(int keyCode, int modifiers) {
         boolean control = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;

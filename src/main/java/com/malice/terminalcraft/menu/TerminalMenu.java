@@ -5,6 +5,7 @@ import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.blockentity.TerminalBlockEntity;
 import com.malice.terminalcraft.blockentity.ServerRackBlockEntity;
 import com.malice.terminalcraft.blockentity.TurtleBlockEntity;
+import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import com.malice.terminalcraft.shell.BashShell;
 import com.malice.terminalcraft.shell.PocketShellComputer;
@@ -28,6 +29,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 public class TerminalMenu extends AbstractContainerMenu {
     public static final byte TYPE_BLOCK = 0;
     public static final byte TYPE_POCKET = 1;
+    public static final byte TYPE_PLC = 2;
 
     private final ShellComputer computer;
     private final ContainerLevelAccess access;
@@ -45,6 +47,11 @@ public class TerminalMenu extends AbstractContainerMenu {
 
     public TerminalMenu(int containerId, Inventory playerInventory, ServerRackBlockEntity rack) {
         this(containerId, playerInventory, rack, ModRegistries.SERVER_RACK_BLOCK.get(), false, InteractionHand.MAIN_HAND);
+    }
+
+    public TerminalMenu(int containerId, Inventory playerInventory, ProgrammableLogicControllerBlockEntity plc) {
+        this(containerId, playerInventory, plc, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get(), false,
+                InteractionHand.MAIN_HAND);
     }
 
     public TerminalMenu(int containerId, Inventory playerInventory, PocketShellComputer pocketComputer) {
@@ -83,6 +90,9 @@ public class TerminalMenu extends AbstractContainerMenu {
         }
         if (be instanceof ServerRackBlockEntity rack) {
             return new TerminalMenu(containerId, playerInventory, rack);
+        }
+        if (be instanceof ProgrammableLogicControllerBlockEntity plc) {
+            return new TerminalMenu(containerId, playerInventory, plc);
         }
         // Fallback so a desync never hard-crashes the client
         TerminalBlockEntity fallback = new TerminalBlockEntity(pos,

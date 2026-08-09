@@ -1,0 +1,8 @@
+{
+  "parent": "terminalcraft:block/video_cable_core",
+  "elements": [ { "from": [10, 6, 6], "to": [16, 10, 10], "faces": {
+    "down": { "texture": "#cable" }, "up": { "texture": "#cable" },
+    "north": { "texture": "#cable" }, "south": { "texture": "#cable" },
+    "west": { "texture": "#cable" }, "east": { "texture": "#cable" }
+  } } ]
+}

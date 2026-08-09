@@ -1,12 +1,16 @@
 package com.malice.terminalcraft.device;
 
 import com.malice.terminalcraft.blockentity.MonitorBlockEntity;
+import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
 import net.minecraft.gametest.framework.GameTestHelper;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.gametest.GameTestHolder;
+import net.minecraft.nbt.CompoundTag;
 
 import java.util.List;
 import java.util.Set;
@@ -17,6 +21,7 @@ import java.util.UUID;
 public final class MonitorWallGameTests {
     private static final BlockPos LEFT = new BlockPos(2, 2, 2);
     private static final BlockPos RIGHT = new BlockPos(3, 2, 2);
+    private static final BlockPos PLC = new BlockPos(2, 2, 3);
 
     private MonitorWallGameTests() {}
 
@@ -100,6 +105,174 @@ public final class MonitorWallGameTests {
                         "stable topology must not publish duplicate local resize events");
                 helper.succeed();
             });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void wallCharacterSurfaceSpansTilesAndPagesBoundedDeltas(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity.WallRenderState leftState = left.wallRenderState();
+            MonitorBlockEntity anchor = leftState.anchor() ? left : right;
+            MonitorBlockEntity second = leftState.anchor() ? right : left;
+
+            ServerLevel level = helper.getLevel();
+            DeviceAccess access = ServerDeviceManager.access(level.getServer(), new DeviceCallContext(
+                    UUID.randomUUID(), "monitor-wall-surface-test", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE)));
+            DeviceDescriptor descriptor = access.descriptor(anchor.getDeviceId()).orElseThrow();
+            long before = (long) number(descriptor, "surface_revision");
+            helper.assertTrue(access.call(anchor.getDeviceId(), "term.set_cursor_pos",
+                    List.of(DeviceValue.of(39), DeviceValue.of(1))).isSuccess(),
+                    "wall cursor placement must succeed");
+            helper.assertTrue(access.call(anchor.getDeviceId(), "term.blit",
+                    List.of(DeviceValue.of("ABCD"), DeviceValue.of("0123"), DeviceValue.of("4567"))).isSuccess(),
+                    "wall blit must succeed across the tile boundary");
+
+            helper.assertTrue(anchor.terminalSurface().characterAt(38, 0) == 'A'
+                            && anchor.terminalSurface().characterAt(39, 0) == 'B'
+                            && second.terminalSurface().characterAt(0, 0) == 'C'
+                            && second.terminalSurface().characterAt(1, 0) == 'D',
+                    "wall blit must write global cells into the two persisted tile surfaces");
+            DeviceValue.MapValue delta = (DeviceValue.MapValue) access.call(anchor.getDeviceId(), "term.delta",
+                    List.of(DeviceValue.of(before), DeviceValue.of(128))).value().orElseThrow();
+            helper.assertTrue(!((DeviceValue.BooleanValue) delta.values().get("complete")).value()
+                            && ((DeviceValue.NumberValue) delta.values().get("total_cells")).value() == 1600,
+                    "wall deltas must remain bounded and expose pagination for a full 80x20 surface");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 120)
+    public static void wallSurfaceAndIdentitySurviveTileSaveLoad(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
+            UUID leftId = left.getDeviceId();
+            UUID rightId = right.getDeviceId();
+            anchor.setWallLine(0, "persisted wall surface" + " ".repeat(40));
+            anchor.terminalSurface().setCell(39, 0, 'Z', 2, 4);
+            CompoundTag leftImage = left.getUpdateTag();
+            CompoundTag rightImage = right.getUpdateTag();
+
+            left.load(leftImage);
+            right.load(rightImage);
+            helper.assertTrue(left.getDeviceId().equals(leftId) && right.getDeviceId().equals(rightId),
+                    "tile reload must preserve stable monitor identities");
+            helper.assertTrue(anchor.terminalSurface().characterAt(39, 0) == 'Z'
+                            && anchor.getLines().get(0).contains("persisted wall"),
+                    "tile reload must preserve the persisted character surface and line mirror");
+            helper.assertTrue(anchor.wallColumns() == 80 && anchor.wallRows() == 20,
+                    "reloaded tiles must continue resolving as one wall");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 120)
+    public static void removingAndReformingWallRebuildsCurrentEndpoint(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            ServerLevel level = helper.getLevel();
+            DeviceAccess access = ServerDeviceManager.access(level.getServer(), DeviceCallContext.readOnly("wall-lifecycle"));
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            UUID leftId = left.getDeviceId();
+            helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().containsKey("surface_revision"),
+                    "initial wall endpoint must expose its surface metadata");
+            helper.setBlock(RIGHT, Blocks.AIR);
+            helper.runAfterDelay(6, () -> {
+                helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().get("columns")
+                                .equals(DeviceValue.of(40)),
+                        "removing a tile must rebuild the surviving endpoint to one tile");
+                helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+                helper.runAfterDelay(6, () -> {
+                    helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().get("columns")
+                                    .equals(DeviceValue.of(80)),
+                            "reforming a tile must rebuild the endpoint to the current wall width");
+                    helper.succeed();
+                });
+            });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 120)
+    public static void wallTouchUsesCurrentAnchorAndGlobalCoordinates(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            ServerLevel level = helper.getLevel();
+            DeviceRegistry registry = ServerDeviceManager.registry(level.getServer());
+            DeviceCallContext reader = DeviceCallContext.readOnly("wall-touch-reader");
+            UUID subscriptionId = UUID.fromString(((DeviceValue.StringValue) registry.subscribeEvents(reader,
+                    new DeviceEventSubscription(null, Set.of("touch"), 0, false))
+                    .value().orElseThrow()).value());
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
+            right.publishTouch(new Vec3(helper.absolutePos(RIGHT).getX() + 0.5,
+                    helper.absolutePos(RIGHT).getY() + 0.5,
+                    helper.absolutePos(RIGHT).getZ() + 0.5), helper.makeMockPlayer());
+            DeviceEvent touch = registry.pollSubscription(reader, subscriptionId, 1).events().stream()
+                    .findFirst().orElseThrow();
+            helper.assertTrue(touch.sourceDeviceId().equals(anchor.getDeviceId()),
+                    "touch events must be sourced by the current wall anchor");
+            helper.assertTrue(mapNumber(touch.payload(), "x") >= 40
+                            && mapNumber(touch.payload(), "x") < 80
+                            && mapNumber(touch.payload(), "y") >= 0
+                            && mapNumber(touch.payload(), "y") < 20,
+                    "touch events must expose global wall coordinates");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void plcDashboardTouchStartsController(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(PLC, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            MonitorBlockEntity monitor = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            ProgrammableLogicControllerBlockEntity plc =
+                    (ProgrammableLogicControllerBlockEntity) helper.getBlockEntity(PLC);
+            helper.assertTrue(plc.loadProgram("IN START REDSTONE NORTH\nOUT MOTOR REDSTONE SOUTH\nRUNG MOTOR = START"),
+                    "dashboard test program must compile");
+            helper.assertTrue(!plc.isRunning(), "PLC starts stopped");
+            // Monitor NORTH faces the local X axis. Row 2 and column 4 are inside the RUN button.
+            monitor.publishTouch(new Vec3(helper.absolutePos(LEFT).getX() + 0.10,
+                    helper.absolutePos(LEFT).getY() + 0.875,
+                    helper.absolutePos(LEFT).getZ() + 0.50), helper.makeMockPlayer());
+            helper.assertTrue(plc.isRunning(), "touching the monitor RUN button must start the PLC");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void wallRevisionTracksMutationsOnEveryTile(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            ServerLevel level = helper.getLevel();
+            DeviceAccess access = ServerDeviceManager.access(level.getServer(),
+                    DeviceCallContext.readOnly("wall-revision-test"));
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
+            MonitorBlockEntity lowerRevisionTile = anchor == left ? right : left;
+            for (int i = 0; i < 8; i++) {
+                anchor.terminalSurface().setCell(i, 0, (char) ('A' + i), 0, 15);
+            }
+            long before = (long) number(access.descriptor(anchor.getDeviceId()).orElseThrow(),
+                    "surface_revision");
+            lowerRevisionTile.terminalSurface().setCell(0, 0, 'Z', 0, 15);
+            long after = (long) number(access.descriptor(anchor.getDeviceId()).orElseThrow(),
+                    "surface_revision");
+            helper.assertTrue(after > before,
+                    "a mutation on a lower-revision wall tile must advance the global surface revision");
+            helper.succeed();
         });
     }
 

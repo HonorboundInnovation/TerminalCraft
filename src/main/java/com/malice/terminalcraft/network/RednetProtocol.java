@@ -9,6 +9,17 @@ import java.util.regex.Pattern;
 public record RednetProtocol(String id, int version, String payloadType) {
     public static final int MAX_VERSION = 65_535;
     private static final Pattern ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9/_.-]+");
+    /** Protocol used by the beginner-facing numeric-channel compatibility surface. */
+    public static final RednetProtocol CHANNEL = new RednetProtocol(
+            RednetAutoConfiguration.CHANNEL_PROTOCOL_ID,
+            RednetAutoConfiguration.CHANNEL_PROTOCOL_VERSION,
+            NetworkEnvelope.TEXT_PAYLOAD);
+    /** Built-in control protocol reserved for discovery, leases, and future router extensions. */
+    public static final RednetProtocol CONTROL = new RednetProtocol(
+            "terminalcraft:rednet-control", 1, "application/json");
+    /** Built-in protocol used for typed service discovery metadata. */
+    public static final RednetProtocol SERVICE = new RednetProtocol(
+            "terminalcraft:rednet-service", 1, NetworkEnvelope.TEXT_PAYLOAD);
 
     public RednetProtocol {
         Objects.requireNonNull(id, "id");

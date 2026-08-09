@@ -257,6 +257,12 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     }
 
     @Override
+    public String monitorScreensaver(String side, String action) {
+        MonitorBlockEntity monitor = findMonitor(side);
+        return monitor == null ? "" : MonitorScreensaver.command(monitor, action);
+    }
+
+    @Override
     public boolean monitorRegisterService(String service, int port) {
         ModemBlockEntity modem = findModem(null);
         return modem != null && modem.registerMonitorService(service, port);
@@ -418,6 +424,30 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     }
 
     @Override
+    public boolean modemRegisterSensorService(String service, int port) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.registerSensorService(service, port);
+    }
+
+    @Override
+    public boolean modemUnregisterSensorService(String service) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.unregisterSensorService(service);
+    }
+
+    @Override
+    public List<String> modemSensorServices() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.sensorServices();
+    }
+
+    @Override
+    public boolean modemTransmitSensorService(String service, String operation, String channel, int replyPort) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.transmitSensorService(service, operation, channel, replyPort);
+    }
+
+    @Override
     public List<String> modemServices(int maximum) {
         ModemBlockEntity modem = findModem(null);
         return modem == null ? List.of() : modem.visibleServices(maximum);
@@ -433,6 +463,24 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     public List<String> modemReceive(int max) {
         ModemBlockEntity modem = findModem(null);
         return modem == null ? List.of() : modem.receiveMessages(max);
+    }
+
+    @Override
+    public List<String> modemStatus() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.statusDiagnostics();
+    }
+
+    @Override
+    public boolean modemAutomaticSetup() {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.automaticSetup();
+    }
+
+    @Override
+    public boolean modemSetAutomaticSetup(boolean enabled) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.setAutomaticSetup(enabled);
     }
 
     @Override

@@ -26,6 +26,8 @@ public final class OptionalIntegrations {
                     "com.malice.terminalcraft.integration.storagedrawers.StorageDrawersIntegration"),
             new Definition("refined_storage_bridge", "refinedstorage",
                     "com.malice.terminalcraft.integration.refinedstorage.RefinedStorageIntegration"),
+            new Definition("applied_energistics_bridge", "ae2",
+                    "com.malice.terminalcraft.integration.appliedenergistics.AppliedEnergisticsIntegration"),
             new Definition("create_monitor_display_target", "create",
                     "com.malice.terminalcraft.integration.create.CreateMonitorIntegration")
     );

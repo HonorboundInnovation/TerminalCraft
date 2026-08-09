@@ -1,0 +1,5 @@
+{
+  "type":"minecraft:crafting_shapeless",
+  "ingredients":[{"item":"minecraft:iron_ingot"},{"item":"minecraft:redstone"},{"item":"minecraft:glass_pane"}],
+  "result":{"item":"terminalcraft:solid_state_drive"}
+}

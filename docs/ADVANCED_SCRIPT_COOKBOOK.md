@@ -180,6 +180,11 @@ The script configures:
 - named `status` service;
 - computer label and monitor status.
 
+For a first network, the script is optional: newly placed modems already open channel 42, receive
+a stable `node-...` hostname, and renew a bounded RedNet lease. Check that profile with `modem
+status`, send a smoke test with `modem send 'hello network'`, and opt into explicit commissioning
+only when a named service or segmented logical network is needed.
+
 Probe it from another reachable node:
 
 ```sh
@@ -217,6 +222,14 @@ device events unsubscribe <subscription-uuid>
 ```
 
 Subscriptions are caller-owned, bounded, best-effort, and do not survive logical-server restart.
+
+For server-rack continuations, use the programmatic `DeviceEventWaitAccess` surface rather than a
+wall-clock shell sleep. Start a wait with the current logical game tick and a timeout of at most
+1,200 ticks, persist the returned `wait_id` in the scheduler continuation, and return
+`ServerJobScheduler.StepResult.waitUntil(wake_at, version, continuation)`. Poll the token when the
+job is selected again. `DeviceEventSchedulerBridge` installs the publication wake callback so a
+matching event makes the queued job eligible before its timeout; all normal fairness, cancellation,
+and per-tick execution budgets remain authoritative.
 
 ## 7. Server-rack job batch
 

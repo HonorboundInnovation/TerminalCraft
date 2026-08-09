@@ -3,6 +3,8 @@ package com.malice.terminalcraft.shell;
 import com.malice.terminalcraft.device.DeviceAccess;
 import com.malice.terminalcraft.device.DeviceCallContext;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 
 import java.util.List;
 
@@ -12,6 +14,9 @@ import java.util.List;
  * drive monitors, and mount floppy media without pure shell logic depending on Minecraft types.
  */
 public interface TerminalHost {
+    /** World anchor exposed to server-side UI commands; block-entity hosts inherit these methods. */
+    default Level getLevel() { return null; }
+    default BlockPos getBlockPos() { return null; }
     /**
      * Composed shell-facing services. Override this method in migrated hosts; the default adapter
      * preserves compatibility with existing implementations of the legacy methods below.
@@ -51,6 +56,8 @@ public interface TerminalHost {
     default int monitorColumns(String side) { return 0; }
     /** Logical text height of the complete connected monitor wall, or 0 when unavailable. */
     default int monitorRows(String side) { return 0; }
+    /** Starts, stops, or reports the bounded animated geometric monitor-wall screensaver. */
+    default String monitorScreensaver(String side, String action) { return ""; }
     default boolean monitorRegisterService(String service, int port) { return false; }
     default boolean monitorUnregisterService(String service) { return false; }
     default List<String> monitorServices() { return List.of(); }
@@ -78,9 +85,17 @@ public interface TerminalHost {
     default boolean modemRegisterService(String service, int port) { return false; }
     default boolean modemUnregisterService(String service) { return false; }
     default List<String> modemLocalServices() { return List.of(); }
+    default boolean modemRegisterSensorService(String service, int port) { return false; }
+    default boolean modemUnregisterSensorService(String service) { return false; }
+    default List<String> modemSensorServices() { return List.of(); }
+    default boolean modemTransmitSensorService(String service, String operation, String channel, int replyPort) { return false; }
     default List<String> modemServices(int maximum) { return List.of(); }
     default boolean modemTransmitService(String service, int replyPort, String message) { return false; }
     default List<String> modemReceive(int max) { return List.of(); }
+    /** Bounded automatic-provisioning and protocol status lines for the attached modem. */
+    default List<String> modemStatus() { return List.of(); }
+    default boolean modemAutomaticSetup() { return false; }
+    default boolean modemSetAutomaticSetup(boolean enabled) { return false; }
     default boolean hasModem() { return false; }
 
     /** Returns whether a bundled-control cable is attached on the named side (or any side). */

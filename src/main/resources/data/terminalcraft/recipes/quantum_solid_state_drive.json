@@ -1,0 +1,5 @@
+{
+  "type":"minecraft:crafting_shapeless",
+  "ingredients":[{"item":"terminalcraft:advanced_solid_state_drive"},{"item":"minecraft:nether_star"},{"item":"minecraft:ender_pearl"}],
+  "result":{"item":"terminalcraft:quantum_solid_state_drive"}
+}

@@ -48,6 +48,33 @@ final class MonitorGroupDevice implements MonitorDevice {
     }
 
     @Override
+    public void renderFrame(List<String> lines, List<String> foreground,
+                            List<String> background, List<Integer> palette) {
+        if (lines == null || foreground == null || background == null || palette == null
+                || lines.size() != foreground.size() || lines.size() != background.size()
+                || lines.size() > maxLines() || palette.size() != com.malice.terminalcraft.device.TerminalBuffer.PALETTE_SIZE) {
+            throw new IllegalArgumentException("invalid monitor wall frame");
+        }
+        int width = maxLineLength();
+        List<String> fullLines = new ArrayList<>(maxLines());
+        List<String> fullForeground = new ArrayList<>(maxLines());
+        List<String> fullBackground = new ArrayList<>(maxLines());
+        for (int row = 0; row < maxLines(); row++) {
+            String text = row < lines.size() ? lines.get(row) : " ".repeat(width);
+            String fg = row < foreground.size() ? foreground.get(row) : "0".repeat(width);
+            String bg = row < background.size() ? background.get(row) : "f".repeat(width);
+            if (text.length() != width || fg.length() != width || bg.length() != width) {
+                throw new IllegalArgumentException("monitor wall frame rows must match the complete wall width");
+            }
+            fullLines.add(text);
+            fullForeground.add(fg);
+            fullBackground.add(bg);
+        }
+        int[] colors = palette.stream().mapToInt(Integer::intValue).toArray();
+        renderColorFrame(new MonitorScreensaver.ColorFrame(fullLines, fullForeground, fullBackground), colors);
+    }
+
+    @Override
     public List<String> lines() {
         Group group = group();
         List<String> result = new ArrayList<>(group.height() * MonitorBlockEntity.MAX_LINES);

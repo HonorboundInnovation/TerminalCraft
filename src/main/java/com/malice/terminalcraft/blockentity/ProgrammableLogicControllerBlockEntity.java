@@ -324,6 +324,12 @@ public class ProgrammableLogicControllerBlockEntity extends BlockEntity
         return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS ? -1 : cable.getSignal(channel);
     }
 
+    @Override public int bundledInput(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getExternalInput(channel);
+    }
+
     @Override public int bundledOutput(String side, int channel) {
         BundledCableBlockEntity cable = findBundledCable(side);
         return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS ? -1 : cable.getLocalOutput(channel);
@@ -383,7 +389,7 @@ public class ProgrammableLogicControllerBlockEntity extends BlockEntity
                     }
                     return -1;
                 }
-                return bundledSignal(binding.side(), binding.channel());
+                return bundledInput(binding.side(), binding.channel());
             }
             @Override public boolean write(PlcProgram.Binding binding, int strength) {
                 strength = forcedOutputs.getOrDefault(binding.name(), strength);
@@ -471,7 +477,7 @@ public class ProgrammableLogicControllerBlockEntity extends BlockEntity
 
     @Nullable private BundledCableBlockEntity findBundledCable(String side) {
         if (level == null) return null;
-        if ("all".equalsIgnoreCase(side)) {
+        if (side == null || side.isBlank() || "all".equalsIgnoreCase(side) || "any".equalsIgnoreCase(side)) {
             for (Direction direction : Direction.values()) {
                 BlockEntity entity = level.getBlockEntity(worldPosition.relative(direction));
                 if (entity instanceof BundledCableBlockEntity cable) return cable;

@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " R ",
+    "PBP",
+    " R "
+  ],
+  "key": {
+    "B": {
+      "item": "minecraft:book"
+    },
+    "P": {
+      "item": "minecraft:paper"
+    },
+    "R": {
+      "item": "minecraft:redstone"
+    }
+  },
+  "result": {
+    "item": "terminalcraft:guide_book",
+    "count": 1
+  }
+}

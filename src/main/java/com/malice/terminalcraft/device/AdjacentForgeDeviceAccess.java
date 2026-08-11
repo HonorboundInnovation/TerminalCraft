@@ -47,6 +47,10 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
             DeviceDescriptor descriptor = endpoint.descriptor();
             merged.putIfAbsent(descriptor.deviceId(), descriptor);
         }
+        for (DeviceEndpoint endpoint : nearby().values()) {
+            DeviceDescriptor descriptor = endpoint.descriptor();
+            merged.putIfAbsent(descriptor.deviceId(), descriptor);
+        }
         List<DeviceDescriptor> result = new ArrayList<>(merged.values());
         result.sort(Comparator.comparing(descriptor -> descriptor.deviceId().toString()));
         return List.copyOf(result.subList(0, Math.min(bounded, result.size())));
@@ -61,6 +65,7 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
         Optional<DeviceDescriptor> registered = base.descriptor(deviceId);
         if (registered.isPresent()) return registered;
         DeviceEndpoint endpoint = adjacent().get(deviceId);
+        if (endpoint == null) endpoint = nearby().get(deviceId);
         return endpoint == null ? Optional.empty() : Optional.of(endpoint.descriptor());
     }
 
@@ -71,6 +76,12 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
                 level, hostPosition, context(), callWorkUnits(method));
         if (!admission.isSuccess()) return admission;
         if (base.descriptor(deviceId).isPresent()) return base.call(deviceId, method, arguments);
+        DeviceEndpoint nearbyEndpoint = nearby().get(deviceId);
+        if (nearbyEndpoint != null) {
+            DeviceRegistry local = new DeviceRegistry();
+            local.register(nearbyEndpoint);
+            return local.call(context(), deviceId, method, arguments);
+        }
         Optional<AdjacentForgeEndpointResolver.Candidate> requested =
                 AdjacentForgeEndpointResolver.candidate(level.dimension().location().toString(),
                         hostPosition, deviceId);
@@ -119,6 +130,15 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
         DeviceRegistry local = new DeviceRegistry();
         local.register(endpoint);
         return local.call(context(), deviceId, method, arguments);
+    }
+
+    private Map<UUID, DeviceEndpoint> nearby() {
+        Map<UUID, DeviceEndpoint> endpoints = new LinkedHashMap<>();
+        for (DeviceEndpoint endpoint : com.malice.terminalcraft.integration.OptionalNearbyDeviceEndpointRegistry
+                .project(level, hostPosition)) {
+            endpoints.putIfAbsent(endpoint.descriptor().deviceId(), endpoint);
+        }
+        return endpoints;
     }
 
     @Override public DeviceEventBatch pollEvents(int limit) { return base.pollEvents(limit); }
@@ -528,8 +548,9 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
             ForgeCapabilityDevice device = new ForgeCapabilityDevice(level, target, accessSide);
             GenericItemStorage logicalStorage = com.malice.terminalcraft.integration.OptionalItemStorageRegistry
                     .resolve(blockEntity).orElse(null);
-            if (!device.hasInventory() && !device.hasFluidStorage() && !device.hasEnergyStorage()
-                    && logicalStorage == null) continue;
+            com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.ChemicalStorage chemicalStorage =
+                    com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry
+                            .resolve(blockEntity, accessSide).orElse(null);
 
             String dimension = level.dimension().location().toString();
             String positionAddress = AdjacentForgeEndpointResolver.positionAddress(dimension, target);
@@ -538,6 +559,14 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
                     AdjacentForgeEndpointResolver.adjacent(dimension, hostPosition, direction);
             String address = candidate.address();
             UUID id = candidate.id();
+            DeviceEndpoint optionalEndpoint = com.malice.terminalcraft.integration.OptionalDeviceEndpointRegistry
+                    .project(new com.malice.terminalcraft.integration.OptionalDeviceEndpointRegistry.Context(
+                            level, hostPosition, target, accessSide, blockEntity, id, address))
+                    .orElse(null);
+            boolean hasGenericCapabilities = device.hasInventory() || device.hasFluidStorage()
+                    || device.hasEnergyStorage() || logicalStorage != null;
+            if (!hasGenericCapabilities && chemicalStorage == null && optionalEndpoint == null) continue;
+
             String blockId = BuiltInRegistries.BLOCK.getKey(blockEntity.getBlockState().getBlock()).toString();
             String source = BuiltInRegistries.BLOCK.getKey(blockEntity.getBlockState().getBlock()).getNamespace();
             com.malice.terminalcraft.integration.OptionalDeviceMetadata metadata =
@@ -549,21 +578,31 @@ public final class AdjacentForgeDeviceAccess implements DeviceAccess, ExactItemT
                     ? java.util.Set.of() : metadata.capabilities();
             java.util.Map<String, DeviceValue> extraProperties = metadata == null
                     ? java.util.Map.of() : metadata.properties();
-            DeviceEndpoint capabilityEndpoint = new GenericCapabilityDeviceEndpoint(id, adapterId, typeName,
+            DeviceEndpoint capabilityEndpoint = hasGenericCapabilities
+                    ? new GenericCapabilityDeviceEndpoint(id, adapterId, typeName,
                     blockId, source, address, device,
                     () -> isCurrent(target, blockEntity), () -> level.hasChunkAt(target),
-                    extraCapabilities, extraProperties, logicalStorage);
+                    extraCapabilities, extraProperties, logicalStorage)
+                    : null;
             com.malice.terminalcraft.device.GenericCraftingService craftingService =
                     com.malice.terminalcraft.integration.OptionalCraftingServiceRegistry
                             .resolve(blockEntity).orElse(null);
-            if (craftingService == null) {
-                result.put(id, capabilityEndpoint);
-            } else {
-                DeviceEndpoint craftingEndpoint = new GenericCraftingServiceEndpoint(id, adapterId,
-                        blockId, source, address, craftingService,
-                        () -> isCurrent(target, blockEntity), () -> level.hasChunkAt(target));
-                result.put(id, new CompositeDeviceEndpoint(capabilityEndpoint, craftingEndpoint));
-            }
+            DeviceEndpoint craftingEndpoint = craftingService == null ? null
+                    : new GenericCraftingServiceEndpoint(id, adapterId,
+                    blockId, source, address, craftingService,
+                    () -> isCurrent(target, blockEntity), () -> level.hasChunkAt(target));
+            DeviceEndpoint chemicalEndpoint = chemicalStorage == null ? null
+                    : new GenericChemicalStorageEndpoint(id, blockId, source, address, chemicalStorage,
+                    () -> isCurrent(target, blockEntity), () -> level.hasChunkAt(target));
+
+            java.util.ArrayList<DeviceEndpoint> endpoints = new java.util.ArrayList<>();
+            if (optionalEndpoint != null) endpoints.add(optionalEndpoint);
+            if (capabilityEndpoint != null) endpoints.add(capabilityEndpoint);
+            if (chemicalEndpoint != null) endpoints.add(chemicalEndpoint);
+            if (craftingEndpoint != null) endpoints.add(craftingEndpoint);
+            DeviceEndpoint primary = endpoints.remove(0);
+            result.put(id, endpoints.isEmpty() ? primary
+                    : new CompositeDeviceEndpoint(primary, endpoints.toArray(DeviceEndpoint[]::new)));
         }
         return result;
     }

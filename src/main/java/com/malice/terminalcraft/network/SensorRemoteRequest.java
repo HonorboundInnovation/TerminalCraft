@@ -3,7 +3,7 @@ package com.malice.terminalcraft.network;
 import java.util.Locale;
 import java.util.Optional;
 
-/** Bounded request format for a modem-published Sensor Array telemetry service. */
+/** Bounded request format for a wireless Sensor telemetry service. */
 public record SensorRemoteRequest(Operation operation, String channel) {
     public static final RednetProtocol PROTOCOL = new RednetProtocol(
             "terminalcraft:sensor-telemetry", 1, "application/x-terminalcraft-sensor");

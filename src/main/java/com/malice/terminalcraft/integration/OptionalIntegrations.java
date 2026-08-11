@@ -29,7 +29,13 @@ public final class OptionalIntegrations {
             new Definition("applied_energistics_bridge", "ae2",
                     "com.malice.terminalcraft.integration.appliedenergistics.AppliedEnergisticsIntegration"),
             new Definition("create_monitor_display_target", "create",
-                    "com.malice.terminalcraft.integration.create.CreateMonitorIntegration")
+                    "com.malice.terminalcraft.integration.create.CreateMonitorIntegration"),
+            new Definition("create_native_devices", "create",
+                    "com.malice.terminalcraft.integration.create.CreateDeviceIntegration"),
+            new Definition("mekanism_native_devices", "mekanism",
+                    "com.malice.terminalcraft.integration.mekanism.MekanismIntegration"),
+            new Definition("securitycraft_native_devices", "securitycraft",
+                    "com.malice.terminalcraft.integration.securitycraft.SecurityCraftIntegration")
     );
     private static final Set<String> INITIALIZED = new HashSet<>();
 

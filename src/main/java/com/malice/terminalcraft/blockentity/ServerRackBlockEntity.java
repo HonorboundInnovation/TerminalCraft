@@ -18,6 +18,7 @@ import com.malice.terminalcraft.shell.BashShell;
 import com.malice.terminalcraft.shell.ShellComputer;
 import com.malice.terminalcraft.shell.TerminalHost;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
@@ -37,6 +38,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /** Two-bay rack backplane whose installed blades provide compute and routing behavior. */
@@ -161,6 +163,30 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     @Override public boolean setRedstoneOutput(String side, int power) { return false; }
     @Override public List<String> redstoneSides() { return List.of(); }
 
+    @Override public boolean hasBundledCable(String side) { return findBundledCable(side) != null; }
+    @Override public int bundledSignal(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getSignal(channel);
+    }
+    @Override public int bundledInput(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getExternalInput(channel);
+    }
+    @Override public int bundledOutput(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getLocalOutput(channel);
+    }
+    @Override public boolean setBundledOutput(String side, int channel, int strength) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        if (cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                || strength < 0 || strength > 15) return false;
+        cable.setLocalOutput(channel, strength);
+        return true;
+    }
+
     @Override
     public List<String> listPeripherals() {
         List<String> result = new ArrayList<>();
@@ -169,7 +195,61 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
             result.add("internal:server_console");
         }
         if (hasRouterModule()) result.add("internal:rednet_router");
+        if (level != null) {
+            for (Direction direction : Direction.values()) {
+                if (level.getBlockEntity(worldPosition.relative(direction)) instanceof BundledCableBlockEntity) {
+                    result.add(sideName(direction) + ":bundled_cable");
+                }
+            }
+        }
         return List.copyOf(result);
+    }
+
+    @Nullable
+    private BundledCableBlockEntity findBundledCable(String side) {
+        if (level == null) return null;
+        if (side == null || side.isBlank() || "all".equalsIgnoreCase(side) || "any".equalsIgnoreCase(side)) {
+            for (Direction direction : Direction.values()) {
+                BlockEntity entity = level.getBlockEntity(worldPosition.relative(direction));
+                if (entity instanceof BundledCableBlockEntity cable) return cable;
+            }
+            return null;
+        }
+        Direction direction = parseSide(side);
+        if (direction == null) return null;
+        BlockEntity entity = level.getBlockEntity(worldPosition.relative(direction));
+        return entity instanceof BundledCableBlockEntity cable ? cable : null;
+    }
+
+    @Nullable
+    private Direction parseSide(String side) {
+        if (side == null || side.isBlank()) return null;
+        return switch (side.toLowerCase(Locale.ROOT)) {
+            case "up", "top" -> Direction.UP;
+            case "down", "bottom" -> Direction.DOWN;
+            case "north" -> Direction.NORTH;
+            case "south" -> Direction.SOUTH;
+            case "east" -> Direction.EAST;
+            case "west" -> Direction.WEST;
+            case "front", "forward" -> facing();
+            case "back", "behind" -> facing().getOpposite();
+            case "left" -> facing().getCounterClockWise();
+            case "right" -> facing().getClockWise();
+            default -> null;
+        };
+    }
+
+    private Direction facing() {
+        return getBlockState().hasProperty(ServerRackBlock.FACING)
+                ? getBlockState().getValue(ServerRackBlock.FACING) : Direction.NORTH;
+    }
+
+    private static String sideName(Direction direction) {
+        return switch (direction) {
+            case UP -> "top";
+            case DOWN -> "bottom";
+            default -> direction.getName();
+        };
     }
 
     @Override

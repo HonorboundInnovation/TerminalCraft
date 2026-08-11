@@ -1,6 +1,6 @@
 # The TerminalCraft Guide
 
-**The comprehensive player, administrator, shell, scripting, networking, and automation manual for TerminalCraft 1.0.38**
+**The comprehensive player, administrator, shell, PLC, networking, SCADA, and automation manual for TerminalCraft 1.0.52**
 
 TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style computers. This guide documents the behavior of the current source release—not ordinary GNU Bash, ComputerCraft Lua, or features merely planned for a later release.
 
@@ -29,6 +29,7 @@ TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style
 19. [Persistence, limits, and security](#19-persistence-limits-and-security)
 20. [Troubleshooting](#20-troubleshooting)
 21. [Current shell differences from GNU Bash](#21-current-shell-differences-from-gnu-bash)
+22. [SCADA supervisory control](#22-scada-supervisory-control)
 
 ---
 
@@ -38,7 +39,7 @@ TerminalCraft is a Minecraft Forge 1.20.1 mod built around persistent Bash-style
 |---|---|
 | Minecraft | 1.20.1 |
 | Minecraft Forge | 47.4.10 |
-| Java | 21 |
+| Java | 17 or newer |
 | TerminalCraft | Both client and server |
 
 Install Forge, place the TerminalCraft JAR in the instance's `mods` directory, and launch the matching Forge profile. On multiplayer servers, install the same TerminalCraft build on the server and every connecting client.
@@ -51,7 +52,7 @@ cd TerminalCraft
 ./gradlew clean build
 ```
 
-The output is `build/libs/terminalcraft-1.20.1-47.4.10-1.0.38.jar`.
+The output is `build/libs/terminalcraft-1.20.1-47.4.10-1.0.63.jar`.
 
 ## 2. Your first terminal
 
@@ -88,6 +89,32 @@ Press `F6` in an open terminal to switch between the scrollback log and the serv
 40×16 character-cell surface. The surface mode is a passive clipped view of the same bounded state
 used by terminal-capable clients; input still goes through the authenticated server shell.
 
+### Device Control Center
+
+Run `control` (aliases: `devmgr`, `setup`) to open the full-screen device setup program. It uses the
+same authenticated Device API as the `device` command, so discovery and mutations remain
+server-authoritative and PLC ownership rules still apply.
+
+The Control Center provides three tabs:
+
+- **Overview** shows live/offline state, type, address, stable identity, source mod, and advertised
+  properties for every discoverable device.
+- **Methods** lists the selected device's advertised API methods. Select a method and press `Enter`;
+  methods with parameters open a typed argument prompt. Put string arguments containing spaces in
+  quotes.
+- **PLC Templates** loads a general, Create, Mekanism, or SecurityCraft-oriented starter program into a selected network PLC
+  through its owner-authorized `program.set` method. This does not require the terminal itself to be
+  the PLC host.
+
+Use the arrow keys or mouse wheel to navigate, `Left`/`Right` to move between the device and detail
+panes, `Tab`/`Shift+Tab` to change tabs, and `Enter` to select or activate. On Overview, `Enter` opens
+the selected device's Methods pane; there it runs the selected method. `F2` or `N` assigns a durable
+DNS alias to the selected device, `F5` or `R` refreshes discovery and live status, and `Escape`
+cancels an input prompt or exits the Control Center back to the shell. The letter shortcuts are
+provided for modpacks that reserve function keys. The mouse can select tabs, devices, methods, and
+templates; keyboard activation is required for mutating actions to avoid accidental clicks. Run
+`help control` in the terminal for the complete in-game key reference.
+
 ## 3. Blocks and items
 
 ### Terminal
@@ -97,6 +124,15 @@ A placed, persistent Bash-style computer. Use it as the normal workstation for s
 ### Pocket Terminal
 
 A stack-size-one handheld computer opened by using the item. Its shell state, label, stable modem identity, and open channels are stored on the item. It includes a built-in wireless modem with a default 64-block range and up to 128 open channels, and rebinding follows the carrying player. It is not a placed world host and therefore cannot provide every adjacency-based operation available to a placed terminal.
+
+### TerminalCraft Guide
+
+A craftable, stack-size-one field manual containing this complete guide, the Advanced Script
+Cookbook, and the exact source of every built-in general, Create, Mekanism, and SecurityCraft PLC template. Right-click the
+book to open its searchable chapter reader. Select chapters with the mouse
+or `Left`/`Right`, scroll with the wheel or `Page Up`/`Page Down`, and press `Ctrl+F` to search chapter
+titles and full text. The manual is local to the installed JAR, works offline, does not pause the
+game, and requires no optional documentation mod.
 
 ### Turtle
 
@@ -117,11 +153,44 @@ Place a Disk Drive adjacent to a computer, insert a Floppy Disk, and mount it at
 
 ### Modem
 
-Provides RedNet communication with a default 64-block wireless range and at most 128 open channels. A modem can operate wirelessly or as an endpoint on physical Network Cable. Shift-right-click toggles its wireless/wired mode; normal right-click reports status. A placed computer must have an adjacent modem for the `modem` command family. New modems automatically open channel 42, receive a stable `node-...` hostname, and receive a bounded private RedNet address.
+Provides RedNet communication with a default 64-block wireless range and at most 128 open channels. A modem can operate wirelessly or as an endpoint on physical Network Cable. Shift-right-click toggles its wireless/wired mode; normal right-click reports status. A placed computer must have an adjacent modem for the `modem` command family. New wireless or unconnected modems automatically open channel 42. A wired modem attached to colored Network Cable also opens that cable's color channel and uses it when a shell command omits the channel. Every modem receives a stable `node-...` hostname and a bounded private RedNet address.
 
 ### Network Cable
 
-Carries wired RedNet traffic through physical topology. Breaking a required segment partitions the route immediately. It does not carry bundled-control signals.
+Carries wired RedNet data/control traffic through physical topology. Network Cable is available in all 16 Minecraft dye colors; the dye ID is its default channel from 0 through 15. Ordinary Network Cable uses one centered cable per face and automatically connects RedPower-style to compatible same-color cables on neighboring blocks, around supported corners, to bundled network trunks, and to wired devices. A second ordinary Network Cable cannot occupy the same face. Network Cable does not carry redstone power.
+
+All ordinary and bundled Red Alloy and Network Cable blocks use a face-oriented half-slab or
+half-wall selection volume. Floor and ceiling cables occupy the corresponding horizontal half;
+wall cables occupy the corresponding vertical half. Multipart cables combine the halves of every
+occupied face, while the visible cable model remains thin. This makes recessed cable installations
+easy to select and provides consistent geometry for decorative covers or facades; normal Minecraft
+blocks still cannot share one block position without a dedicated cover system.
+
+RedNet packet subscriptions are exact: a packet sent on channel 3 is delivered only to modems
+listening on channel 3, never to channels 2 or 4. Cable color provisions the matching default channel;
+it does not merge the 16 RedNet channel queues. Physical routing also retains the selected channel
+through a Bundled Network Cable: a channel-3 packet can leave only through channel-3 colored
+breakouts, even if a modem behind a differently colored breakout manually listens on channel 3.
+
+### Bundled Network Cable
+
+Carries all 16 independently routed Network Cable data/control channels in one high-density surface
+trunk. Any colored Network Cable can break out only into the matching numbered channel, and a wired
+modem beside the trunk automatically exposes channels 0 through 15. It remains packet transport only
+and never carries Red Alloy/redstone power.
+
+### Cable color/channel map
+
+| Channel | Color | Channel | Color |
+|---:|---|---:|---|
+| 0 | White | 8 | Light Gray |
+| 1 | Orange | 9 | Cyan |
+| 2 | Magenta | 10 | Purple |
+| 3 | Light Blue | 11 | Blue |
+| 4 | Yellow | 12 | Brown |
+| 5 | Lime | 13 | Green |
+| 6 | Pink | 14 | Red |
+| 7 | Gray | 15 | Black |
 
 ### Universal Sensor Array
 
@@ -189,16 +258,19 @@ selects a metric from a standard, provider-neutral family:
 - `fluid`: millibuckets, capacity, tanks, fill percentage, or an exact fluid selector;
 - `energy`: FE stored/capacity/fill percentage and receive/extract capability;
 - `entity`: bounded nearby counts, presence, `players`, `items`, or an entity type selector;
-- `machine`: common active/lit/powered/progress state properties and TerminalCraft PLC state;
+- `machine`: common active/lit/powered/progress state properties, TerminalCraft PLC state, and
+  native SecurityCraft active/powered/disabled/locked/module/audit/range/output telemetry;
 - `environment`: light, sky/block light, rain, thunder, day, time, temperature, and dimension;
 - `network`: modem online/channels/pending/hosts/routers or router status;
-- `kinetic`: generic exposed speed/rotation/overstress state properties;
-- `chemical`: reserved and explicitly reports `unsupported` until a generic capability exists.
+- `kinetic`: generic state plus native Create speed, direction, stress, capacity, network, and
+  overstress telemetry when Create is installed;
+- `chemical`: runtime-discovered provider tanks, amount, capacity, fill percentage, tank count, and
+  exact resource selectors when an optional chemical provider is installed.
 
 Samples carry a quality value (`ok`, `unavailable`, `chunk_unloaded`, `partial`, or `unsupported`).
-An unavailable or unsupported sample never becomes a PLC signal. Create and Mekanism-specific values
-are therefore not guessed through private APIs; their standard Forge capabilities and exposed block
-state are still usable immediately.
+An unavailable or unsupported sample never becomes a PLC signal. Native Create, Mekanism, and SecurityCraft adapters
+are registered only when their mods are installed; otherwise the same sensor engine continues through
+vanilla state and standard Forge capabilities without trying to load those APIs.
 
 Example terminal setup:
 
@@ -226,6 +298,12 @@ the array can publish it as a typed RedNet service with `modem sensor add teleme
 can request `list`, `snapshot`, or `read <channel>` with `modem sensor request ...`. RedNet replies are
 bounded text telemetry and do not grant world mutation.
 
+Every array also advertises itself automatically as a wireless RedNet telemetry service. Its stable
+DNS-style name is `sensor-<uuid prefix>` (for example, `sensor-a1b2c3d4e5f6`), it listens on channel
+`42`, and its default wireless range is 64 blocks. Open channel 42 on a modem, use `modem services`
+to discover nearby sensors, then use `modem sensor request <name> list|snapshot|read [channel]`.
+This automatic endpoint is additive: adjacent wired/device and PLC integration continue to work.
+
 ### Individual Sensors
 
 Every Sensor Array family is also available as a dedicated one-channel block: **Redstone**,
@@ -252,6 +330,10 @@ Array when a deterministic multi-channel panel is needed. A modem can publish an
 with the same `modem sensor add` and `modem sensor request` workflow used by an array. Its device
 endpoint exposes one channel and does not offer channel removal; break the block to remove it.
 
+Individual sensors are wireless RedNet telemetry endpoints as well. They use the same automatic
+`sensor-<uuid prefix>` naming, channel 42, 64-block range, discovery, and request commands as the
+array, without requiring a modem to be placed beside the block.
+
 ### Network Access Storage and Materializer
 
 A **Network Access Storage** block accepts up to eight portable Solid-State Drives. Basic, Advanced,
@@ -276,28 +358,62 @@ first available item; holding an item requests that item; holding a compatible f
 it from stored fluid. Machines can pull through the Materializer's read-only item/fluid capabilities,
 which prevents accidental insertion back into the storage network.
 
-### Red Alloy Wire
+### Unshielded and Shielded Red Alloy Wire
 
-A compact attenuating vanilla-redstone surface wire. Parts can occupy supported floor, wall, and
-ceiling faces, join across valid corners, and drop individually when support is removed. Right-click
-with a Forge/Common-tagged wrench (including the Create wrench) to inspect the selected face,
-current power, occupied faces, and links. Empty-hand interaction is deliberately left unclaimed for
-compatibility with Carry On and similar interaction mods. A vanilla source is sampled using its
+The craftable **Unshielded Red Alloy Wire** is the original compact, attenuating vanilla-redstone
+surface conductor. It can join any Red Alloy insulation color but has no bundled-channel identity,
+so it never enters a Bundled Red Alloy Cable. Combine it with a vanilla dye to create the matching
+**Shielded Red Alloy Wire**. The sixteen shielded colors remain electrically isolated from one
+another and each selects the same-numbered bundled channel.
+
+Both forms use one centered cable per face. They automatically connect RedPower-style on neighboring
+blocks, around supported outside corners, to compatible occupied faces in the same multipart space,
+and to vanilla-redstone endpoints. Shielded wire also connects to a matching Bundled Red Alloy
+channel. A second ordinary Red Alloy wire cannot occupy the same face. Network Cable follows the
+same single-cable placement and automatic-routing model for data/control traffic. Placed Shielded
+Red Alloy and colored Network Cables use clean, opaque dye-color rendering without patterned overlays.
+Every ordinary and bundled cable uses the half-slab or half-wall selection volume described under
+Network Cable, oriented to the face carrying that cable.
+
+While holding either ordinary cable, the world preview shows one centered marker on the selected
+face. Red means the face is unsupported or already occupied. Right-click with a Forge/Common-tagged
+wrench (including the Create wrench) to inspect its color, face, current power or data channel, and
+live links. Empty-hand interaction is deliberately left unclaimed for compatibility with Carry On
+and similar interaction mods. A vanilla source is sampled using its
 directional output toward the wire, including the solid support behind a mounted face. Power loses
 one strength per connected wire edge. Output is limited to the plane of the mounted face, so a
 floor wire emits horizontally, a wall wire emits vertically and horizontally within that wall,
 and neither leaks through its support nor through its outward normal.
-It is separate from data networking and bundled control.
+Each shielded color can enter or leave the matching channel of a Bundled Red Alloy Cable. It is separate from
+data networking: redstone strength `0..15` is not the same thing as data/control channel `0..15`.
 
-### Bundled Control Cable
+### Red Alloy Capacitor
 
-Carries 16 independent channels numbered `0` through `15`. Values are strengths from `0` through
-`15`. Channel 0 bridges vanilla redstone behavior; data-network traffic remains a separate system.
+The Red Alloy Capacitor is a compact six-port signal regenerator for long Red Alloy runs. Any
+nonzero signal entering one face becomes strength `15` on the directly opposing face. The other
+four faces remain isolated from that path: west input produces east output, north produces south,
+and down produces up, with the reverse paths working independently at the same time. This lets one
+capacitor extend several straight wire axes without merging them or feeding an output back into its
+own input. Right-click it with a Forge/Common-tagged wrench to list its currently active paths.
+
+### Bundled Red Alloy Cable
+
+![Bundled Red Alloy and Bundled Network cable families](terminalcraft:textures/gui/guide/bundled_cable_families.png)
+
+> Cable-family plate: the warm red/multiconductor jacket is Bundled Red Alloy; the navy/cyan packet-marked jacket is Bundled Network. They never exchange signals.
+
+Carries 16 independent Red Alloy/redstone channels numbered `0` through `15`. Values are strengths
+from `0` through `15`. Colored Shielded Red Alloy Wire breaks out to the channel with the same dye
+ID. Direct uncolored vanilla redstone does not connect to a bundled trunk because it supplies no
+channel identity; use the matching colored Shielded Red Alloy Wire as the input or output breakout.
+White selects channel 0 just as red selects 14 and black selects 15. Data-network traffic remains a
+separate system.
 Right-click with a Forge/Common-tagged wrench to inspect the selected face, links, and all active
-channels. Terminals and turtles adjacent to a cable expose the same channels through `wire` and
-`bundled`; setting a channel is a local computer-owned source, while reads report the effective
-component signal. Channel 0 accepts vanilla redstone input from adjacent sources, including a
-mounted face's support block, and cable output stays within the plane of its occupied face.
+channels. Terminals, server racks, PLCs, and turtles adjacent to a cable expose the same channels
+through both `redstone`/`rs` and `wire`/`bundled`. Each channel has a separate external input, local
+computer-owned output, and combined bus value; a host's own output is not echoed as its input.
+Every channel remains isolated through straight runs, corners, multipart faces, computer I/O, and
+colored breakouts.
 
 ### Programmable Logic Controller
 
@@ -364,6 +480,16 @@ IRI
 " I "
 ```
 
+### TerminalCraft Guide
+
+```text
+ R
+PBP
+ R
+```
+
+`B` book, `P` paper, `R` redstone.
+
 ### Turtle
 
 ```text
@@ -422,6 +548,19 @@ IRI
 
 Here `I` is an iron nugget.
 
+Craft any Network Cable together with one vanilla dye to recolor it. Recoloring preserves one cable
+and assigns the dye's default data/control channel.
+
+### Bundled Network Cable (6)
+
+```text
+CCC
+GGG
+CCC
+```
+
+`C` Network Cable, `G` glass pane.
+
 ### Network Router
 
 ```text
@@ -459,7 +598,7 @@ IGI
 
 `I` iron ingot, `P` piston, `R` redstone, `N` Network Access Storage, `G` glass pane.
 
-### Red Alloy Wire (12)
+### Unshielded Red Alloy Wire (12)
 
 ```text
 RRR
@@ -467,9 +606,17 @@ ICI
 RRR
 ```
 
-`I` iron nugget, `C` copper ingot.
+`R` redstone, `I` iron nugget, `C` copper ingot. This recipe produces the unshielded base wire.
 
-### Bundled Control Cable (6)
+Craft an Unshielded or Shielded Red Alloy Wire together with one vanilla dye to produce the matching
+Shielded Red Alloy color. Network Cable is likewise craftable from its listed recipe and may be
+combined with any dye to select that color and default channel.
+
+### Red Alloy Capacitor
+
+Craft shapelessly with one Red Alloy Wire, one Redstone Torch, one Copper Ingot, and one Nether Quartz.
+
+### Bundled Red Alloy Cable (6)
 
 ```text
 RRR
@@ -653,24 +800,34 @@ The pipeline passes one command's textual output to the next command's standard 
 |---|---|
 | `label [name]` | Read or set computer label |
 | `peripheral` | List adjacent peripheral/device information |
-| `redstone`, `rs` | Read/set vanilla redstone sides |
-| `wire`, `bundled` | Read/set bundled channels |
+| `redstone`, `rs` | Read/set vanilla sides and all 16 Bundled Red Alloy channels |
+| `wire`, `bundled` | Read/set Bundled Red Alloy input, output, and combined bus channels |
 | `plc` | Program, inspect, start, stop, and reset the attached PLC |
 | `displaylink`, `display-link`, `dlink` | Pair and configure adjacent wireless display links |
 | `turtle`, `tu` | Turtle movement and interaction |
 | `monitor` | Adjacent monitor control |
 | `modem`, `rednet` | RedNet network operations |
 | `sensor`, `sensors` | Configure and read an adjacent Sensor Array or individual sensor |
+| `scada` | Plant-wide process tags, historian, alarms, dashboards, roles, audit, and control |
 | `mount`, `umount`, `unmount`, `disk` | Floppy operations |
-| `device`, `devices` | Unified device API |
+| `device`, `devices` | Unified device API and persistent DNS aliases |
+| `control`, `devmgr`, `setup` | Open the full-screen device setup and PLC template Control Center |
 | `storage`, `inventory` | Generic storage API |
 | `sophisticated` | Sophisticated Storage/Backpacks adapter |
 | `drawers` | Storage Drawers adapter |
 | `server`, `jobs` | Server-rack jobs |
 | `auth`, `authorization` | Current caller authorization diagnostics |
 
-The terminal screen also supports `Ctrl+R` reverse history search, `Ctrl+L` input clearing, `F6`
-surface/log switching, Page Up/Page Down scrollback, and the existing editor copy/paste shortcuts.
+The terminal screen also supports `Tab` command/path completion, click-drag selection of visible
+scrollback, `Ctrl+C` to copy a selection, and `Ctrl+V` to paste into the active prompt or editor.
+`Ctrl+R` performs reverse history search, `Ctrl+L` clears the input, `F6` switches between the
+surface and log views, and Page Up/Page Down scrolls the log. With no scrollback selected,
+`Ctrl+C` continues to use the prompt's normal text-field copy behavior.
+
+Inside the Control Center, `Tab`, arrows, `Enter`, `F2`/`N`, `F5`/`R`, and `Escape` operate the
+graphical device workflow. DNS and method prompts use the same command-line text box, including
+mouse text selection and normal `Ctrl+C`/`Ctrl+V` clipboard behavior. Run `help control` for a
+screen-readable list of every key and alias.
 
 ## 7. Scripting language
 
@@ -1235,29 +1392,62 @@ POWER=$(rs get back)
 echo power=$POWER
 ```
 
-### Bundled cable
+### Six-side vanilla and 16-channel Bundled Red Alloy forms
+
+The same `redstone`/`rs` command also directly addresses Bundled Red Alloy channels when a channel
+argument is present:
 
 ```text
-wire get <side|any> <channel 0-15>
-wire output <side|any> <channel 0-15>
-wire set <side|any> <channel 0-15> <strength 0-15>
+redstone input <side|any> <channel 0-15|all>
+redstone output <side|any> <channel 0-15|all>
+redstone set <side|any> <channel 0-15> <strength 0-15>
+redstone channels <side|any>
 ```
 
 Examples:
 
 ```sh
-wire get back 3
-wire set back 3 15
-wire output back 3
+rs input back 3
+rs set back 3 15
+rs output back 3
+rs channels back
 ```
 
-Bundled components are bounded and resolve per-channel strengths. Bundled control, red-alloy signals, and RedNet data are distinct systems.
+`rs channels` prints one color-labeled row for every channel from 0 through 15. `input` is the
+external signal entering that host's attached cable segment, `output` is that host segment's local
+computer-driven source, and `bus` is their combined effective component signal. Input and output
+remain separate on terminals, server racks, PLCs, and turtles. In particular, a PLC cannot satisfy
+its own `BUNDLED` input binding merely by driving the corresponding output on the same segment.
+
+### `wire`/`bundled` aliases
+
+```text
+wire get <side|any> <channel 0-15|all>
+wire input <side|any> <channel 0-15|all>
+wire output <side|any> <channel 0-15|all>
+wire set <side|any> <channel 0-15> <strength 0-15>
+wire status <side|any>
+```
+
+Examples:
+
+```sh
+wire input back 3
+wire set back 3 15
+wire output back 3
+wire status back
+```
+
+`wire get` is retained for scripts that need the combined effective bus value. `wire input` reads
+external input without local-output echo. Adding `all` lists all 16 values independently.
+Bundled components are bounded and preserve channel identity. Network Cable and Bundled Network
+Cable carry RedNet packets instead; they never become redstone conductors.
 
 ### Programmable Logic Controller
 
 A **Programmable Logic Controller** is a dedicated server-authoritative automation block. Right-click
-it to open the terminal screen. The normal shell editor can author a program file, and the `plc`
-command compiles or runs it:
+it to open the PLC Programmer. A terminal's normal shell editor can also author a program file, and
+the `plc` command compiles or runs it:
 
 ```sh
 edit /home/player/programs/factory.plc
@@ -1296,6 +1486,159 @@ input range to an output range. `PID` defines a bounded discrete controller, for
 sensor (`value`). Sensor bindings
 are input-only, and a non-`ok` sample stops the PLC and clears its outputs.
 
+#### PLC scan model
+
+The PLC is a deterministic scan controller, not a general-purpose shell. On each scan it performs
+the following order:
+
+1. Read and clamp every declared input to signal strength `0..15`.
+2. Convert digital inputs to false (`0`) or true (`1..15`).
+3. Update timers, rising-edge counters, and reset-dominant latches.
+4. Evaluate Boolean rungs in source order.
+5. Evaluate analog `MOVE`, `SCALE`, and `PID` operations.
+6. Write declared outputs. Digital outputs write `0` or `15`; analog outputs write `0..15`.
+
+If a declared endpoint disappears, a sensor reports non-`ok` quality, compilation fails, or an
+output cannot be written, the controller stops and attempts to drive all declared outputs to zero.
+Design real machines so zero output is the safest state. Invert active-low Create components such as
+Clutches and Funnels where necessary.
+
+#### Source format and names
+
+- One instruction is written per line. `#` begins a comment.
+- Instructions and signal references are case-insensitive and canonicalized to upper case.
+- Signal names start with a letter or underscore and may contain letters, digits, underscores, and
+  dots. Names must be unique where the compiler requires them.
+- A program is bounded to 16 KiB, 128 lines, 192 characters per line, 32 I/O bindings, 64 rungs,
+  and 16 each of timers, counters, and latches.
+- `SCAN <ticks>` selects a scan period from 1 through 20 game ticks. The default is 2.
+
+#### Digital and analog I/O declarations
+
+```text
+IN <name> REDSTONE <side>
+IN <name> BUNDLED <side> <channel 0-15>
+IN <name> SENSOR <sensor-channel>
+OUT <name> REDSTONE <side>
+OUT <name> BUNDLED <side> <channel 0-15>
+
+AIN <name> REDSTONE <side>
+AIN <name> BUNDLED <side> <channel 0-15>
+AIN <name> SENSOR <sensor-channel>
+AOUT <name> REDSTONE <side>
+AOUT <name> BUNDLED <side> <channel 0-15>
+```
+
+Use `IN`/`OUT` when only off/on matters. Use `AIN`/`AOUT` when the full redstone strength matters.
+Sides are relative to the PLC block (`NORTH`, `SOUTH`, `EAST`, `WEST`, `UP`, `DOWN`). A bundled
+binding selects one of the 16 channels on that face. Sensor bindings are input-only and name the
+configured channel exposed by an adjacent Sensor Array or individual sensor; `value` is the standard
+calibrated channel on an individual sensor.
+
+#### Boolean expressions and rungs
+
+```text
+RUNG <output-or-signal> = <expression>
+```
+
+Expressions support named signals, `ON`/`TRUE`, `OFF`/`FALSE`, parentheses, `NOT`/`!`,
+`AND`/`&&`, and `OR`/`||`. Precedence is `NOT`, then `AND`, then `OR`. Parenthesize safety logic
+when the intended order is not immediately obvious.
+
+```text
+RUNG MOTOR = RUN AND GUARD AND NOT ESTOP
+RUNG ALARM = ESTOP OR OVERLOAD
+RUNG PERMISSIVE = (PRESSURE_OK OR BYPASS) AND GUARD
+```
+
+A rung with the same name as a digital `OUT` controls that output. A rung may also create an
+intermediate Boolean signal for later rungs.
+
+#### Timers, counters, and latches
+
+```text
+TIMER <name> <ticks> = <expression>
+COUNTER <name> <preset> = <expression>
+LATCH <name> SET <expression> RESET <expression>
+```
+
+A timer accumulates while its expression is true and resets to zero when false. It exposes
+`NAME.ACTIVE` and `NAME.DONE`. The preset is 1 through 72,000 ticks. A counter increments only on a
+false-to-true edge, saturates at its preset, and exposes the same `.ACTIVE` and `.DONE` flags. A
+held-high input is one count, not one count per scan. Timers and counters reset when the program is
+loaded or `plc reset` is used. Latches retain their state across scans; when SET and RESET are both
+true, RESET wins.
+
+```text
+TIMER START_DELAY 40 = RUN
+COUNTER PARTS 16 = ITEM_PULSE AND RUN
+LATCH RUN SET START RESET STOP OR ESTOP
+RUNG MOTOR = RUN AND START_DELAY.DONE
+RUNG BATCH_DONE = PARTS.DONE
+```
+
+#### Analog MOVE, SCALE, and PID
+
+```text
+MOVE <AOUT> = <source>
+SCALE <AOUT> = <source> <in-min> <in-max> <out-min> <out-max>
+PID <name> SETPOINT <0-15|signal> PROCESS <signal> OUTPUT <AOUT>
+    KP <number> KI <number> KD <number>
+```
+
+`MOVE` copies a `0..15` value. `SCALE` performs bounded linear mapping and can reverse a signal by
+reversing an output range. Its input minimum and maximum must differ. `PID` is a discrete bounded
+controller: the setpoint is a literal or known signal, the process references a known input, and the
+output must be an `AOUT`. Gains are finite numbers from `-64` through `64`; the integral term is
+internally bounded and the final output is clamped to `0..15`.
+
+```text
+SCAN 2
+AIN LEVEL SENSOR value
+AIN DEMAND BUNDLED WEST 0
+AOUT VALVE REDSTONE EAST
+AOUT MIRROR BUNDLED EAST 3
+PID LEVEL_LOOP SETPOINT DEMAND PROCESS LEVEL OUTPUT VALVE KP 2 KI 0.02 KD 0.1
+MOVE MIRROR = LEVEL
+```
+
+Tune a PID with `KI` and `KD` at zero first, raise `KP` until the response is useful without severe
+oscillation, then add small integral and derivative terms only as the machine requires. Always test
+with the machine disconnected or otherwise made safe.
+
+#### Complete motor starter example
+
+```text
+# Start/stop seal-in with guard, emergency stop, delayed start, and alarm.
+SCAN 1
+IN START REDSTONE NORTH
+IN STOP REDSTONE SOUTH
+IN GUARD BUNDLED WEST 0
+IN ESTOP BUNDLED WEST 1
+OUT MOTOR REDSTONE EAST
+OUT ALARM BUNDLED EAST 1
+LATCH RUN SET START AND GUARD RESET STOP OR ESTOP OR NOT GUARD
+TIMER START_DELAY 20 = RUN
+RUNG MOTOR = RUN AND START_DELAY.DONE AND GUARD AND NOT ESTOP
+RUNG ALARM = ESTOP OR NOT GUARD
+```
+
+Commission it in this order:
+
+```sh
+plc template show motor-start-stop
+edit /home/player/programs/motor.plc
+plc load /home/player/programs/motor.plc
+plc status
+plc watch
+plc start
+```
+
+Use `plc stop` before rewiring, `plc reset` to clear retained controller state, and `plc alarm` plus
+`plc acknowledge` to inspect and acknowledge faults. The four program slots provide local rollback;
+the template catalog provides compile-tested starting points rather than machine-specific final
+control logic.
+
 The complete command surface is:
 
 ```text
@@ -1308,7 +1651,121 @@ plc alarm|acknowledge
 plc page <0|1|2|3|next|previous>
 plc slot save|load|clear <0-3>
 plc remote open <x> <y> <z>
+plc template categories
+plc template list [category]
+plc template show <name>
+plc template load <name>
 ```
+
+The built-in template catalog provides compile-checked starters for motor start/stop, delayed
+starts, conveyor interlocks, pump level switches, acknowledged alarms, batch counters, bundled
+channel gates, sensor scaling, PID temperature control, security zones, airlocks, and other common patterns. Use
+`plc template list` to browse it from any terminal, `plc template show <name>` to inspect a source
+program from any terminal, or `plc template load <name>` to compile and load one directly into an
+attached PLC. From an ordinary terminal, use `plc remote open <x> <y> <z>` first to open the PLC
+programmer at a remote controller.
+
+### Create PLC template library
+
+The `create` category contains fourteen programs designed around the redstone behavior of Create
+6.0.8 on Minecraft 1.20.1. They use only TerminalCraft PLC redstone, bundled, timer, counter, latch,
+analog, and PID instructions, so Create remains optional. Browse the category with:
+
+```text
+plc template categories
+plc template list create
+plc template show create-clutch-safety
+```
+
+| Template | Create components and purpose |
+|---|---|
+| `create-clutch-safety` | Fail-safe Clutch starter with stop, E-stop, and permissive inputs |
+| `create-reversing-drive` | Clutch plus Gearshift forward/reverse drive |
+| `create-chain-speed-control` | Open-loop analog control of an Adjustable Chain Gearshift |
+| `create-speed-regulator` | PID feedback from a Speedometer comparator into an input-side Adjustable Chain Gearshift |
+| `create-belt-jam-stop` | Content Observer dwell detection, clutch stop, and latched jam alarm |
+| `create-threshold-refill` | Low/high Threshold Switch refill control for a Funnel or feeder Clutch |
+| `create-sequenced-gearshift` | Bounded trigger pulse for a configured Sequenced Gearshift |
+| `create-deployer-workcell` | Tunable operating window for a clutch-fed Deployer |
+| `create-mixer-batch` | Timed Basin/Mixer run followed by interlocked Funnel discharge |
+| `create-crushing-line` | Downstream-first startup for belts, crushing wheels, or other processing lines |
+| `create-contraption-indexer` | Four-position one-shot index using Redstone Contact pulses |
+| `create-portable-interface-dock` | Dock, cargo-ready delay, PSI disconnect, and contraption departure |
+| `create-elevator-two-stop` | Two-stop Rope Pulley, Gantry, or piston lift using a Clutch and Gearshift |
+| `create-item-batch-counter` | Sixteen-item one-shot batch from Content Observer transfer pulses |
+
+Create Clutches transmit rotation when unpowered and stop when powered. Funnels and Portable
+Storage Interfaces also use powered states as stops or disconnects. Templates whose output is named
+`RUN_ENABLE`, `DRIVE_ENABLE`, or `TRANSFER_ENABLE` therefore document a redstone-torch inverter
+between the PLC output and the Create component. With that wiring, TerminalCraft's fault behavior
+(all PLC outputs go to zero) restores power to the Clutch or Funnel and leaves the machine stopped
+or closed. Outputs such as `GEAR_REVERSE`, `SEQUENCE_TRIGGER`, and `PSI_RELEASE` are direct unless
+the program comments say otherwise.
+
+Template faces and bundled channels are starter assignments. Change the `REDSTONE <side>` and
+`BUNDLED <side> <channel>` declarations to match the physical machine before loading. Timer values
+also need tuning for the kinetic speed and travel distance. The two counter templates are explicitly
+one-shot because PLC counters retain their value until `plc reset` or the program is reloaded. Any
+ordinary-redstone input or output in these programs can be carried wirelessly through a paired
+Create Redstone Link; the PLC logic does not need to change.
+
+### Mekanism PLC template library
+
+The `mekanism` category contains eight compile-checked starters for machines configured with
+Mekanism's native redstone control, normally `HIGH`. Mekanism is still optional because the programs
+use TerminalCraft redstone, bundled I/O, timers, latches, and calibrated sensor contacts:
+
+```text
+plc template list mekanism
+plc template show mekanism-machine-starter
+plc template load mekanism-chemical-refill
+```
+
+| Template | Mekanism components and purpose |
+|---|---|
+| `mekanism-machine-starter` | Start/stop, E-stop, and permissive control for one HIGH-mode machine |
+| `mekanism-ore-line` | Downstream-first ore-processing line startup and fault trip |
+| `mekanism-chemical-refill` | Low/high chemical buffer refill using runtime resource selectors |
+| `mekanism-energy-load-shed` | Essential/nonessential load shedding from calibrated energy contacts |
+| `mekanism-factory-jam` | Blocked-output dwell, latched jam, and feeder stop |
+| `mekanism-fission-scram` | Reset-dominant coolant, waste, temperature, and containment scram |
+| `mekanism-turbine-trip` | Condenser, energy-space, overspeed, and E-stop interlock |
+| `mekanism-digital-miner-window` | Authorized schedule, storage-space, and power window |
+
+These are commissioning starters, not a substitute for reactor protection design. Configure every
+machine's native redstone mode and every sensor threshold first, confirm that loss of PLC power moves
+the plant to its safest state, then test each trip before supplying valuable material or fuel.
+
+### SecurityCraft PLC template library
+
+The `securitycraft` category contains ten compile-checked starters for SecurityCraft devices that
+emit or accept redstone. SecurityCraft remains optional because the programs use only TerminalCraft
+redstone, bundled I/O, timers, and latches:
+
+```text
+plc template list securitycraft
+plc template show securitycraft-perimeter-alarm
+plc template load securitycraft-panic-lockdown
+```
+
+| Template | Security system purpose |
+|---|---|
+| `securitycraft-perimeter-alarm` | Latched alarm from a Laser, scanner, logger, or other zone detector |
+| `securitycraft-laser-zone` | Valid-access window and unauthorized Laser crossing lockdown |
+| `securitycraft-inventory-checkpoint` | Inventory Scanner verification, release, and contraband alarm |
+| `securitycraft-panic-lockdown` | Reset-dominant Panic Button lockdown and fail-closed access release |
+| `securitycraft-camera-zone` | Confirmed motion event associated with a camera zone |
+| `securitycraft-two-door-airlock` | Mutually exclusive door releases and chamber dwell |
+| `securitycraft-rift-lockdown` | Unauthorized Rift Stabilizer activity containment |
+| `securitycraft-trophy-defense` | Sustained projectile/degraded-defense response |
+| `securitycraft-secure-redstone-backhaul` | Four-channel alarm backhaul through Secure Redstone Interfaces |
+| `securitycraft-redundant-perimeter` | Two-out-of-three Laser/retinal/logger trip voting |
+
+These programs never bypass a passcode, keycard, allowlist, or owner check. Wire a reader's successful
+redstone output into a PLC input and let the PLC coordinate releases, alarms, and interlocks. For
+fail-safe doors, confirm whether the chosen SecurityCraft door opens on power or on loss of power and
+add a torch inverter where necessary. Test every detector, broken-wire state, PLC stop, and server
+restart before treating the installation as secure.
 
 The dashboard is available without opening the PLC terminal. Attach a monitor directly to the PLC,
 or connect it through a display-link receiver or Video Cable. Touching its buttons changes the PLC
@@ -1325,7 +1782,7 @@ instructions remain source-controlled and are preserved when switching modes. Co
 uses the same bounded server compiler.
 
 PLCs register on the authenticated TerminalCraft device network. From any authorized terminal,
-`device list`/`device info <uuid>` discovers the controller; `device call <uuid> status` reads
+`device list`/`device info <name-or-uuid>` discovers the controller; `device call <name-or-uuid> status` reads
 status, `program.get` reads chunks, `program.set <source>` loads a program, `control.run|stop|reset`
 controls it, and `trend.get` returns the last 64 samples. Program writes and control calls require
 the PLC owner, and `plc remote open <x> <y> <z>` opens the same programmer screen from an
@@ -1377,6 +1834,11 @@ If the current directory is inside `/disk`, unmounting returns the shell to its 
 - A modem is a network interface with a stable UUID identity.
 - Ports/channels are integers from `0` to `65535`.
 - A receiver must open the destination port.
+- Hostnames are a bounded DNS-like directory: each name points to one device UUID, while the UUID
+  remains authoritative if a name is renamed. Modems keep a primary hostname; other devices can
+  have durable secondary aliases.
+- `rednet:<uuid>/<name>` is an explicit identity-preserving address; scripts may also route to a
+  raw modem UUID when a hostname is unavailable.
 - Hostnames and service names are canonical aliases, not authority credentials.
 - Logical network names can isolate or connect configured topology.
 - Wireless reachability and wired physical topology are different transports.
@@ -1414,8 +1876,10 @@ modem neighbors [max]
 modem route <host>
 modem ping <host>
 modem hosts
+modem dns [list|resolve <name|uuid>|self]
 modem service [list|add <name> <channel>|remove <name>]
 modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]
+modem scada [list|add <name> <channel>|remove <name>|request <service> <status|tags|read|history|alarms> <selector|-> <limit> <replyChannel>]
 modem services
 modem call <service> [replyChannel] <message>
 modem send [channel] [replyChannel] <message>
@@ -1423,6 +1887,16 @@ modem sendto <host> [channel] [replyChannel] <message>
 modem probe <host> <port> <replyChannel> <message>
 modem delivery <messageId>
 modem recv [max]
+```
+
+The unified device shell also manages durable DNS aliases:
+
+```text
+device dns list
+device dns add <name|uuid> <alias>
+device dns resolve <name|uuid>
+device dns remove <alias>
+device dns clear <name|uuid>
 ```
 
 List limits are bounded. `neighbors [max]` accepts `1..128`.
@@ -1452,6 +1926,7 @@ On sender:
 modem hostname sender
 modem network workshop
 modem open 41
+modem dns self
 modem ping receiver
 modem sendto receiver 42 41 'hello receiver'
 ```
@@ -1473,6 +1948,31 @@ modem recv 8
    networks.
 
 A wireless modem touching cable is not a wired endpoint. Both route endpoints must be live wired modems.
+
+`modem hostname name` registers the attached modem UUID under a human-friendly name. The mapping
+is unique within the current server/dimension scope and is restored from the modem's saved state.
+Use `modem dns list` to inspect name-to-UUID records, `modem dns resolve receiver` (or the
+shorthand `modem resolve receiver`) to inspect the canonical `rednet:<uuid>/receiver` address, and
+`modem route`, `modem ping`, `modem sendto`, and `modem probe` with either a hostname, raw UUID, or
+encoded RedNet address. Renaming a modem changes only its alias; UUID-targeted scripts continue to
+resolve the same device.
+
+For any live TerminalCraft device shown by `device list`, use its UUID (or an existing DNS name) to
+create a persistent alias:
+
+```sh
+device list
+device dns add 123e4567-e89b-12d3-a456-426614174000 production-plc
+device dns resolve production-plc
+device info production-plc
+device call production-plc status
+```
+
+Aliases are unique within the current server/dimension scope, survive world reloads, and resolve
+back to the authoritative UUID. `device dns remove <alias>` removes one alias; `device dns clear
+<name|uuid>` removes all aliases owned by that device. A DNS alias identifies a device for discovery
+and device calls; RedNet packet transport still requires the target to expose a modem or other
+network interface.
 
 ### 14.6 Advanced network controls and protocol
 
@@ -1531,15 +2031,15 @@ Queues, queue bytes, sender message/byte rates, duplicate state, acknowledgement
 
 ```sh
 device list
-device info <device-uuid>
+device info <device-name-or-uuid>
 ```
 
-`device list` prints UUID, type, status, address, and display name for discoverable devices. Only server-authorized adjacent/current endpoints are exposed.
+`device list` prints UUID, type, status, address, and display name for discoverable devices. Only server-authorized adjacent/current endpoints are exposed. After creating a DNS alias with `device dns add`, the alias can be used by the unified `device info`, `device call`, transfer, and escrow commands.
 
 ### 15.2 Calling methods
 
 ```sh
-device call <device-uuid> <method> [arguments...]
+device call <device-name-or-uuid> <method> [arguments...]
 ```
 
 Run `device info` first to see methods and typed parameters. Arguments are parsed according to the published method descriptor rather than treated as arbitrary Java values.
@@ -1672,6 +2172,113 @@ Typed principals distinguish player, device, service, and process identity even 
 ## 17. Optional integrations
 
 All integrations are optional and centrally isolated. TerminalCraft must remain startup-safe when these mods are absent.
+
+### Create 6.0.8
+
+Every adjacent Create kinetic block entity can be discovered through the normal Device API even when
+it has no Forge inventory, fluid, or energy capability. Native methods expose live speed, theoretical
+speed, direction, stress impact, added capacity, source, kinetic network ID, and overstress state.
+Stressometers add network load/capacity; Threshold Switches add live thresholds and authenticated
+inversion; Redstone Links add signal telemetry and authenticated 0–15 transmission; configured
+Sequenced Gearshifts add state and an authenticated idle-only trigger. Existing monitor-wall Display
+Link support remains available.
+
+Useful calls after `device list` and `device methods <device>` include:
+
+```text
+device call <device> create.kinetic.status
+device call <device> create.stress.status
+device call <device> create.threshold.status
+device call <device> create.redstone_link.transmit 15
+device call <device> create.sequencer.trigger
+```
+
+Write methods require `device.write`. Create's own redstone-facing components remain compatible with
+ordinary, shielded, bundled, and wireless TerminalCraft wiring, so direct methods are additive rather
+than a required control path. Create is compile-only for development and neither bundled nor required
+to start TerminalCraft.
+
+### Mekanism 10.4.16 and dynamic chemicals
+
+Every adjacent Mekanism base machine can expose activity, powered state, current redstone level and
+mode, process progress/ticks, native Joule containers, heat capacitors, supported substance families,
+and non-sensitive security status. `mekanism.redstone_control.set` selects `disabled`, `high`, `low`,
+or supported `pulse` mode through the authenticated Device API. TerminalCraft does not impersonate a
+Mekanism owner or trusted player: mutation is allowed only for Mekanism-public machines and otherwise
+fails closed in addition to requiring `device.write`.
+
+Chemical storage is provider-neutral and runtime-discovered. Mekanism contributes every live gas,
+infusion, pigment, and slurry handler visible on the accessed side; resource IDs are read from the
+actual tank stacks. There is no built-in chemical allowlist, so Mekanism add-ons and other mods that
+register resources in those handlers work automatically. Other optional integrations can register
+the same generic contract, while chemicals represented as Forge fluids continue through `fluid.*`.
+
+```text
+device call <device> mekanism.status
+device call <device> mekanism.energy.containers
+device call <device> mekanism.heat.capacitors
+device call <device> chemical.tanks
+device call <device> chemical.count addonchem:tritium_mix gas
+device call <device> mekanism.redstone_control.set high
+sensor configure hydrogen chemical north fill_percent mekanism:hydrogen 2
+sensor configure mixture chemical north amount gas:addonchem:tritium_mix 2
+```
+
+`chemical.tanks` returns family, tank, live resource ID, exact amount/capacity decimal strings, fill
+percentage, and unit. `chemical.count` also returns a decimal string so quantities above the exact
+IEEE-754 integer range are not rounded. The `CHEMICAL` sensor produces bounded numeric PLC/SCADA
+samples from the same provider snapshot.
+
+### SecurityCraft 1.10.2.1
+
+TerminalCraft's SecurityCraft adapter is based on the official
+[SecurityCraft 1.20.1 source and public APIs](https://github.com/Geforce132/SecurityCraft/tree/1.20.1).
+It is loaded only when mod ID `securitycraft` is present. Every adjacent SecurityCraft block entity
+implementing the official `IOwnable` API is discoverable, including reinforced and technical blocks.
+`ICustomizable` options and `IModuleInventory` modules are handled generically, so additional
+SecurityCraft block families using those APIs inherit support without a TerminalCraft block-ID list.
+
+The native endpoint covers:
+
+- owner/validation, powered, active, disabled, lock, passcode-configured, module, option, and audit counts;
+- native option values/ranges and enabling or disabling modules that are already physically installed;
+- nearby Security Sea Boat discovery with owner-only position, option, module, and bounded chest telemetry;
+- Alarm, Block Change Detector, Username Logger, Inventory Scanner, Laser, keypad/keycard,
+  retinal/scanner, Portable Radar, Projector, Protecto, Rift Stabilizer, Trophy System, Security
+  Camera, Sonic Security System, Secure Redstone Interface, Track Mine, IMS, display/frame, and
+  sentry status;
+- owner-authorized configuration for alarms, keycard levels/signatures, laser sides, rift/trophy
+  filters, scanner power, projectors, Sonic Security, Secure Redstone Interfaces, track mines,
+  cameras/EMP shutdown, and sentry mode/shutdown;
+- native Machine Sensor metrics including `active`, `powered`, `disabled`, `enabled`, `locked`,
+  `passcode_configured`, `module_count`, `enabled_modules`, `audit_entries`, `range`,
+  `signal_length`, `redstone_output`, `shutdown`, `target_present`, and `mode` where supported.
+
+Useful Device API calls are:
+
+```text
+device methods <device>
+device call <device> securitycraft.status
+device call <device> securitycraft.details
+device call <device> securitycraft.options
+device call <device> securitycraft.option.set disabled false
+device call <device> securitycraft.modules
+device call <device> securitycraft.module.set_enabled redstone true
+device call <device> securitycraft.config.set frequency 42
+device call <device> securitycraft.audit
+```
+
+`securitycraft.status` is operational and secret-safe. Detailed configuration, audit entries, and
+all writes require both TerminalCraft's normal permission and the online authenticated player whom
+SecurityCraft itself recognizes as owner. Device/service/process identities cannot impersonate that
+player; use redstone for unattended PLC control. TerminalCraft never returns or accepts passcodes,
+hashes, salts, allowlist/denylist contents, keycard item data, or owner UUIDs, and it never changes
+ownership or creates/removes module items. Sentry support is reached safely through SecurityCraft's
+ownable disguise block entity at the sentry position.
+
+SecurityCraft is compile-only during development and is neither bundled nor mandatory. The verified
+optional target is `[1.20.1] SecurityCraft v1.10.2.1.jar`; TerminalCraft continues to start and run
+when it is absent.
 
 ### Sophisticated Storage and Sophisticated Backpacks
 
@@ -1844,6 +2451,299 @@ This section prevents the most common incorrect assumptions.
 
 Design scripts around explicit commands, exit codes, literal bounded loops, files, RedNet messages, event subscriptions, and server-rack jobs. That style is both reliable in the current release and aligned with TerminalCraft's server-safe automation model.
 
+## 22. SCADA supervisory control
+
+TerminalCraft's SCADA system combines existing devices, sensors, PLCs, RedNet, server racks, and
+monitors into one server-authoritative process database. It provides live named tags, measurement
+quality, persistent history, alarm lifecycle management, automatically refreshed HMI dashboards,
+role-based operator control, and an audit trail.
+
+SCADA does not replace PLC control logic. A PLC should continue to run time-sensitive interlocks and
+safe local control. SCADA supervises many controllers and machines: it presents their state,
+records trends, alerts operators, and issues authorized high-level commands.
+
+### 22.1 Initialize the plant
+
+The first authenticated player to initialize a new world's SCADA database becomes its administrator:
+
+```sh
+scada init
+scada status
+```
+
+Initialization can happen only once. Later access is assigned explicitly with SCADA roles. Device
+permissions and PLC ownership remain additional mandatory checks; a SCADA role never bypasses the
+underlying device's security policy.
+
+### 22.2 Process tags
+
+A tag is a durable human name bound to a typed Device API method:
+
+```text
+scada tag add <name> <device> <readMethod> <path|-> <unit|-> <interval> <stale> <writeMethod|@commandMethod|-> [typedArgs...]
+```
+
+- Names are hierarchical, such as `factory.line1.boiler.temperature`.
+- The device may be a stable UUID or RedNet DNS name.
+- The value path uses slash-separated map keys or list indexes. Use `-` when the method returns a
+  scalar directly. Dots inside a Device API map key remain ordinary characters.
+- Interval and stale time are server ticks. Stale time must be at least the sample interval.
+- Use `-` for the write method to make a read-only tag.
+- Prefix a write method with `@` when it is a no-value command such as `@control.run`. Invoke that
+  tag with `scada command`; static arguments are still passed, but no operator value is appended.
+- Static method arguments and write values are typed as `n:12.5`, `b:true`, or `s:text`.
+
+Bind a Sensor Array channel named `tank_level`:
+
+```sh
+device dns add <sensor-uuid> line1-sensors
+scada tag add factory.line1.tank.level line1-sensors sensor.read value % 20 100 - s:tank_level
+scada tags factory.line1
+scada read factory.line1.tank.level
+scada history factory.line1.tank.level 32
+```
+
+The sensor's `sensor.read` result is a map, so `value` selects its scalar measurement. SCADA also
+imports the result's `quality` and `detail` fields automatically.
+
+A writable tag appends the requested operator value after its configured static arguments. This is
+useful for paired methods such as a terminal's `redstone.input` and `redstone.set`:
+
+```sh
+scada tag add factory.line1.pump.command pump-io redstone.input - level 5 20 redstone.set s:north
+scada write factory.line1.pump.command n:15
+```
+
+The caller needs the SCADA operator role and the underlying device must independently authorize
+`redstone.set`. Every accepted or rejected write is recorded in the audit log.
+
+PLC command methods do not take a setpoint value. Bind those with `@` and invoke them explicitly:
+
+```sh
+scada tag add factory.line1.plc.start line1-plc status state - 20 100 @control.run
+scada command factory.line1.plc.start
+```
+
+Here the tag continues to acquire the PLC's `status`/`state` value, while the command invokes
+`control.run`. `scada write` is rejected for command tags, and `scada command` is rejected for
+ordinary writable tags, preventing an ambiguous operator action.
+
+### 22.3 Quality and historian
+
+Each live value carries its server tick timestamp, last-good tick, unit, detail, and quality:
+
+| Quality | Meaning |
+|---|---|
+| `good` | The method returned a usable scalar |
+| `stale` | The last good update exceeded the configured stale time |
+| `offline` | The device is absent, unloaded, or offline |
+| `access_denied` | The acquisition identity could not read the method |
+| `bad_response` | The call failed or the selected value was not scalar |
+| `config_error` | The method, arguments, or path are invalid |
+
+When quality degrades, SCADA retains the last known scalar but marks it unusable. It never silently
+presents an old value as good. The historian stores both value and quality, retains up to 2,048
+points per tag, and enforces a global 65,536-point cap. Shell and device queries return no more than
+256 points at once.
+
+### 22.4 Alarm lifecycle
+
+Alarm rules support `above`, `below`, `equal`, `not_equal`, and `bad_quality`, with `info`, `warning`,
+`high`, or `critical` severity. Numeric above/below rules use deadband to prevent threshold chatter:
+
+```sh
+scada alarm add tank-high factory.line1.tank.level above n:85 critical 3 'Tank above safe level'
+scada alarm add tank-signal-bad factory.line1.tank.level bad_quality - high 0 'Tank telemetry unavailable'
+scada alarm list
+scada alarm ack tank-high
+scada alarm shelve tank-high 1200
+scada alarm shelve tank-high 0
+```
+
+An alarm moves through `normal`, `active`, `acknowledged`, and `shelved` states. Acknowledgment does
+not clear the process condition. The alarm clears only when its rule becomes false; shelving hides
+the presentation until its bounded timeout but evaluation continues. Activation, acknowledgment,
+shelving, clearing, and removal are audited.
+
+### 22.5 Monitor HMI dashboards
+
+TerminalCraft provides two HMI levels. A legacy dashboard is a fast automatic tag list; an advanced
+HMI is a persistent, multi-page, full-color layout with live value, gauge, trend, alarm, text,
+button, and page-link widgets.
+
+#### Legacy automatic dashboard
+
+Assign a DNS name to a monitor or use its UUID, then create an automatically refreshed dashboard:
+
+```sh
+device dns add <monitor-uuid> line1-overview
+scada dashboard add line1-overview factory.line1 20 'LINE 1 OVERVIEW'
+scada dashboard list
+```
+
+The dashboard uses the full connected monitor wall exposed by the monitor device. It displays SCADA
+health, active-alarm count, matching tag values, units, and quality. `!` marks a tag with a non-normal
+alarm. The refresh period is bounded from 10 to 1,200 ticks, dashboard writes are server-side, and
+only a bounded number of dashboards refresh per tick.
+
+Remove a binding without deleting the monitor or tags:
+
+```sh
+scada dashboard remove line1-overview
+```
+
+#### Advanced multi-page HMI
+
+Create an advanced HMI on a monitor wall, add its pages, and place widgets on a normalized 12 by 12
+grid. The same layout scales from one monitor to a connected wall without changing coordinates:
+
+```sh
+device dns add <monitor-uuid> line1-hmi
+scada hmi create line1 line1-hmi 10 'LINE 1 CONTROL'
+scada hmi page add line1 controls 'Controls'
+
+scada hmi widget add line1 overview heading text 0 0 12 1 - - 'LINE 1 PROCESS'
+scada hmi widget add line1 overview tank_value value 0 1 4 3 factory.line1.tank.level - 'Tank Level'
+scada hmi widget add line1 overview tank_gauge gauge 4 1 8 3 factory.line1.tank.level 0:100 'Tank Level'
+scada hmi widget add line1 overview tank_trend trend 0 4 8 4 factory.line1.tank.level - 'Recent Trend'
+scada hmi widget add line1 overview alarms alarms 8 4 4 6 factory.line1 - 'Active Alarms'
+scada hmi widget add line1 overview controls page_link 4 9 4 2 controls - 'Controls'
+
+scada hmi widget add line1 controls pump_on button 0 2 5 3 factory.line1.pump.command n:15 'PUMP ON'
+scada hmi widget add line1 controls pump_off button 7 2 5 3 factory.line1.pump.command n:0 'PUMP OFF'
+scada hmi widget add line1 controls overview page_link 4 9 4 2 overview - 'Overview'
+```
+
+Widget arguments depend on type:
+
+| Type | Source | Argument |
+|---|---|---|
+| `text` | `-` | `-` |
+| `value` | readable tag | `-` |
+| `gauge` | numeric tag | `minimum:maximum` |
+| `trend` | numeric tag with history | `-` |
+| `alarms` | tag hierarchy prefix or `-` for all | `-` |
+| `button` | writable or command tag | typed value, or `command` |
+| `page_link` | existing page name | `-` |
+
+The `x y width height` fields must fit within the 12 by 12 grid. Pages retain widget ordering and
+can hold up to 32 widgets; each dashboard holds up to eight pages. Use these commands to inspect or
+change a definition without opening the graphical editor:
+
+```sh
+scada hmi list
+scada hmi page list line1
+scada hmi widget list line1 overview
+scada hmi page select line1 controls
+scada hmi widget remove line1 overview tank_trend
+scada hmi remove line1
+```
+
+Run `hmi` in a terminal to open the live graphical viewer. It repaints automatically while open:
+
+| Key or input | Operator view |
+|---|---|
+| Up / Down | Change dashboard |
+| Left / Right | Change page |
+| Tab / Shift+Tab | Select a button or page link |
+| Enter / mouse click | Activate the selected control |
+| F5 or R | Refresh immediately |
+| Escape | Close the HMI |
+
+An engineer or administrator can press F2 to enter the graphical designer. Click or Tab selects a
+widget, arrow keys move it, Shift+Arrow resizes it, A adds a widget, E edits the selected widget,
+and Delete twice removes it. Add/edit prompts use the same compact widget specification shown after
+`scada hmi widget add`: `id type x y width height source|- argument|- label`.
+
+Physical monitor walls are interactive too. Clicking a page link changes the displayed page;
+clicking a button submits control as the touching player. A viewer can navigate, an operator can use
+authorized controls, and only engineers or administrators can change layouts. Underlying device
+permissions and PLC ownership still apply. Every page selection, layout change, and accepted or
+rejected control is server-authoritative and audited.
+
+Advanced frames carry sixteen-color foreground/background cells and are applied atomically to a
+monitor wall, avoiding partially redrawn screens. TerminalCraft renders up to 320 by 32 cells and
+falls back to a plain-text frame for a compatible monitor endpoint that lacks atomic color frames.
+
+### 22.6 Roles and audit
+
+Roles are cumulative:
+
+| Role | Capabilities |
+|---|---|
+| `viewer` | Read tags, history, alarms, dashboards, roles, and audit |
+| `operator` | Viewer access plus control writes and alarm acknowledge/shelve |
+| `engineer` | Operator access plus tag, alarm, and dashboard configuration |
+| `admin` | Engineer access plus role administration |
+
+Administrators grant access by authenticated player UUID. Display names are diagnostic only:
+
+```sh
+scada role grant <player-uuid> operator Alex
+scada role list
+scada audit 64
+scada role revoke <player-uuid> Alex
+```
+
+The final administrator cannot be removed, preventing an accidental permanent lockout. The audit
+log is bounded to the newest 1,024 entries.
+
+### 22.7 Device API and Control Center
+
+SCADA registers as the virtual device **TerminalCraft SCADA**. It appears in `device list` and the
+graphical Control Center with these methods:
+
+- `status`, `tags.list`, `tag.read`, `history.get`, and `alarms.list`;
+- `hmi.list`, `hmi.page.select`, and `hmi.widget.activate` for scripted HMI navigation and controls;
+- `alarm.ack` for operators;
+- `tag.write` for writable tags, using the same typed value text;
+- `tag.command` for no-value command tags.
+
+It emits `tag_changed` and `alarm_changed` Device API events. Event subscriptions can therefore wake
+server-rack jobs or scripts without polling the entire plant.
+
+### 22.8 RedNet SCADA gateway
+
+Place exactly one Server Rack beside a modem, open a channel, and publish a read-only typed service:
+
+```sh
+modem open 42
+modem scada add plant-scada 42
+```
+
+Remote terminals discover it with `modem services` and request bounded status, tags, one live value,
+history, or alarms. The explicit request form avoids ambiguous optional arguments:
+
+```sh
+modem open 41
+modem scada request plant-scada status - 32 41
+modem scada request plant-scada tags factory.line1 32 41
+modem scada request plant-scada read factory.line1.tank.level 1 41
+modem scada request plant-scada history factory.line1.tank.level 32 41
+modem scada request plant-scada alarms - 32 41
+modem recv 8
+```
+
+The gateway intentionally exposes telemetry only. RedNet packets cannot remotely initialize SCADA,
+change configuration, acknowledge alarms, assign roles, or control equipment. Use an authenticated
+terminal/Device API caller for those operations and use logical RedNet networks or physical routing
+to isolate telemetry scopes. Scalar text and engineering units percent-escape protocol separators
+(`%`, `|`, `,`, `:`, `=`, `[` and `]`) in responses; receivers should percent-decode displayed
+fields after splitting the response structure.
+
+### 22.9 Runtime limits and safe design
+
+The SCADA runtime scans at most 16 due tags per server tick, refreshes at most four due legacy or
+advanced dashboards per tick, and bounds tags, alarms, dashboards, pages, widgets, roles, history,
+responses, and audit records. All
+acquisition and control run on the logical server. A client never supplies an authoritative role,
+principal, value timestamp, alarm state, or historian record.
+
+Prefer event-capable devices and reasonable scan intervals. Use PLCs for fast interlocks, local
+fail-safe behavior, and outputs that must remain deterministic during an HMI or network outage. Use
+SCADA for plant-wide visibility, history, alarm coordination, operator intent, and supervisory
+setpoints.
+
 ---
 
 ## Quick-reference starter sheet
@@ -1888,6 +2788,15 @@ storage query 0 --limit 16
 
 # Jobs/events
 server list
+
+# SCADA
+scada init
+scada status
+scada tags
+scada alarm list
+scada hmi list
+hmi
+scada audit 16
 device events 16
 ```
 

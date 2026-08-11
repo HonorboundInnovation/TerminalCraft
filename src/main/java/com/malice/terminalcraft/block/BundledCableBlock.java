@@ -37,7 +37,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.HashSet;
 import java.util.Set;
 
-/** Sixteen-channel RedPower-style surface cable; channel zero interoperates with vanilla redstone. */
+/** Sixteen-channel RedPower-style bundled Red Alloy cable with color-selected breakouts. */
 public class BundledCableBlock extends BaseEntityBlock {
     public static final DirectionProperty FACE = DirectionProperty.create("face");
     public static final IntegerProperty POWER = IntegerProperty.create("power", 0, 15);
@@ -90,9 +90,11 @@ public class BundledCableBlock extends BaseEntityBlock {
     @SuppressWarnings("deprecation")
     public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
         Set<Direction> faces = occupiedFaces(level, pos);
-        if (faces.isEmpty()) return faceShape(level, pos, state.getValue(FACE));
+        if (faces.isEmpty()) return SurfaceCableSupport.faceHalfShape(state.getValue(FACE));
         VoxelShape shape = Shapes.empty();
-        for (Direction face : faces) shape = Shapes.or(shape, faceShape(level, pos, face));
+        for (Direction face : faces) {
+            shape = Shapes.or(shape, SurfaceCableSupport.faceHalfShape(face));
+        }
         return shape.optimize();
     }
 
@@ -126,18 +128,18 @@ public class BundledCableBlock extends BaseEntityBlock {
 
     @Override
     @SuppressWarnings("deprecation")
-    public boolean isSignalSource(BlockState state) { return true; }
+    public boolean isSignalSource(BlockState state) { return false; }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return outputPower(level, pos, state, direction);
+        return 0;
     }
 
     @Override
     @SuppressWarnings("deprecation")
     public int getDirectSignal(BlockState state, BlockGetter level, BlockPos pos, Direction direction) {
-        return outputPower(level, pos, state, direction);
+        return 0;
     }
 
     @Override
@@ -161,7 +163,7 @@ public class BundledCableBlock extends BaseEntityBlock {
         if (!level.isClientSide) {
             Direction face = targetedFace(level, pos, player.getEyePosition(), hit.getLocation());
             if (face == null) face = state.getValue(FACE);
-            player.displayClientMessage(Component.literal(diagnostic(level, pos, face)), false);
+            CableDiagnosticDisplay.show(player, diagnosticLines(level, pos, face));
         }
         return InteractionResult.sidedSuccess(level.isClientSide);
     }
@@ -249,8 +251,12 @@ public class BundledCableBlock extends BaseEntityBlock {
 
     /** Bounded player-facing inspection of occupancy, links, and active channels. */
     public static String diagnostic(BlockGetter level, BlockPos pos, Direction face) {
+        return String.join(" | ", diagnosticLines(level, pos, face));
+    }
+
+    public static java.util.List<String> diagnosticLines(BlockGetter level, BlockPos pos, Direction face) {
         if (!(level.getBlockEntity(pos) instanceof BundledCableBlockEntity cable) || !cable.hasFace(face)) {
-            return "Bundled Cable: unavailable";
+            return java.util.List.of("Bundled Red Alloy Cable", "State: unavailable");
         }
         BlockState rendered = renderState(level, pos, face);
         String links = java.util.Arrays.stream(planeDirections(face))
@@ -263,11 +269,26 @@ public class BundledCableBlock extends BaseEntityBlock {
             int signal = cable.getSignal(channel);
             if (signal <= 0) continue;
             if (!active.isEmpty()) active.append(',');
-            active.append(channel).append('=').append(signal);
+            active.append(SurfaceCableSupport.dyeColor(channel).getName())
+                    .append('(').append(channel).append(")=").append(signal);
         }
         if (active.isEmpty()) active.append("none");
-        return "Bundled Cable face=" + face.getName().toLowerCase(java.util.Locale.ROOT)
-                + " faces=" + cable.faceCount() + " links=" + links + " active=" + active;
+        StringBuilder sources = new StringBuilder();
+        for (int channel = 0; channel < BundledCableBlockEntity.CHANNELS; channel++) {
+            int local = cable.getLocalOutput(channel);
+            int breakout = cable.getBreakoutInput(channel);
+            if (local <= 0 && breakout <= 0) continue;
+            if (!sources.isEmpty()) sources.append("  ");
+            sources.append(channel).append(":local=").append(local).append("/wire=").append(breakout);
+        }
+        if (sources.isEmpty()) sources.append("none");
+        return java.util.List.of(
+                "Bundled Red Alloy Cable",
+                "Target: face=" + face.getName() + "  mounted-faces=" + cable.faceCount(),
+                "Transport: redstone  channels=0-15  links=" + links,
+                "Active: " + active,
+                "Sources: " + sources,
+                "Breakouts: color selects channel; direct uncolored redstone is isolated");
     }
 
     @Nullable
@@ -275,7 +296,7 @@ public class BundledCableBlock extends BaseEntityBlock {
         Direction nearest = null;
         double nearestDistance = Double.POSITIVE_INFINITY;
         for (Direction face : occupiedFaces(level, pos)) {
-            BlockHitResult hit = faceShape(level, pos, face).clip(start, end, pos);
+            BlockHitResult hit = SurfaceCableSupport.faceHalfShape(face).clip(start, end, pos);
             if (hit == null) continue;
             double distance = start.distanceToSqr(hit.getLocation());
             if (distance < nearestDistance) {
@@ -352,21 +373,9 @@ public class BundledCableBlock extends BaseEntityBlock {
     }
 
     /** Exposes channel zero only through the plane of an occupied mounted face. */
-    private static int outputPower(BlockGetter level, BlockPos pos, BlockState state,
-                                   Direction direction) {
-        if (direction == null) return 0;
-        if (level.getBlockEntity(pos) instanceof BundledCableBlockEntity cable) {
-            for (Direction face : cable.faces()) {
-                if (face.getAxis() != direction.getAxis()) return state.getValue(POWER);
-            }
-            return 0;
-        }
-        return state.hasProperty(FACE) && state.getValue(FACE).getAxis() != direction.getAxis()
-                ? state.getValue(POWER) : 0;
-    }
-
     private static boolean canAttachDevice(BlockState state) {
-        return state.getBlock() instanceof TerminalBlock || state.getBlock() instanceof TurtleBlock;
+        return state.getBlock() instanceof TerminalBlock || state.getBlock() instanceof TurtleBlock
+                || state.getBlock() instanceof RedAlloyWireBlock;
     }
 
     private static VoxelShape faceShape(BlockGetter level, BlockPos pos, Direction face) {

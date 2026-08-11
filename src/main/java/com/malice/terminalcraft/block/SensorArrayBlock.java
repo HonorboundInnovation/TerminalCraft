@@ -17,6 +17,8 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 
 /** Placeable universal telemetry hub for vanilla and standard Forge capabilities. */
@@ -26,10 +28,29 @@ public class SensorArrayBlock extends BaseEntityBlock {
                 .mapColor(MapColor.COLOR_CYAN)
                 .strength(2.0f, 4.0f)
                 .requiresCorrectToolForDrops()
+                .noOcclusion()
                 .isRedstoneConductor((state, level, pos) -> false));
     }
 
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level,
+                               BlockPos pos, net.minecraft.world.phys.shapes.CollisionContext context) {
+        return Shapes.or(
+                box(3, 0, 3, 13, 2, 13),
+                box(4, 2, 4, 12, 4, 12),
+                box(6, 4, 6, 10, 8, 10),
+                box(4, 6, 7, 6, 8, 9),
+                box(10, 6, 7, 12, 8, 9),
+                box(7, 7, 4, 9, 9, 6));
+    }
+
+    private static VoxelShape box(int fromX, int fromY, int fromZ, int toX, int toY, int toZ) {
+        return Shapes.box(fromX / 16.0, fromY / 16.0, fromZ / 16.0,
+                toX / 16.0, toY / 16.0, toZ / 16.0);
+    }
 
     @Nullable
     @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {

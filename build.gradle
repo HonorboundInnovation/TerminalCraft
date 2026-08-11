@@ -61,6 +61,7 @@ sourceSets.main.java {
 repositories {
     maven { url = "https://cursemaven.com" }
     maven { url = "https://api.modrinth.com/maven" }
+    maven { url = "https://maven.createmod.net" }
     if (sophisticatedModsDir != null && !sophisticatedModsDir.isBlank()) {
         flatDir { dirs sophisticatedModsDir }
     }
@@ -85,6 +86,10 @@ dependencies {
     compileOnly fg.deobf("curse.maven:storage-drawers-223852:6994481")
     compileOnly fg.deobf("maven.modrinth:refined-storage:1.12.4")
     compileOnly fg.deobf("curse.maven:create-328085:7178761")
+    // Create 6 embeds Ponder at runtime; its API is compile-only here for Create block-entity hierarchies.
+    compileOnly "net.createmod.ponder:Ponder-Forge-1.20.1:1.0.91"
+    compileOnly fg.deobf("curse.maven:mekanism-268560:6552911")
+    compileOnly fg.deobf("curse.maven:security-craft-64760:8336490")
     compileOnly fg.deobf("curse.maven:applied-energistics-2-223794:7148487")
 
     // Optional local focused profile. No Sophisticated artifact is bundled or required by default.
@@ -147,6 +152,16 @@ tasks.named('processResources', ProcessResources).configure {
     filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
         expand replaceProperties + [project: project]
     }
+    // Ship the canonical manuals directly in the searchable in-game Guide Book. Keeping these as
+    // process inputs makes documentation changes rebuild the resource without maintaining a copy.
+    from('docs/TERMINALCRAFT_GUIDE.md') {
+        into 'assets/terminalcraft/guide'
+        rename { 'terminalcraft_guide.md' }
+    }
+    from('docs/ADVANCED_SCRIPT_COOKBOOK.md') {
+        into 'assets/terminalcraft/guide'
+        rename { 'advanced_script_cookbook.md' }
+    }
 }
 
 tasks.named('jar', Jar).configure {
@@ -182,12 +197,20 @@ def headlessTests = [
         shellCharacterizationTest: ['Run external BashShell compatibility characterization tests', 'com.malice.terminalcraft.shell.BashShellCharacterizationTest'],
         shellArchitectureExtractionTest: ['Run composed host-service and shell command-module tests', 'com.malice.terminalcraft.shell.ShellArchitectureExtractionTest'],
         bashShellSurfaceTest: ['Run shared shell character-cell surface tests', 'com.malice.terminalcraft.shell.BashShellSurfaceTest'],
+        bashShellCompletionTest: ['Run shell command and path completion tests', 'com.malice.terminalcraft.shell.BashShellCompletionTest'],
+        controlCenterProgramTest: ['Run authenticated graphical device Control Center tests', 'com.malice.terminalcraft.shell.ControlCenterProgramTest'],
+        guideBookDocumentTest: ['Run searchable in-game guide document tests', 'com.malice.terminalcraft.guide.GuideBookDocumentTest'],
         bundledWireShellCommandTest: ['Run bundled-control cable shell bridge tests', 'com.malice.terminalcraft.shell.BundledWireShellCommandTest'],
         plcProgramTest: ['Run bounded PLC compiler and scan-cycle tests', 'com.malice.terminalcraft.plc.PlcProgramTest'],
         sensorModelTest: ['Run universal sensor channel and PLC normalization tests', 'com.malice.terminalcraft.sensor.SensorModelTest'],
+        scadaModelTest: ['Run SCADA security, historian, alarm, dashboard and persistence tests', 'com.malice.terminalcraft.scada.ScadaModelTest'],
+        scadaAdvancedHmiTest: ['Run advanced HMI layout, rendering, touch and persistence tests', 'com.malice.terminalcraft.scada.ScadaAdvancedHmiTest'],
+        scadaRemoteRequestTest: ['Run bounded typed SCADA RedNet request tests', 'com.malice.terminalcraft.network.ScadaRemoteRequestTest'],
         nasModelTest: ['Run tiered NAS media capacity and progression tests', 'com.malice.terminalcraft.item.NasModelTest'],
         plcLadderModelTest: ['Run source-preserving PLC ladder projection tests', 'com.malice.terminalcraft.client.PlcLadderModelTest'],
         wireInteractionSupportTest: ['Run wire wrench-interaction compatibility tests', 'com.malice.terminalcraft.block.WireInteractionSupportTest'],
+        surfaceCableSupportTest: ['Run colored four-lane surface cable and bundle contract tests', 'com.malice.terminalcraft.block.SurfaceCableSupportTest'],
+        machineBlockVisualContractTest: ['Run inset machine-model occlusion contract tests', 'com.malice.terminalcraft.block.MachineBlockVisualContractTest'],
         serverShellCommandTest: ['Run server rack shell command tests', 'com.malice.terminalcraft.shell.ServerShellCommandTest'],
         serverJobSchedulerTest: ['Run persistent bounded server job scheduler tests', 'com.malice.terminalcraft.server.ServerJobSchedulerTest'],
         commandSubmissionGuardTest: ['Run authoritative command packet admission tests', 'com.malice.terminalcraft.network.CommandSubmissionGuardTest'],
@@ -249,6 +272,8 @@ def headlessTests = [
         exactFluidTransferServiceTest: ['Run exact fluid transfer service authority and result-mapping tests', 'com.malice.terminalcraft.device.ExactFluidTransferServiceTest'],
         exactFluidAccessContractTest: ['Run public exact fluid transfer and escrow access contract tests', 'com.malice.terminalcraft.device.ExactFluidAccessContractTest'],
         optionalIntegrationsTest: ['Run optional integration registry absence-safety tests', 'com.malice.terminalcraft.integration.OptionalIntegrationsTest'],
+        optionalTechnologyApiLinkageTest: ['Link isolated Create, Mekanism, and SecurityCraft adapters against pinned APIs', 'com.malice.terminalcraft.integration.OptionalTechnologyApiLinkageTest'],
+        genericChemicalStorageEndpointTest: ['Run dynamic provider-neutral chemical storage tests', 'com.malice.terminalcraft.device.GenericChemicalStorageEndpointTest'],
         optionalMutationPolicyContextTest: ['Run caller-aware optional mutation policy tests', 'com.malice.terminalcraft.integration.OptionalDeviceMutationPolicyRegistryTest'],
         monitorRemoteRequestTest: ['Run bounded remote-monitor protocol tests', 'com.malice.terminalcraft.network.MonitorRemoteRequestTest'],
         wirelessDisplayLinkChannelTest: ['Run wireless display-link channel contract tests', 'com.malice.terminalcraft.blockentity.WirelessDisplayLinkChannelTest'],
@@ -263,6 +288,12 @@ headlessTests.each { taskName, configuration ->
         classpath = sourceSets.test.runtimeClasspath
         mainClass = configuration[1]
     }
+}
+
+// The default runtime classpath intentionally omits optional mods. This one focused smoke test adds
+// only the compile classpath so isolated adapter classes are linked against the exact pinned APIs.
+tasks.named('optionalTechnologyApiLinkageTest', JavaExec).configure {
+    classpath += sourceSets.main.compileClasspath
 }
 
 check.dependsOn headlessTests.keySet()

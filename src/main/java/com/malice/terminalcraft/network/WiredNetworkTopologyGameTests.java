@@ -123,6 +123,61 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void bundledNetworkTrunkKeepsColoredChannelsPhysicallyIsolated(GameTestHelper helper) {
+        int lightBlue = net.minecraft.world.item.DyeColor.LIGHT_BLUE.getId();
+        int yellow = net.minecraft.world.item.DyeColor.YELLOW.getId();
+        BlockPos senderPos = new BlockPos(1, 2, 3);
+        BlockPos senderBreakout = new BlockPos(2, 2, 3);
+        BlockPos trunkA = new BlockPos(3, 2, 3);
+        BlockPos trunkB = new BlockPos(4, 2, 3);
+        BlockPos matchingBreakout = new BlockPos(5, 2, 3);
+        BlockPos matchingReceiverPos = new BlockPos(6, 2, 3);
+        BlockPos isolatedBreakout = new BlockPos(3, 2, 2);
+        BlockPos isolatedReceiverPos = new BlockPos(3, 2, 1);
+        for (BlockPos supported : java.util.List.of(senderBreakout, trunkA, trunkB,
+                matchingBreakout, isolatedBreakout)) {
+            helper.setBlock(supported.below(), net.minecraft.world.level.block.Blocks.STONE);
+        }
+        helper.setBlock(senderPos, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(senderBreakout, coloredCable(lightBlue));
+        helper.setBlock(trunkA, bundledNetworkCable());
+        helper.setBlock(trunkB, bundledNetworkCable());
+        helper.setBlock(matchingBreakout, coloredCable(lightBlue));
+        helper.setBlock(matchingReceiverPos, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(isolatedBreakout, coloredCable(yellow));
+        helper.setBlock(isolatedReceiverPos, ModRegistries.MODEM_BLOCK.get());
+
+        ModemBlockEntity sender = (ModemBlockEntity) helper.getBlockEntity(senderPos);
+        ModemBlockEntity matching = (ModemBlockEntity) helper.getBlockEntity(matchingReceiverPos);
+        ModemBlockEntity isolated = (ModemBlockEntity) helper.getBlockEntity(isolatedReceiverPos);
+        sender.setWireless(false);
+        matching.setWireless(false);
+        isolated.setWireless(false);
+        sender.openChannel(lightBlue);
+        matching.openChannel(lightBlue);
+        // Deliberately listen on channel 3 behind a channel-4 physical breakout. Protocol filtering
+        // alone cannot protect this case; the physical trunk route must reject it.
+        isolated.openChannel(lightBlue);
+
+        WiredNetworkTopology.Route matchingRoute = WiredNetworkTopology.route(helper.getLevel(),
+                helper.absolutePos(senderPos), helper.absolutePos(matchingReceiverPos), lightBlue);
+        WiredNetworkTopology.Route isolatedRoute = WiredNetworkTopology.route(helper.getLevel(),
+                helper.absolutePos(senderPos), helper.absolutePos(isolatedReceiverPos), lightBlue);
+        helper.assertTrue(matchingRoute.reachable() && !matchingRoute.truncated(),
+                "matching channel-3 breakouts must share bundled network lane 3");
+        helper.assertTrue(!isolatedRoute.reachable(),
+                "a channel-4 breakout must not be reachable through bundled network lane 3");
+
+        helper.assertTrue(sender.transmit(lightBlue, yellow, "lane-three-only"),
+                "sender must accept a channel-3 packet on the matching physical lane");
+        helper.assertTrue(matching.receiveMessages(1).stream().anyMatch(line -> line.contains("lane-three-only")),
+                "matching channel-3 breakout must receive the packet");
+        helper.assertTrue(isolated.receiveMessages(1).isEmpty(),
+                "channel-3 packet must not leak through the channel-4 physical breakout");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void multipartSurfaceCableRoutesInternalCorner(GameTestHelper helper) {
         BlockPos space = new BlockPos(3, 2, 3);
@@ -1267,4 +1322,14 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+    private static net.minecraft.world.level.block.state.BlockState coloredCable(int channel) {
+        return ModRegistries.NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP)
+                .setValue(NetworkCableBlock.COLOR, channel);
+    }
+
+    private static net.minecraft.world.level.block.state.BlockState bundledNetworkCable() {
+        return ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP);
+    }
 }

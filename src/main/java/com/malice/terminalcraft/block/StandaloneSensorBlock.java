@@ -25,6 +25,8 @@ import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 
 /** One fixed-family sensor that samples the block or world in its facing direction. */
@@ -37,6 +39,7 @@ public class StandaloneSensorBlock extends BaseEntityBlock {
                 .mapColor(mapColor(kind))
                 .strength(1.5f, 3.0f)
                 .requiresCorrectToolForDrops()
+                .noOcclusion()
                 .isRedstoneConductor((state, level, pos) -> false));
         this.kind = kind;
         registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
@@ -54,6 +57,35 @@ public class StandaloneSensorBlock extends BaseEntityBlock {
     }
 
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos,
+                               net.minecraft.world.phys.shapes.CollisionContext context) {
+        return shapeFor(state.getValue(FACING));
+    }
+
+    private static VoxelShape shapeFor(Direction facing) {
+        return switch (facing) {
+            case NORTH -> Shapes.or(
+                    box(3, 3, 0, 13, 13, 2), box(4, 4, 2, 12, 12, 4), box(6, 6, 4, 10, 10, 6));
+            case SOUTH -> Shapes.or(
+                    box(3, 3, 14, 13, 13, 16), box(4, 4, 12, 12, 12, 14), box(6, 6, 10, 10, 10, 12));
+            case EAST -> Shapes.or(
+                    box(14, 3, 3, 16, 13, 13), box(12, 4, 4, 14, 12, 12), box(10, 6, 6, 12, 10, 10));
+            case WEST -> Shapes.or(
+                    box(0, 3, 3, 2, 13, 13), box(2, 4, 4, 4, 12, 12), box(4, 6, 6, 6, 10, 10));
+            case UP -> Shapes.or(
+                    box(3, 14, 3, 13, 16, 13), box(4, 12, 4, 12, 14, 12), box(6, 10, 6, 10, 12, 10));
+            case DOWN -> Shapes.or(
+                    box(3, 0, 3, 13, 2, 13), box(4, 2, 4, 12, 4, 12), box(6, 4, 6, 10, 6, 10));
+        };
+    }
+
+    private static VoxelShape box(int fromX, int fromY, int fromZ, int toX, int toY, int toZ) {
+        return Shapes.box(fromX / 16.0, fromY / 16.0, fromZ / 16.0,
+                toX / 16.0, toY / 16.0, toZ / 16.0);
+    }
 
     @Nullable
     @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {

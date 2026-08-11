@@ -42,8 +42,10 @@ final class ModemCommandModule implements ShellCommandModule {
             context.printLine("modem delivery <messageId>");
             context.printLine("modem neighbors [max]");
             context.printLine("modem hosts");
+            context.printLine("modem dns [list|resolve <name|uuid>|self]");
             context.printLine("modem service [list|add <name> <channel>|remove <name>]");
             context.printLine("modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]");
+            context.printLine("modem scada [list|add <name> <channel>|remove <name>|request <service> <status|tags|read|history|alarms> <selector|-> <limit> <replyChannel>]");
             context.printLine("modem services");
             context.printLine("modem call <service> [replyChannel] <message>");
             context.printLine("modem send [channel] [replyChannel] <message>");
@@ -183,6 +185,69 @@ final class ModemCommandModule implements ShellCommandModule {
             }
             context.printLine(requested.isEmpty() ? "network automatic" : "network " + modem.networkName());
             context.setExitCode(0);
+            return;
+        }
+        if ("dns".equals(op) || "resolve".equals(op)) {
+            boolean shorthandResolve = "resolve".equals(op);
+            if (shorthandResolve) {
+                if (args.size() != 2) {
+                    context.printLine("modem: usage: modem resolve <name|uuid>");
+                    context.setExitCode(1);
+                    return;
+                }
+                String resolved = modem.resolve(args.get(1));
+                if (resolved.isEmpty()) {
+                    context.printLine("modem: name not found: " + args.get(1));
+                    context.setExitCode(1);
+                } else {
+                    context.printLine(resolved);
+                    context.setExitCode(0);
+                }
+                return;
+            }
+            String action = args.size() == 1 ? "list" : args.get(1).toLowerCase(Locale.ROOT);
+            if ("list".equals(action)) {
+                if (args.size() > 2) {
+                    context.printLine("modem: usage: modem dns list");
+                    context.setExitCode(1);
+                    return;
+                }
+                List<String> records = modem.dns(128);
+                if (records.isEmpty()) context.printLine("(none)");
+                else records.forEach(context::printLine);
+                context.setExitCode(0);
+                return;
+            }
+            if ("self".equals(action)) {
+                if (args.size() != 2) {
+                    context.printLine("modem: usage: modem dns self");
+                    context.setExitCode(1);
+                    return;
+                }
+                String selector = modem.hostname();
+                String resolved = selector.isEmpty() ? "" : modem.resolve(selector);
+                if (resolved.isEmpty()) {
+                    context.printLine("modem: current modem is not registered in DNS");
+                    context.setExitCode(1);
+                } else {
+                    context.printLine(resolved);
+                    context.setExitCode(0);
+                }
+                return;
+            }
+            if ("resolve".equals(action) && args.size() == 3) {
+                String resolved = modem.resolve(args.get(2));
+                if (resolved.isEmpty()) {
+                    context.printLine("modem: name not found: " + args.get(2));
+                    context.setExitCode(1);
+                } else {
+                    context.printLine(resolved);
+                    context.setExitCode(0);
+                }
+                return;
+            }
+            context.printLine("modem: usage: modem dns [list|resolve <name|uuid>|self]");
+            context.setExitCode(1);
             return;
         }
         if ("interfaces".equals(op) || "ifaces".equals(op)) {
@@ -447,6 +512,61 @@ final class ModemCommandModule implements ShellCommandModule {
             fail(context, "modem: usage: modem sensor [list|add <name> <channel>|remove <name>|request <service> <list|snapshot|read> [channel] [replyChannel]]");
             return;
         }
+        if ("scada".equals(op)) {
+            String action = args.size() > 1 ? args.get(1).toLowerCase(Locale.ROOT) : "list";
+            if ("list".equals(action)) {
+                List<String> registrations = modem.scadaServices();
+                if (registrations.isEmpty()) context.printLine("(none)");
+                else registrations.forEach(context::printLine);
+                context.setExitCode(0);
+                return;
+            }
+            if ("add".equals(action) || "register".equals(action)) {
+                if (args.size() != 4) { fail(context, "modem: usage: modem scada add <name> <channel>"); return; }
+                int port;
+                try { port = Integer.parseInt(args.get(3)); }
+                catch (NumberFormatException invalid) { fail(context, "modem: channel must be an integer"); return; }
+                if (!modem.registerScadaService(args.get(2), port)) {
+                    fail(context, "modem: SCADA service registration failed (one adjacent server rack, open channel, and unique name required)");
+                    return;
+                }
+                context.printLine("SCADA service " + args.get(2).toLowerCase(Locale.ROOT) + " " + port);
+                context.setExitCode(0);
+                return;
+            }
+            if ("remove".equals(action) || "unregister".equals(action)) {
+                if (args.size() != 3 || !modem.unregisterScadaService(args.get(2))) {
+                    fail(context, "modem: usage: modem scada remove <name>"); return;
+                }
+                context.printLine("SCADA service removed " + args.get(2).toLowerCase(Locale.ROOT));
+                context.setExitCode(0);
+                return;
+            }
+            if ("request".equals(action)) {
+                if (args.size() != 7) {
+                    fail(context, "modem: usage: modem scada request <service> <status|tags|read|history|alarms> <selector|-> <limit> <replyChannel>");
+                    return;
+                }
+                int limit;
+                int reply;
+                try {
+                    limit = Integer.parseInt(args.get(5));
+                    reply = Integer.parseInt(args.get(6));
+                } catch (NumberFormatException invalid) {
+                    fail(context, "modem: limit and reply channel must be integers"); return;
+                }
+                String selector = "-".equals(args.get(4)) ? "" : args.get(4);
+                if (!modem.transmitScadaService(args.get(2), args.get(3), selector, limit, reply)) {
+                    fail(context, "modem: SCADA request failed (service offline, unreachable, or malformed)");
+                    return;
+                }
+                context.printLine("SCADA request sent service=" + args.get(2) + " reply=" + reply);
+                context.setExitCode(0);
+                return;
+            }
+            fail(context, "modem: use modem scada list|add|remove|request");
+            return;
+        }
         if ("services".equals(op)) {
             List<String> services = modem.services(128);
             if (services.isEmpty()) context.printLine("(none)");
@@ -491,7 +611,7 @@ final class ModemCommandModule implements ShellCommandModule {
                 return;
             }
             String destination = args.get(1);
-            int channel = com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL;
+            int channel = modem.defaultChannel();
             int reply = 0;
             int msgStart = 2;
             if (args.size() >= 4) {
@@ -531,7 +651,7 @@ final class ModemCommandModule implements ShellCommandModule {
                 context.setExitCode(1);
                 return;
             }
-            int channel = com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL;
+            int channel = modem.defaultChannel();
             int reply = 0;
             int msgStart = 1;
             if (args.size() >= 3) {
@@ -587,7 +707,7 @@ final class ModemCommandModule implements ShellCommandModule {
             context.setExitCode(0);
             return;
         }
-        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|interfaces|topology|diagnostics|neighbors|route|ping|probe|delivery|hosts|service|sensor|services|call|send|sendto|recv ...");
+        context.printLine("modem: usage: modem open|listen|close|unlisten|channels|hostname|network|dns|resolve|interfaces|topology|diagnostics|neighbors|route|ping|probe|delivery|hosts|service|sensor|scada|services|call|send|sendto|recv ...");
         context.setExitCode(1);
     }
 

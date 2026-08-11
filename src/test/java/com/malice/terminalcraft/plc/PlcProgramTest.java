@@ -1,7 +1,9 @@
 package com.malice.terminalcraft.plc;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 /** Headless characterization tests for PLC compilation, scan timing, state, and fail-safe I/O. */
 public final class PlcProgramTest {
@@ -15,7 +17,110 @@ public final class PlcProgramTest {
         analogTransferScalesSignals();
         pidLoopProducesBoundedOutput();
         sensorBindingsCompileAsInputsOnly();
+        builtInTemplatesCompile();
+        createTemplatesExecuteControlPatterns();
         System.out.println("PLC program tests: OK");
+    }
+
+    private static void builtInTemplatesCompile() {
+        require(PlcProgramTemplates.all().size() >= 45,
+                "template catalog has general, Create, Mekanism, and SecurityCraft starter programs");
+        Set<String> ids = new HashSet<>();
+        for (PlcProgramTemplates.Template template : PlcProgramTemplates.all()) {
+            require(ids.add(template.id()), "template id is unique: " + template.id());
+            PlcProgram.CompileResult result = PlcProgram.compile(template.source());
+            require(result.successful(), "template compiles: " + template.id() + " — " + result.error());
+        }
+        require(PlcProgramTemplates.find("MOTOR-START-STOP").isPresent(),
+                "template lookup is case-insensitive");
+        require(PlcProgramTemplates.categories().equals(java.util.List.of(
+                        "general", "create", "mekanism", "securitycraft")),
+                "template categories are stable and discoverable");
+        require(PlcProgramTemplates.byCategory("CREATE").size() == 14,
+                "Create category contains the complete Create PLC library");
+        require(PlcProgramTemplates.byCategory("create").stream()
+                        .allMatch(template -> template.id().startsWith("create-")),
+                "Create templates use a recognizable id prefix");
+        require(PlcProgramTemplates.byCategory("MEKANISM").size() == 8,
+                "Mekanism category contains the complete Mekanism PLC starter library");
+        require(PlcProgramTemplates.byCategory("mekanism").stream()
+                        .allMatch(template -> template.id().startsWith("mekanism-")),
+                "Mekanism templates use a recognizable id prefix");
+        require(PlcProgramTemplates.byCategory("SECURITYCRAFT").size() == 10,
+                "SecurityCraft category contains the complete security PLC starter library");
+        require(PlcProgramTemplates.byCategory("securitycraft").stream()
+                        .allMatch(template -> template.id().startsWith("securitycraft-")),
+                "SecurityCraft templates use a recognizable id prefix");
+    }
+
+    private static void createTemplatesExecuteControlPatterns() {
+        PlcProgram.Controller clutch = controllerFor("create-clutch-safety");
+        FakeIo clutchIo = new FakeIo();
+        clutchIo.inputs.put("NORTH", 15);
+        clutchIo.inputs.put("UP", 15);
+        require(clutch.scan(clutchIo).success(), "Create clutch starter scan succeeds");
+        require(clutchIo.outputs.getOrDefault("EAST", 0) == 15,
+                "start and permissive assert fail-safe run-enable output");
+        clutchIo.inputs.put("SOUTH", 15);
+        clutch.scan(clutchIo);
+        require(clutchIo.outputs.getOrDefault("EAST", 15) == 0,
+                "stop drops the fail-safe run-enable output");
+
+        PlcProgram.Controller reversing = controllerFor("create-reversing-drive");
+        FakeIo reversingIo = new FakeIo();
+        reversingIo.inputs.put("NORTH", 15);
+        reversing.scan(reversingIo);
+        reversingIo.inputs.put("WEST", 15);
+        reversing.scan(reversingIo);
+        require(reversingIo.outputs.getOrDefault("DOWN", 15) == 0,
+                "Gearshift direction cannot change while the drive is running");
+        reversingIo.inputs.put("SOUTH", 15);
+        reversing.scan(reversingIo);
+        require(reversingIo.outputs.getOrDefault("EAST", 15) == 0
+                        && reversingIo.outputs.getOrDefault("DOWN", 0) == 15,
+                "stopping the drive permits the selected Gearshift direction change");
+
+        PlcProgram.Controller speed = controllerFor("create-chain-speed-control");
+        FakeIo speedIo = new FakeIo();
+        speedIo.inputs.put("NORTH", 11);
+        require(speed.scan(speedIo).success(), "Create chain speed scan succeeds");
+        require(speedIo.outputs.getOrDefault("EAST", -1) == 11,
+                "analog speed command reaches the Adjustable Chain Gearshift output");
+
+        PlcProgram.Controller jam = controllerFor("create-belt-jam-stop");
+        FakeIo jamIo = new FakeIo();
+        jamIo.inputs.put("NORTH", 15);
+        jamIo.inputs.put("WEST", 15);
+        require(jam.scan(jamIo).success(), "Create jam controller starts");
+        for (int scan = 0; scan < 60; scan++) require(jam.scan(jamIo).success(),
+                "Create jam dwell scan succeeds");
+        require(jamIo.outputs.getOrDefault("EAST", 15) == 0,
+                "sustained Content Observer signal stops the belt");
+        require(jamIo.outputs.getOrDefault("DOWN", 0) == 15,
+                "sustained Content Observer signal latches the jam alarm");
+
+        PlcProgram.Controller sequencer = controllerFor("create-sequenced-gearshift");
+        FakeIo sequencerIo = new FakeIo();
+        sequencerIo.inputs.put("NORTH", 15);
+        for (int scan = 0; scan < 3; scan++) {
+            require(sequencer.scan(sequencerIo).success(), "Sequenced Gearshift pulse scan succeeds");
+            require(sequencerIo.outputs.getOrDefault("EAST", 0) == 15,
+                    "Sequenced Gearshift trigger remains high during pulse window");
+        }
+        sequencer.scan(sequencerIo);
+        require(sequencerIo.outputs.getOrDefault("EAST", 15) == 0,
+                "Sequenced Gearshift trigger ends after its bounded pulse");
+    }
+
+    private static PlcProgram.Controller controllerFor(String templateId) {
+        PlcProgramTemplates.Template template = PlcProgramTemplates.find(templateId)
+                .orElseThrow(() -> new AssertionError("missing template: " + templateId));
+        PlcProgram.CompileResult compiled = PlcProgram.compile(template.source());
+        if (!compiled.successful()) throw new AssertionError("template did not compile: " + templateId);
+        PlcProgram.Controller controller = new PlcProgram.Controller();
+        controller.load(compiled.program());
+        controller.start();
+        return controller;
     }
 
     private static void compileAndRunTimerLatchLogic() {

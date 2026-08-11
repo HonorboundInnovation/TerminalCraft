@@ -31,9 +31,18 @@ public final class DeviceShellCommandTest {
         assertTrue(info.lines().contains("methods: echo(value:string)->string [device.read], typed(count:number,enabled:boolean?)->list [device.read], values()->map [device.read]"),
                 "sorted methods and optional schema");
 
+        DeviceShellCommand.Outcome namedInfo = DeviceShellCommand.execute(registry,
+                List.of("info", "controller"), value -> "controller".equals(value) ? id : null);
+        assertEquals(0, namedInfo.exitCode(), "DNS alias info exit");
+        assertTrue(namedInfo.lines().contains("id: " + id), "DNS alias must resolve to the device UUID");
+
         assertOutcome(DeviceShellCommand.execute(registry,
                         List.of("call", id.toString(), "echo", "hello world")),
                 0, List.of("\"hello world\""), "string call");
+        assertOutcome(DeviceShellCommand.execute(registry,
+                        List.of("call", "controller", "echo", "hello alias"),
+                        value -> "controller".equals(value) ? id : null),
+                0, List.of("\"hello alias\""), "DNS alias call");
         assertOutcome(DeviceShellCommand.execute(registry,
                         List.of("call", id.toString(), "echo", "12")),
                 0, List.of("\"12\""), "numeric-looking string follows schema");

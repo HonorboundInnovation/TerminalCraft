@@ -1,0 +1,9 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": ["CCC", "GGG", "CCC"],
+  "key": {
+    "C": {"item": "terminalcraft:network_cable"},
+    "G": {"item": "minecraft:glass_pane"}
+  },
+  "result": {"item": "terminalcraft:bundled_network_cable", "count": 6}
+}

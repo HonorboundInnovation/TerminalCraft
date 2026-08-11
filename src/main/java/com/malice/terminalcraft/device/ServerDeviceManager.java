@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.device;
 
 import com.malice.terminalcraft.shell.TerminalHost;
+import com.malice.terminalcraft.network.RednetNetwork;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
@@ -66,6 +67,26 @@ public final class ServerDeviceManager {
         return state(server).registry.publishEvent(deviceId, type, gameTime, payload);
     }
 
+    /** Registers one logical-server service endpoint that is not owned by a block entity. */
+    public static void ensureServiceRegistered(MinecraftServer server, UUID deviceId,
+                                               java.util.function.Supplier<DeviceEndpoint> endpointFactory) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(deviceId, "deviceId");
+        Objects.requireNonNull(endpointFactory, "endpointFactory");
+        requireServerThread(server);
+        ServerState state = state(server);
+        if (state.services.containsKey(deviceId)) return;
+        if (state.byId.containsKey(deviceId)) {
+            throw new IllegalArgumentException("service UUID collides with a live block device: " + deviceId);
+        }
+        DeviceEndpoint endpoint = Objects.requireNonNull(endpointFactory.get(), "service endpoint");
+        if (!endpoint.descriptor().deviceId().equals(deviceId)) {
+            throw new IllegalArgumentException("service endpoint UUID mismatch");
+        }
+        state.registry.register(endpoint);
+        state.services.put(deviceId, endpoint);
+    }
+
     /** Publishes a bounded event for a currently registered live block entity. */
     public static DeviceResult publishEvent(BlockEntity owner, String type, long gameTime,
                                             DeviceValue.MapValue payload) {
@@ -119,7 +140,10 @@ public final class ServerDeviceManager {
         requireServerThread(server);
         ServerState state = state(server);
         Binding binding = state.byOwner.get(owner);
-        if (binding != null) state.remove(owner, binding);
+        if (binding != null) {
+            state.remove(owner, binding);
+            RednetNetwork.unregisterDeviceAliases(level, binding.deviceId);
+        }
     }
 
     /**
@@ -210,6 +234,7 @@ public final class ServerDeviceManager {
         private final DeviceInvocationBudget invocationBudget = new DeviceInvocationBudget();
         private final Map<BlockEntity, Binding> byOwner = new IdentityHashMap<>();
         private final Map<UUID, Binding> byId = new LinkedHashMap<>();
+        private final Map<UUID, DeviceEndpoint> services = new LinkedHashMap<>();
 
         private void remove(BlockEntity owner, Binding binding) {
             byOwner.remove(owner);

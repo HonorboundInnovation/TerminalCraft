@@ -1,0 +1,5 @@
+{
+  "multipart": [
+    {"apply": {"model": "terminalcraft:block/red_alloy_capacitor"}}
+  ]
+}

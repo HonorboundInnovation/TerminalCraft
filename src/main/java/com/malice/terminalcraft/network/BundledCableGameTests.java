@@ -1,7 +1,10 @@
 package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.BundledCableBlock;
+import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.blockentity.BundledCableBlockEntity;
+import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.blockentity.ServerRackBlockEntity;
 import com.malice.terminalcraft.blockentity.TurtleBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -119,7 +122,7 @@ public final class BundledCableGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 40)
-    public static void channelZeroBridgesVanillaSourcesAndStaysInMountedPlane(GameTestHelper helper) {
+    public static void uncoloredVanillaSourceCannotEnterAnyBundledChannel(GameTestHelper helper) {
         BlockPos cablePos = new BlockPos(2, 2, 2);
         helper.setBlock(cablePos.below(), Blocks.REDSTONE_BLOCK);
         helper.setBlock(cablePos, cable(Direction.UP));
@@ -131,8 +134,81 @@ public final class BundledCableGameTests {
         int east = state.getBlock().getSignal(state, helper.getLevel(), worldPos, Direction.EAST);
         int up = state.getBlock().getSignal(state, helper.getLevel(), worldPos, Direction.UP);
         int down = state.getBlock().getDirectSignal(state, helper.getLevel(), worldPos, Direction.DOWN);
-        helper.assertTrue(cable.getSignal(0) == 15 && east == 15 && up == 0 && down == 0,
-                "channel zero must bridge a vanilla support source without leaking off the mounted plane");
+        helper.assertTrue(cable.getSignal(0) == 0 && east == 0 && up == 0 && down == 0,
+                "uncolored vanilla redstone must not enter or leave an arbitrary bundled channel");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void unshieldedRedAlloyCannotSelectABundledChannel(GameTestHelper helper) {
+        int red = net.minecraft.world.item.DyeColor.RED.getId();
+        BlockPos bundlePos = new BlockPos(3, 2, 3);
+        BlockPos bareWirePos = bundlePos.west();
+        BlockPos shieldedOutputPos = bundlePos.east();
+        BlockPos sourcePos = bareWirePos.west();
+        for (BlockPos supported : java.util.List.of(bundlePos, bareWirePos, shieldedOutputPos)) {
+            helper.setBlock(supported.below(), Blocks.STONE);
+        }
+        helper.setBlock(bundlePos, cable(Direction.UP));
+        helper.setBlock(bareWirePos, wire(Direction.UP, red));
+        helper.setBlock(shieldedOutputPos, wire(Direction.UP, red));
+        com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity bare =
+                (com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity) helper.getBlockEntity(bareWirePos);
+        bare.setShielded(Direction.UP, 0, false);
+        helper.setBlock(sourcePos, Blocks.REDSTONE_BLOCK);
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(bareWirePos));
+        BundledCableBlockEntity bundle = (BundledCableBlockEntity) helper.getBlockEntity(bundlePos);
+        bundle.refreshVanillaInput();
+        bundle.recomputeComponent();
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(shieldedOutputPos));
+
+        com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity output =
+                (com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity) helper.getBlockEntity(shieldedOutputPos);
+        helper.assertTrue(bare.power(Direction.UP, 0) == 15,
+                "unshielded Red Alloy must still carry ordinary redstone");
+        helper.assertTrue(bundle.getSignal(red) == 0 && output.power(Direction.UP, 0) == 0,
+                "unshielded Red Alloy has no color identity and must not enter bundled channel 14");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void coloredBreakoutsRemainStrictlyChannelIsolated(GameTestHelper helper) {
+        int red = net.minecraft.world.item.DyeColor.RED.getId();
+        int green = net.minecraft.world.item.DyeColor.GREEN.getId();
+        BlockPos bundlePos = new BlockPos(3, 2, 3);
+        BlockPos inputPos = bundlePos.west();
+        BlockPos redOutputPos = bundlePos.east();
+        BlockPos greenOutputPos = bundlePos.north();
+        BlockPos sourcePos = inputPos.west();
+        for (BlockPos supported : java.util.List.of(bundlePos, inputPos, redOutputPos, greenOutputPos)) {
+            helper.setBlock(supported.below(), Blocks.STONE);
+        }
+        helper.setBlock(bundlePos, cable(Direction.UP));
+        helper.setBlock(inputPos, wire(Direction.UP, red));
+        helper.setBlock(redOutputPos, wire(Direction.UP, red));
+        helper.setBlock(greenOutputPos, wire(Direction.UP, green));
+        helper.setBlock(sourcePos, Blocks.REDSTONE_BLOCK);
+
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(inputPos));
+        BundledCableBlockEntity bundle = (BundledCableBlockEntity) helper.getBlockEntity(bundlePos);
+        bundle.refreshVanillaInput();
+        bundle.recomputeComponent();
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(redOutputPos));
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(greenOutputPos));
+
+        com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity redOutput =
+                (com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity) helper.getBlockEntity(redOutputPos);
+        com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity greenOutput =
+                (com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity) helper.getBlockEntity(greenOutputPos);
+        helper.assertTrue(bundle.getSignal(red) == 15 && bundle.getSignal(green) == 0,
+                "a red breakout input must energize only red channel 14");
+        helper.assertTrue(redOutput.power(Direction.UP, 0) == 15 && greenOutput.power(Direction.UP, 0) == 0,
+                "red channel output must reach red wire without leaking to green channel 13");
+        for (int channel = 0; channel < BundledCableBlockEntity.CHANNELS; channel++) {
+            if (channel != red) helper.assertTrue(bundle.getSignal(channel) == 0,
+                    "red input leaked into bundled channel " + channel);
+        }
         helper.succeed();
     }
 
@@ -152,8 +228,46 @@ public final class BundledCableGameTests {
                 "turtle bundled API must set a bounded per-channel source");
         helper.assertTrue(turtle.bundledOutput("north", 4) == 11
                         && turtle.bundledSignal("north", 4) == 11
+                        && turtle.bundledInput("north", 4) == 0
                         && cable.getSignal(4) == 11,
-                "turtle output must be visible as the effective bundled channel");
+                "turtle input must remain separate from its local output and effective bus signal");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void serverAndPlcExposeIndependentBundledInputAndOutput(GameTestHelper helper) {
+        BlockPos leftCablePos = new BlockPos(2, 2, 2);
+        BlockPos rightCablePos = leftCablePos.east();
+        BlockPos serverPos = leftCablePos.north();
+        BlockPos plcPos = rightCablePos.south();
+        helper.setBlock(leftCablePos.below(), Blocks.STONE);
+        helper.setBlock(rightCablePos.below(), Blocks.STONE);
+        helper.setBlock(leftCablePos, cable(Direction.UP));
+        helper.setBlock(rightCablePos, cable(Direction.UP));
+        helper.setBlock(serverPos, ModRegistries.SERVER_RACK_BLOCK.get());
+        helper.setBlock(plcPos, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get());
+
+        ServerRackBlockEntity server = (ServerRackBlockEntity) helper.getBlockEntity(serverPos);
+        ProgrammableLogicControllerBlockEntity plc =
+                (ProgrammableLogicControllerBlockEntity) helper.getBlockEntity(plcPos);
+        helper.assertTrue(server.hasBundledCable("south") && plc.hasBundledCable("north"),
+                "server and PLC shells must discover adjacent bundled Red Alloy cable");
+        helper.assertTrue(server.setBundledOutput("south", 2, 6)
+                        && plc.setBundledOutput("north", 5, 11),
+                "server and PLC must independently drive selected channels");
+        helper.assertTrue(server.bundledOutput("south", 2) == 6
+                        && server.bundledInput("south", 2) == 0
+                        && plc.bundledInput("north", 2) == 6,
+                "server channel 2 output must appear as external PLC input without echoing locally");
+        helper.assertTrue(plc.bundledOutput("north", 5) == 11
+                        && plc.bundledInput("north", 5) == 0
+                        && server.bundledInput("south", 5) == 11,
+                "PLC channel 5 output must appear as external server input without echoing locally");
+        helper.assertTrue(server.bundledOutput("south", 1) == 0
+                        && server.bundledOutput("south", 3) == 0
+                        && plc.bundledOutput("north", 4) == 0
+                        && plc.bundledOutput("north", 6) == 0,
+                "server and PLC writes must not leak to neighboring channel numbers");
         helper.succeed();
     }
 
@@ -179,32 +293,15 @@ public final class BundledCableGameTests {
     }
 
     @GameTest(template = "empty", timeoutTicks = 60)
-    public static void channelZeroNotifiesAndDepowersVanillaReceiver(GameTestHelper helper) {
-        BlockPos cablePos = new BlockPos(2, 2, 2);
-        BlockPos lampPos = cablePos.east();
-        helper.setBlock(cablePos.below(), Blocks.STONE);
-        helper.setBlock(cablePos, cable(Direction.UP));
-        helper.setBlock(lampPos, Blocks.REDSTONE_LAMP);
-        BundledCableBlockEntity cable = (BundledCableBlockEntity) helper.getBlockEntity(cablePos);
-
-        cable.setLocalOutput(0, 15);
-        helper.runAfterDelay(2, () -> {
-            helper.assertTrue(helper.getBlockState(lampPos).getValue(
-                            net.minecraft.world.level.block.RedstoneLampBlock.LIT),
-                    "channel zero power must notify and light an adjacent vanilla receiver");
-            cable.setLocalOutput(0, 0);
-            helper.runAfterDelay(2, () -> {
-                helper.assertTrue(!helper.getBlockState(lampPos).getValue(
-                                net.minecraft.world.level.block.RedstoneLampBlock.LIT),
-                        "channel zero depower must notify and release an adjacent vanilla receiver");
-                helper.succeed();
-            });
-        });
-    }
-
     private static net.minecraft.world.level.block.state.BlockState cable(Direction face) {
         return ModRegistries.BUNDLED_CABLE_BLOCK.get().defaultBlockState()
                 .setValue(BundledCableBlock.FACE, face);
+    }
+
+    private static net.minecraft.world.level.block.state.BlockState wire(Direction face, int color) {
+        return ModRegistries.RED_ALLOY_WIRE_BLOCK.get().defaultBlockState()
+                .setValue(RedAlloyWireBlock.FACE, face)
+                .setValue(RedAlloyWireBlock.COLOR, color);
     }
 
 }

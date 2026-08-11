@@ -32,6 +32,13 @@ public final class RednetHostDirectoryTest {
                         == RednetRegistrationResult.Status.INVALID,
                 "invalid host registration must be structured");
         check(directory.resolve("Factory").orElseThrow().equals(first), "lookup must be canonical");
+        check(directory.resolveDestination(first.toString()).orElseThrow().equals(first),
+                "raw UUID selectors must resolve to stable identity");
+        check(directory.resolveDestination(new RednetAddress(first, "factory").encoded())
+                        .orElseThrow().equals(first),
+                "encoded RedNet addresses must resolve to stable identity");
+        check(directory.resolveDestination("not-a-host").isEmpty(),
+                "unknown DNS selectors must fail closed");
         check(directory.registerDetailed(first, "warehouse").status()
                         == RednetRegistrationResult.Status.UPDATED,
                 "owner rename must report update");
@@ -39,6 +46,13 @@ public final class RednetHostDirectoryTest {
         check(directory.name(first).equals("warehouse"), "reverse lookup must track rename");
         check(directory.register(second, "alpha"), "released unrelated name must register");
         check(directory.names(1).equals(List.of("alpha")), "listing must be sorted and bounded");
+        check(directory.registerAliasDetailed(second, "warehouse-alias").accepted(),
+                "secondary device aliases must register without replacing the primary hostname");
+        check(directory.name(second).equals("alpha"), "secondary alias must preserve the primary hostname");
+        check(directory.resolve("warehouse-alias").orElseThrow().equals(second),
+                "secondary alias must resolve to the same UUID");
+        check(directory.unregisterAlias(second, "warehouse-alias"),
+                "secondary alias must be removable independently");
         directory.unregister(first);
         check(directory.resolve("warehouse").isEmpty(), "unregister must remove both indexes");
 

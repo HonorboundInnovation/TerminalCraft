@@ -1,6 +1,8 @@
 package com.malice.terminalcraft.blockentity;
 
 import com.malice.terminalcraft.block.BundledCableBlock;
+import com.malice.terminalcraft.block.RedAlloyWireBlock;
+import com.malice.terminalcraft.block.SurfaceCableSupport;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
@@ -27,8 +29,10 @@ public class BundledCableBlockEntity extends BlockEntity {
     private final EnumSet<Direction> faces = EnumSet.noneOf(Direction.class);
     private final int[] localOutput = new int[CHANNELS];
     private final int[] effectiveSignal = new int[CHANNELS];
-    /** Vanilla redstone is an independent channel-zero source, not computer-owned output. */
+    /** Legacy persisted bridge value. Strict channel isolation keeps this at zero from 1.0.62. */
     private int vanillaInput;
+    /** Color-matched shielded Red Alloy breakout sources, indexed by dye/channel ID. */
+    private final int[] breakoutInput = new int[CHANNELS];
     private boolean recomputing;
 
     public BundledCableBlockEntity(BlockPos pos, BlockState state) {
@@ -54,6 +58,25 @@ public class BundledCableBlockEntity extends BlockEntity {
 
     public int getSignal(int channel) { return effectiveSignal[requireChannel(channel)]; }
     public int getLocalOutput(int channel) { return localOutput[requireChannel(channel)]; }
+    public int getBreakoutInput(int channel) { return breakoutInput[requireChannel(channel)]; }
+    public int getVanillaInput() { return vanillaInput; }
+
+    /**
+     * Returns the signal entering this segment from physical sources and other bundled segments.
+     * The segment's own computer-driven output is deliberately excluded so a terminal can inspect
+     * input and output independently instead of reading its output back as input.
+     */
+    public int getExternalInput(int channel) {
+        int index = requireChannel(channel);
+        int result = breakoutInput[index];
+        if (level == null) return result;
+        for (BundledCableBlockEntity cable : collectComponent(level, worldPosition)) {
+            int source = cable.breakoutInput[index];
+            if (cable != this) source = Math.max(source, cable.localOutput[index]);
+            result = Math.max(result, source);
+        }
+        return result;
+    }
 
     /** Sets one local channel source and deterministically recomputes the connected component. */
     public void setLocalOutput(int channel, int strength) {
@@ -65,17 +88,26 @@ public class BundledCableBlockEntity extends BlockEntity {
         recomputeComponent();
     }
 
-    /** Updates the vanilla bridge source on channel zero while ignoring connected cable positions. */
+    /** Updates the sixteen color-selected breakout sources; direct uncolored redstone is isolated. */
     public void refreshVanillaInput() {
         if (level == null || level.isClientSide || recomputing) return;
         int input = 0;
-        for (Direction direction : Direction.values()) {
-            BlockPos neighbor = worldPosition.relative(direction);
-            if (level.getBlockState(neighbor).getBlock() instanceof BundledCableBlock) continue;
-            input = Math.max(input, level.getSignal(neighbor, direction.getOpposite()));
+        int[] nextBreakout = new int[CHANNELS];
+        for (Direction face : faces) {
+            for (Direction direction : SurfaceCableSupport.planeDirections(face)) {
+                BlockPos adjacent = worldPosition.relative(direction);
+                if (!(level.getBlockEntity(adjacent) instanceof RedAlloyWireBlockEntity wire)) continue;
+                for (RedAlloyWireBlockEntity.Run run : wire.runs()) {
+                    if (run.face() != face || !run.shielded()) continue;
+                    int nativePower = RedAlloyWireBlock.nativePowerAt(level, adjacent,
+                            run.face(), run.lane(), run.color());
+                    nextBreakout[run.color()] = Math.max(nextBreakout[run.color()], nativePower);
+                }
+            }
         }
-        if (vanillaInput != input) {
+        if (vanillaInput != input || !Arrays.equals(breakoutInput, nextBreakout)) {
             vanillaInput = input;
+            System.arraycopy(nextBreakout, 0, breakoutInput, 0, CHANNELS);
             setChanged();
             recomputeComponent();
         }
@@ -88,14 +120,18 @@ public class BundledCableBlockEntity extends BlockEntity {
         for (BundledCableBlockEntity cable : component) {
             for (int channel = 0; channel < CHANNELS; channel++) {
                 int source = cable.localOutput[channel];
-                if (channel == 0) source = Math.max(source, cable.vanillaInput);
+                source = Math.max(source, cable.breakoutInput[channel]);
                 aggregate[channel] = Math.max(aggregate[channel], source);
             }
         }
-        for (BundledCableBlockEntity cable : component) cable.applyEffective(aggregate);
+        List<BundledCableBlockEntity> changed = new ArrayList<>();
+        for (BundledCableBlockEntity cable : component) {
+            if (cable.applyEffective(aggregate)) changed.add(cable);
+        }
+        for (BundledCableBlockEntity cable : changed) cable.refreshBreakoutOutputs();
     }
 
-    private void applyEffective(int[] aggregate) {
+    private boolean applyEffective(int[] aggregate) {
         boolean changed = false;
         for (int channel = 0; channel < CHANNELS; channel++) {
             if (effectiveSignal[channel] != aggregate[channel]) {
@@ -103,7 +139,7 @@ public class BundledCableBlockEntity extends BlockEntity {
                 changed = true;
             }
         }
-        if (level == null) return;
+        if (level == null) return changed;
         recomputing = true;
         try {
             BlockState current = getBlockState();
@@ -117,6 +153,22 @@ public class BundledCableBlockEntity extends BlockEntity {
             if (changed) changedAndSync();
         } finally {
             recomputing = false;
+        }
+        return changed;
+    }
+
+    /** Recomputes only adjacent colored breakouts after an effective channel actually changes. */
+    private void refreshBreakoutOutputs() {
+        if (level == null || level.isClientSide) return;
+        Set<BlockPos> refreshed = new HashSet<>();
+        for (Direction face : faces) {
+            for (Direction direction : SurfaceCableSupport.planeDirections(face)) {
+                BlockPos adjacent = worldPosition.relative(direction);
+                if (refreshed.add(adjacent)
+                        && level.getBlockEntity(adjacent) instanceof RedAlloyWireBlockEntity) {
+                    RedAlloyWireBlock.recomputeAt(level, adjacent);
+                }
+            }
         }
     }
 
@@ -156,6 +208,7 @@ public class BundledCableBlockEntity extends BlockEntity {
         tag.putInt("FaceMask", mask);
         tag.putIntArray("LocalOutput", localOutput);
         tag.putIntArray("EffectiveSignal", effectiveSignal);
+        tag.putIntArray("BreakoutInput", breakoutInput);
         tag.putInt("VanillaInput", vanillaInput);
     }
 
@@ -172,6 +225,7 @@ public class BundledCableBlockEntity extends BlockEntity {
         }
         loadArray(tag, "LocalOutput", localOutput);
         loadArray(tag, "EffectiveSignal", effectiveSignal);
+        loadArray(tag, "BreakoutInput", breakoutInput);
         if (tag.contains("VanillaInput", Tag.TAG_INT)) {
             vanillaInput = Math.max(0, Math.min(15, tag.getInt("VanillaInput")));
         } else {

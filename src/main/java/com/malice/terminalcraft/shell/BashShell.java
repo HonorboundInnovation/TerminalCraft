@@ -3,6 +3,7 @@ package com.malice.terminalcraft.shell;
 import com.malice.terminalcraft.persistence.PersistedDataLimits;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.device.DeviceShellCommand;
+import com.malice.terminalcraft.device.DeviceDnsShellCommand;
 import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.device.IntegratedStorageShellCommand;
 import com.malice.terminalcraft.device.StorageShellCommand;
@@ -13,6 +14,9 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import com.malice.terminalcraft.network.RednetAddress;
+import com.malice.terminalcraft.network.RednetNetwork;
+import net.minecraft.world.level.Level;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -36,11 +40,19 @@ public class BashShell implements ShellCommandModule.Context {
     private static final int MAX_CHAIN_STEPS = 128;
     private static final int MAX_COMMAND_SUBSTITUTION_DEPTH = 4;
     private static final int MAX_COMMAND_SUBSTITUTION_OUTPUT = 4096;
+    private static final int SHELL_FOREGROUND = 0;
+    private static final int SHELL_BACKGROUND = 15;
+    private static final String[] BUNDLED_CHANNEL_COLORS = {
+            "white", "orange", "magenta", "light_blue", "yellow", "lime", "pink", "gray",
+            "light_gray", "cyan", "purple", "blue", "brown", "green", "red", "black"
+    };
 
     private enum ControlSignal { NONE, BREAK, CONTINUE, EXIT }
 
     private final VirtualFileSystem vfs = new VirtualFileSystem();
     private final TerminalBuffer terminalSurface = new TerminalBuffer(40, 16);
+    private final ControlCenterProgram controlCenter = new ControlCenterProgram();
+    private final ScadaHmiProgram hmiProgram = new ScadaHmiProgram();
     private final Map<String, String> env = new LinkedHashMap<>();
     private final Deque<String> commandHistory = new ArrayDeque<>();
     private final List<String> output = new ArrayList<>();
@@ -106,6 +118,30 @@ public class BashShell implements ShellCommandModule.Context {
         return terminalSurface;
     }
 
+    /** True while the full-screen authenticated device setup program owns the terminal surface. */
+    public synchronized boolean isControlCenterActive() {
+        return controlCenter.active() || hmiProgram.active();
+    }
+
+    /** True while the Control Center is waiting for a bounded DNS name or method argument line. */
+    public synchronized boolean isControlCenterInputActive() {
+        return controlCenter.inputActive() || hmiProgram.inputActive();
+    }
+
+    public synchronized String getControlCenterInputPrompt() {
+        return hmiProgram.active() ? hmiProgram.inputPrompt() : controlCenter.inputPrompt();
+    }
+
+    /** Display name for whichever full-screen server-authoritative program owns the terminal. */
+    public synchronized String getFullScreenProgramTitle() {
+        return hmiProgram.active() ? hmiProgram.title() : "CONTROL CENTER";
+    }
+
+    /** True when the advanced HMI viewer/designer owns the terminal surface. */
+    public synchronized boolean isAdvancedHmiActive() {
+        return hmiProgram.active();
+    }
+
     public synchronized String getCwd() {
         return cwd;
     }
@@ -116,6 +152,114 @@ public class BashShell implements ShellCommandModule.Context {
 
     public synchronized List<String> getCommandHistory() {
         return List.copyOf(commandHistory);
+    }
+
+    /**
+     * Returns bounded shell completion candidates for the token under the supplied cursor.
+     * Completion is intentionally read-only: the client applies one of the returned candidates
+     * to its local input box and the server still remains authoritative when the command runs.
+     */
+    public synchronized CompletionResult complete(String line, int cursor) {
+        String safeLine = line == null ? "" : line;
+        int safeCursor = Math.max(0, Math.min(safeLine.length(), cursor));
+        if (editor.active) {
+            return new CompletionResult(safeLine, safeCursor, safeCursor, safeCursor, List.of());
+        }
+
+        int tokenStart = safeCursor;
+        while (tokenStart > 0 && !Character.isWhitespace(safeLine.charAt(tokenStart - 1))) {
+            tokenStart--;
+        }
+        int tokenEnd = safeCursor;
+        while (tokenEnd < safeLine.length() && !Character.isWhitespace(safeLine.charAt(tokenEnd))) {
+            tokenEnd++;
+        }
+        String token = safeLine.substring(tokenStart, tokenEnd);
+        boolean commandPosition = isCommandPosition(safeLine, tokenStart);
+        List<String> candidates = commandPosition && !token.contains("/")
+                ? commandCandidates(token)
+                : pathCandidates(token);
+        return new CompletionResult(safeLine, safeCursor, tokenStart, tokenEnd, candidates);
+    }
+
+    private List<String> commandCandidates(String prefix) {
+        List<String> candidates = new ArrayList<>();
+        for (String command : commandRegistry.commandNames()) {
+            if (command.startsWith(prefix)) candidates.add(command);
+        }
+        // Include scripts and programs on PATH as command candidates. Directory suffixes are
+        // removed because these are command names, not path arguments.
+        String path = env.getOrDefault("PATH", "/bin:/usr/bin");
+        for (String directory : path.split(":")) {
+            if (directory.isEmpty()) continue;
+            List<String> names = vfs.list(vfs.resolve(cwd, directory));
+            if (names == null) continue;
+            for (String name : names) {
+                String command = name.endsWith("/") ? name.substring(0, name.length() - 1) : name;
+                if (command.startsWith(prefix) && !candidates.contains(command)) candidates.add(command);
+            }
+        }
+        Collections.sort(candidates);
+        return boundedCandidates(candidates);
+    }
+
+    private List<String> pathCandidates(String token) {
+        int slash = token.lastIndexOf('/');
+        String directoryPart = slash < 0 ? "" : token.substring(0, slash);
+        String prefix = slash < 0 ? token : token.substring(slash + 1);
+        String directory = slash < 0 ? cwd : (directoryPart.isEmpty() ? "/" : directoryPart);
+        List<String> names = vfs.list(vfs.resolve(cwd, directory));
+        if (names == null) return List.of();
+        String displayPrefix = slash < 0 ? "" : token.substring(0, slash + 1);
+        List<String> candidates = new ArrayList<>();
+        for (String name : names) {
+            if (name.startsWith(prefix)) candidates.add(displayPrefix + name);
+        }
+        Collections.sort(candidates);
+        return boundedCandidates(candidates);
+    }
+
+    private static List<String> boundedCandidates(List<String> candidates) {
+        return candidates.size() <= 128 ? List.copyOf(candidates) : List.copyOf(candidates.subList(0, 128));
+    }
+
+    private static boolean isCommandPosition(String line, int tokenStart) {
+        String before = line.substring(0, tokenStart).trim();
+        if (before.isEmpty()) return true;
+        return before.endsWith(";") || before.endsWith("|") || before.endsWith("&&") || before.endsWith("||");
+    }
+
+    /** Result of completing the token under a client-side cursor. */
+    public record CompletionResult(String line, int cursor, int tokenStart, int tokenEnd,
+                                   List<String> candidates) {
+        public CompletionResult {
+            line = line == null ? "" : line;
+            candidates = candidates == null ? List.of() : List.copyOf(candidates);
+        }
+
+        public boolean hasMatches() { return !candidates.isEmpty(); }
+
+        public String apply(String replacement) {
+            String value = replacement == null ? "" : replacement;
+            return line.substring(0, tokenStart) + value + line.substring(tokenEnd);
+        }
+
+        public int appliedCursor(String replacement) {
+            return tokenStart + (replacement == null ? 0 : replacement.length());
+        }
+
+        public String commonPrefix() {
+            if (candidates.isEmpty()) return "";
+            String common = candidates.get(0);
+            for (int i = 1; i < candidates.size() && !common.isEmpty(); i++) {
+                String candidate = candidates.get(i);
+                int length = Math.min(common.length(), candidate.length());
+                int match = 0;
+                while (match < length && common.charAt(match) == candidate.charAt(match)) match++;
+                common = common.substring(0, match);
+            }
+            return common;
+        }
     }
 
     public synchronized VirtualFileSystem getVfs() {
@@ -195,6 +339,11 @@ public class BashShell implements ShellCommandModule.Context {
             trimOutput();
             return;
         }
+        // Full-screen programs accept only their typed action packet surface. A forged command
+        // packet must not escape back into the shell while the Control Center is active.
+        if (controlCenter.active() || hmiProgram.active()) {
+            return;
+        }
 
         if (!output.isEmpty() && output.get(output.size() - 1).endsWith("$ ")) {
             String display = line.contains("\n") ? line.split("\n", 2)[0] : line;
@@ -218,6 +367,26 @@ public class BashShell implements ShellCommandModule.Context {
     /** True while the interactive text editor is open. */
     public synchronized boolean isEditorActive() {
         return editor.active;
+    }
+
+    /** Applies one authenticated, bounded action to the active full-screen Control Center. */
+    public synchronized void handleControlCenterAction(ControlCenterProgram.Action action,
+                                                       int row, int column, String text,
+                                                       DeviceCallContext context) {
+        if (!controlCenter.active() && !hmiProgram.active()) return;
+        DeviceCallContext previous = deviceCallContext;
+        deviceCallContext = Objects.requireNonNull(context, "context");
+        try {
+            Level level = host == null ? null : host.getLevel();
+            if (hmiProgram.active()) {
+                hmiProgram.handle(action, row, column, text, deviceAccess(), level, terminalSurface);
+            } else {
+                controlCenter.handle(action, row, column, text, deviceAccess(), level, terminalSurface);
+            }
+            if (!controlCenter.active() && !hmiProgram.active()) syncTerminalSurface();
+        } finally {
+            deviceCallContext = previous;
+        }
     }
 
     /** Path currently being edited, or null. */
@@ -1343,7 +1512,7 @@ public class BashShell implements ShellCommandModule.Context {
     // ------------------------------------------------------------------
 
     private void registerBuiltins() {
-        commandRegistry.register("help", args -> cmdHelp());
+        commandRegistry.register("help", this::cmdHelp);
         commandRegistry.register("echo", this::cmdEcho);
         commandRegistry.register("pwd", args -> {
             println(cwd);
@@ -1401,6 +1570,8 @@ public class BashShell implements ShellCommandModule.Context {
         commandRegistry.register("redstone", this::cmdRedstone, "rs");
         commandRegistry.register("wire", this::cmdWire, "bundled");
         commandRegistry.register("device", this::cmdDevice, "devices");
+        commandRegistry.register("control", this::cmdControlCenter, "devmgr", "setup");
+        commandRegistry.register("hmi", this::cmdAdvancedHmi);
         commandRegistry.register("storage", this::cmdStorage, "inventory");
         commandRegistry.register("sophisticated",
                 args -> cmdIntegratedStorage(IntegratedStorageShellCommand.Profile.SOPHISTICATED, args),
@@ -1419,6 +1590,45 @@ public class BashShell implements ShellCommandModule.Context {
         commandRegistry.install(new PlcShellCommandModule(), this);
         commandRegistry.install(new SensorCommandModule(), this);
         commandRegistry.install(new DisplayLinkShellCommandModule(), this);
+        commandRegistry.install(new ScadaCommandModule(), this);
+    }
+
+    private void cmdControlCenter(List<String> args) {
+        if (args.size() == 1 && ("help".equalsIgnoreCase(args.get(0))
+                || "--help".equalsIgnoreCase(args.get(0))
+                || "-h".equalsIgnoreCase(args.get(0)))) {
+            printControlCenterHelp();
+            lastExitCode = 0;
+            return;
+        }
+        if (!args.isEmpty()) {
+            println("control: usage: control [--help]");
+            lastExitCode = 1;
+            return;
+        }
+        controlCenter.open(deviceAccess(), host == null ? null : host.getLevel(), terminalSurface);
+        lastExitCode = 0;
+    }
+
+    private void cmdAdvancedHmi(List<String> args) {
+        if (args.size() == 1 && ("help".equalsIgnoreCase(args.get(0))
+                || "--help".equalsIgnoreCase(args.get(0))
+                || "-h".equalsIgnoreCase(args.get(0)))) {
+            printAdvancedHmiHelp();
+            lastExitCode = 0;
+            return;
+        }
+        if (!args.isEmpty()) {
+            println("hmi: usage: hmi [--help]");
+            lastExitCode = 1;
+            return;
+        }
+        if (hmiProgram.open(deviceAccess(), host == null ? null : host.getLevel(), terminalSurface)) {
+            lastExitCode = 0;
+        } else {
+            println("hmi: SCADA viewer role or higher and a server-side terminal are required");
+            lastExitCode = 1;
+        }
     }
 
     private void dispatch(String cmd, List<String> args) {
@@ -1496,41 +1706,132 @@ public class BashShell implements ShellCommandModule.Context {
         return true;
     }
 
-    private void cmdHelp() {
-        println("TerminalCraft bash builtins:");
-        println("  help                 Show this help");
-        println("  echo / printf        Print arguments");
-        println("  pwd / cd / ls        Navigate filesystem");
-        println("  cat / head / write   Read/write files");
-        println("  edit / nano <file>   Interactive editor (save to VFS/floppy)");
-        println("  touch / mkdir / rm   File operations");
-        println("  env / history / clear");
-        println("  test / [             Conditional tests");
-        println("  let NAME=EXPR        Bounded signed-integer arithmetic");
-        println("  arith EXPR           Print an arithmetic result");
-        println("  source / . / bash    Run a script from VFS");
-        println("  selftest             Run built-in shell tests");
-        println("  redstone / rs        Read/write redstone (get|set|sides)");
-        println("  wire / bundled       Read/write 16-channel bundled cable");
-        println("  plc                  Program and control an adjacent PLC");
-        println("  displaylink          Pair and configure wireless display links");
-        println("  server / jobs        Submit/list/status/cancel server-rack jobs");
-        println("  peripheral           List adjacent peripherals");
-        println("  device               List/info/call unified devices");
-        println("  storage / inventory  Query and mutate generic item storage");
-        println("  sophisticated        Control adjacent Sophisticated Storage/backpacks");
-        println("  drawers              Control adjacent Storage Drawers");
-        println("  label [name]         Get/set computer label");
-        println("  turtle / tu          Move/dig/place (forward|back|up|down|turn|inspect)");
-        println("  monitor              Write/clear/read adjacent monitor");
-        println("  modem / rednet       Open/close/send/receive channels");
-        println("  mount / umount       Mount/unmount adjacent floppy at /disk");
-        println("  disk                 Disk status / label [name] / sync");
-        println("Operators:");
-        println("  ; && || |  > >> <");
-        println("  if/then/else/fi  for/do/done  while/do/done  break  continue  exit");
-        println("  NAME=value   $NAME  ${NAME}  $?  $1..$9  $(command)  $((expression))");
+    private void cmdHelp(List<String> args) {
+        if (!args.isEmpty()) {
+            if (args.size() == 1 && ("control".equalsIgnoreCase(args.get(0))
+                    || "devmgr".equalsIgnoreCase(args.get(0))
+                    || "setup".equalsIgnoreCase(args.get(0)))) {
+                printControlCenterHelp();
+                lastExitCode = 0;
+                return;
+            }
+            if (args.size() == 1 && "scada".equalsIgnoreCase(args.get(0))) {
+                ScadaCommandModule.printHelp(this);
+                lastExitCode = 0;
+                return;
+            }
+            if (args.size() == 1 && "hmi".equalsIgnoreCase(args.get(0))) {
+                printAdvancedHmiHelp();
+                lastExitCode = 0;
+                return;
+            }
+            println("help: usage: help [control|hmi|scada]");
+            lastExitCode = 1;
+            return;
+        }
+        println("TerminalCraft shell help");
+        println("");
+        println("File system:");
+        println("  pwd                         Print the current directory");
+        println("  cd <directory>              Change directory");
+        println("  ls [directory]              List files and directories");
+        println("  cat <file>                  Print a file");
+        println("  head <file> [lines]         Print the first lines of a file");
+        println("  write <file> <text...>      Write text to a file");
+        println("  edit <file>                 Open the script editor (alias: nano)");
+        println("  touch <file...>             Create files");
+        println("  mkdir [-p] <directory...>   Create directories");
+        println("  rm [-rf] <path...>          Remove files or directories");
+        println("");
+        println("Shell:");
+        println("  help [control|hmi|scada]    Show focused command help");
+        println("  echo <text...>              Print text");
+        println("  printf <format> [args...]   Print formatted text");
+        println("  env [name]                  Show environment variables");
+        println("  history                     Show command history");
+        println("  clear                       Clear the scrollback");
+        println("  test ... / [ ...            Evaluate a condition");
+        println("  let NAME=EXPR               Set an arithmetic variable");
+        println("  arith <expression>          Evaluate an arithmetic expression");
+        println("  source <file> [args...]     Run a script in this shell");
+        println("  bash <file> [args...]       Run a script (alias: sh)");
+        println("  selftest                    Run built-in shell tests");
+        println("");
+        println("Devices and automation:");
+        println("  redstone / rs               Vanilla and 16-channel Red Alloy I/O");
+        println("  wire / bundled              Read or set 16 bundled channels");
+        println("  plc                         Program and control an adjacent PLC");
+        println("  sensor / sensors            Read and configure sensors");
+        println("  scada                       Plant-wide tags, history, alarms, HMI, and control");
+        println("  displaylink                 Pair wireless display links");
+        println("  device / devices            Discover and call devices; manage DNS");
+        println("  control / devmgr / setup    Open the graphical device Control Center");
+        println("  hmi                         Open the advanced HMI viewer/designer");
+        println("  storage / inventory         Query generic item storage");
+        println("  sophisticated               Control Sophisticated Storage/backpacks");
+        println("  drawers                     Control Storage Drawers");
+        println("  peripheral                  List adjacent peripherals");
+        println("  turtle / tu                 Move, dig, place, and inspect");
+        println("  monitor                     Control an adjacent monitor");
+        println("  modem / rednet              Configure wireless and wired networking");
+        println("  server / jobs               Submit and inspect server-rack jobs");
+        println("  mount / umount              Mount or unmount a floppy at /disk");
+        println("  disk                        Show disk status, label, or sync");
+        println("");
+        println("Syntax:");
+        println("  ; && || |                  Chain commands and pipelines");
+        println("  > >> <                     Redirect output or input");
+        println("  if/for/while ...            Bounded control-flow blocks");
+        println("  NAME=value, $NAME, $?       Variables and status");
+        println("  $(command), $((expression)) Command and arithmetic substitution");
+        println("");
+        println("Tip: use 'help control' for device setup keys or 'help hmi' for live plant screens.");
         lastExitCode = 0;
+    }
+
+    private void printControlCenterHelp() {
+        println("Device Control Center");
+        println("");
+        println("Open:");
+        println("  control                     Open graphical device setup");
+        println("  devmgr / setup              Aliases for control");
+        println("");
+        println("Navigation:");
+        println("  Arrow keys / mouse wheel    Navigate devices and details");
+        println("  Left / Right                Switch device and detail panes");
+        println("  Tab / Shift+Tab             Switch Overview, Methods, Templates");
+        println("  Enter                       Open methods, run method, or load template");
+        println("  Mouse click                 Select a tab, device, method, or template");
+        println("");
+        println("Actions:");
+        println("  F2 or N                     Assign DNS name to selected device");
+        println("  F5 or R                     Refresh discovery and live status");
+        println("  Enter in text prompt        Save DNS name or submit method arguments");
+        println("  Escape                      Cancel text entry or close Control Center");
+    }
+
+    private void printAdvancedHmiHelp() {
+        println("Advanced HMI viewer and designer");
+        println("");
+        println("Open:");
+        println("  hmi                         Open live advanced HMI dashboards");
+        println("  scada hmi ...               Create dashboards, pages, and widgets");
+        println("");
+        println("Operator view:");
+        println("  Up / Down                   Previous or next dashboard");
+        println("  Left / Right                Previous or next page");
+        println("  Tab / Shift+Tab             Select an interactive widget");
+        println("  Enter / mouse click         Activate a button or page link");
+        println("  F5 or R                     Refresh live values");
+        println("");
+        println("Designer (Engineer role or higher):");
+        println("  F2                          Toggle design mode");
+        println("  Click / Tab                 Select a widget");
+        println("  Arrow keys                  Move selected widget on the 12x12 grid");
+        println("  Shift+Arrow keys            Resize selected widget");
+        println("  A / E                       Add or edit a widget specification");
+        println("  Delete twice                Confirm and remove selected widget");
+        println("  Escape                      Cancel entry or close the HMI");
     }
 
 
@@ -2410,18 +2711,22 @@ public class BashShell implements ShellCommandModule.Context {
             return;
         }
         if (args.isEmpty() || "help".equalsIgnoreCase(args.get(0))) {
-            println("wire get <side|any> <channel 0-15>");
-            println("wire output <side|any> <channel 0-15>");
+            println("wire get <side|any> <channel 0-15|all>");
+            println("wire input <side|any> <channel 0-15|all>");
+            println("wire output <side|any> <channel 0-15|all>");
             println("wire set <side|any> <channel 0-15> <strength 0-15>");
+            println("wire status <side|any>");
             lastExitCode = 0;
             return;
         }
         String operation = args.get(0).toLowerCase(Locale.ROOT);
-        int required = "set".equals(operation) ? 4 : 3;
-        if (args.size() < required) {
-            println("wire: usage: wire " + operation + " <side|any> <channel 0-15>"
-                    + ("set".equals(operation) ? " <strength 0-15>" : ""));
-            lastExitCode = 1;
+        if ("status".equals(operation) || "channels".equals(operation)) {
+            if (args.size() > 2) {
+                println("wire: usage: wire status <side|any>");
+                lastExitCode = 1;
+                return;
+            }
+            printBundledChannelTable(args.size() == 2 ? args.get(1) : "any", "wire");
             return;
         }
         if (!("get".equals(operation) || "input".equals(operation)
@@ -2430,25 +2735,30 @@ public class BashShell implements ShellCommandModule.Context {
             lastExitCode = 1;
             return;
         }
+        int required = "set".equals(operation) ? 4 : 3;
+        if (args.size() != required) {
+            println("wire: usage: wire " + operation + " <side|any> <channel 0-15"
+                    + ("set".equals(operation) ? "> <strength 0-15>" : "|all>"));
+            lastExitCode = 1;
+            return;
+        }
         String side = args.get(1);
-        int channel;
-        try {
-            channel = Integer.parseInt(args.get(2));
-        } catch (NumberFormatException invalid) {
-            println("wire: channel must be an integer from 0 to 15");
-            lastExitCode = 1;
-            return;
-        }
-        if (channel < 0 || channel > 15) {
-            println("wire: channel must be an integer from 0 to 15");
-            lastExitCode = 1;
-            return;
-        }
         if (!host.hasBundledCable(side)) {
             println("wire: no bundled cable on side '" + side + "'");
             lastExitCode = 1;
             return;
         }
+        if ("all".equalsIgnoreCase(args.get(2))) {
+            if ("set".equals(operation)) {
+                println("wire: set requires one channel from 0 to 15");
+                lastExitCode = 1;
+                return;
+            }
+            printBundledChannelValues(side, operation);
+            return;
+        }
+        Integer channel = parseBundledChannel(args.get(2), "wire");
+        if (channel == null) return;
         if ("set".equals(operation)) {
             int strength;
             try {
@@ -2466,8 +2776,11 @@ public class BashShell implements ShellCommandModule.Context {
             lastExitCode = 0;
             return;
         }
-        int value = "output".equals(operation)
-                ? host.bundledOutput(side, channel) : host.bundledSignal(side, channel);
+        int value = switch (operation) {
+            case "input" -> host.bundledInput(side, channel);
+            case "output" -> host.bundledOutput(side, channel);
+            default -> host.bundledSignal(side, channel);
+        };
         if (value < 0) {
             println("wire: unable to read channel");
             lastExitCode = 1;
@@ -2483,13 +2796,38 @@ public class BashShell implements ShellCommandModule.Context {
             lastExitCode = 1;
             return;
         }
-        if (args.isEmpty() || "sides".equals(args.get(0))) {
+        if (args.isEmpty() || "help".equalsIgnoreCase(args.get(0))) {
+            println("redstone sides");
+            println("redstone input <side|all>");
+            println("redstone output <side|all>");
+            println("redstone set <side> <strength 0-15>");
+            println("redstone input <side|any> <channel 0-15|all>");
+            println("redstone output <side|any> <channel 0-15|all>");
+            println("redstone set <side|any> <channel 0-15> <strength 0-15>");
+            println("redstone channels <side|any>");
+            lastExitCode = 0;
+            return;
+        }
+        if ("sides".equalsIgnoreCase(args.get(0))) {
             println(String.join("  ", host.redstoneSides()));
             lastExitCode = 0;
             return;
         }
-        String op = args.get(0);
+        String op = args.get(0).toLowerCase(Locale.ROOT);
+        if ("channels".equals(op) || "status".equals(op)) {
+            if (args.size() > 2) {
+                println("redstone: usage: redstone channels <side|any>");
+                lastExitCode = 1;
+                return;
+            }
+            printBundledChannelTable(args.size() == 2 ? args.get(1) : "any", "redstone");
+            return;
+        }
         if ("get".equals(op) || "input".equals(op) || "in".equals(op)) {
+            if (args.size() >= 3) {
+                readBundledFromRedstone(args, true);
+                return;
+            }
             String side = args.size() > 1 ? args.get(1) : "all";
             int v = host.getRedstoneInput(side);
             if (v < 0) {
@@ -2502,6 +2840,10 @@ public class BashShell implements ShellCommandModule.Context {
             return;
         }
         if ("output".equals(op) || "out".equals(op)) {
+            if (args.size() >= 3) {
+                readBundledFromRedstone(args, false);
+                return;
+            }
             String side = args.size() > 1 ? args.get(1) : "all";
             int v = host.getRedstoneOutput(side);
             if (v < 0) {
@@ -2514,8 +2856,13 @@ public class BashShell implements ShellCommandModule.Context {
             return;
         }
         if ("set".equals(op)) {
-            if (args.size() < 3) {
-                println("redstone: usage: redstone set <side> <0-15>");
+            if (args.size() == 4) {
+                setBundledFromRedstone(args);
+                return;
+            }
+            if (args.size() != 3) {
+                println("redstone: usage: redstone set <side> <strength 0-15>");
+                println("          redstone set <side|any> <channel 0-15> <strength 0-15>");
                 lastExitCode = 1;
                 return;
             }
@@ -2566,6 +2913,101 @@ public class BashShell implements ShellCommandModule.Context {
         lastExitCode = 1;
     }
 
+    private void readBundledFromRedstone(List<String> args, boolean input) {
+        if (args.size() != 3) {
+            println("redstone: usage: redstone " + (input ? "input" : "output")
+                    + " <side|any> <channel 0-15|all>");
+            lastExitCode = 1;
+            return;
+        }
+        String side = args.get(1);
+        if (!host.hasBundledCable(side)) {
+            println("redstone: no bundled cable on side '" + side + "'");
+            lastExitCode = 1;
+            return;
+        }
+        if ("all".equalsIgnoreCase(args.get(2))) {
+            printBundledChannelValues(side, input ? "input" : "output");
+            return;
+        }
+        Integer channel = parseBundledChannel(args.get(2), "redstone");
+        if (channel == null) return;
+        int value = input ? host.bundledInput(side, channel) : host.bundledOutput(side, channel);
+        if (value < 0) {
+            println("redstone: unable to read bundled channel");
+            lastExitCode = 1;
+            return;
+        }
+        println(Integer.toString(value));
+        lastExitCode = 0;
+    }
+
+    private void setBundledFromRedstone(List<String> args) {
+        String side = args.get(1);
+        if (!host.hasBundledCable(side)) {
+            println("redstone: no bundled cable on side '" + side + "'");
+            lastExitCode = 1;
+            return;
+        }
+        Integer channel = parseBundledChannel(args.get(2), "redstone");
+        if (channel == null) return;
+        int strength;
+        try {
+            strength = Integer.parseInt(args.get(3));
+        } catch (NumberFormatException invalid) {
+            println("redstone: strength must be an integer from 0 to 15");
+            lastExitCode = 1;
+            return;
+        }
+        if (strength < 0 || strength > 15 || !host.setBundledOutput(side, channel, strength)) {
+            println("redstone: strength must be an integer from 0 to 15");
+            lastExitCode = 1;
+            return;
+        }
+        lastExitCode = 0;
+    }
+
+    private Integer parseBundledChannel(String value, String command) {
+        try {
+            int channel = Integer.parseInt(value);
+            if (channel >= 0 && channel < BUNDLED_CHANNEL_COLORS.length) return channel;
+        } catch (NumberFormatException ignored) {
+            // Use the same bounded diagnostic for malformed and out-of-range values.
+        }
+        println(command + ": channel must be an integer from 0 to 15");
+        lastExitCode = 1;
+        return null;
+    }
+
+    private void printBundledChannelValues(String side, String operation) {
+        println("ch color      " + operation);
+        for (int channel = 0; channel < BUNDLED_CHANNEL_COLORS.length; channel++) {
+            int value = switch (operation) {
+                case "input" -> host.bundledInput(side, channel);
+                case "output" -> host.bundledOutput(side, channel);
+                default -> host.bundledSignal(side, channel);
+            };
+            println(String.format(Locale.ROOT, "%02d %-10s %2d",
+                    channel, BUNDLED_CHANNEL_COLORS[channel], value));
+        }
+        lastExitCode = 0;
+    }
+
+    private void printBundledChannelTable(String side, String command) {
+        if (!host.hasBundledCable(side)) {
+            println(command + ": no bundled cable on side '" + side + "'");
+            lastExitCode = 1;
+            return;
+        }
+        println("ch color      in out bus");
+        for (int channel = 0; channel < BUNDLED_CHANNEL_COLORS.length; channel++) {
+            println(String.format(Locale.ROOT, "%02d %-10s %2d %3d %3d", channel,
+                    BUNDLED_CHANNEL_COLORS[channel], host.bundledInput(side, channel),
+                    host.bundledOutput(side, channel), host.bundledSignal(side, channel)));
+        }
+        lastExitCode = 0;
+    }
+
     private com.malice.terminalcraft.device.DeviceAccess deviceAccess() {
         if (host == null) return null;
         if (cachedDeviceAccess == null || !deviceCallContext.equals(cachedDeviceContext)) {
@@ -2576,11 +3018,29 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void cmdDevice(List<String> args) {
-        DeviceShellCommand.Outcome outcome = DeviceShellCommand.execute(deviceAccess(), args);
+        DeviceShellCommand.Outcome outcome;
+        if (!args.isEmpty() && "dns".equalsIgnoreCase(args.get(0))) {
+            outcome = DeviceDnsShellCommand.execute(host == null ? null : host.getLevel(), deviceAccess(),
+                    args.subList(1, args.size()));
+        } else {
+            outcome = DeviceShellCommand.execute(deviceAccess(), args, this::resolveDeviceSelector);
+        }
         for (String line : outcome.lines()) {
             println(line);
         }
         lastExitCode = outcome.exitCode();
+    }
+
+    private java.util.UUID resolveDeviceSelector(String selector) {
+        if (selector == null) return null;
+        try {
+            return java.util.UUID.fromString(selector);
+        } catch (IllegalArgumentException ignored) {
+            Level level = host == null ? null : host.getLevel();
+            return level == null || level.isClientSide
+                    ? null
+                    : RednetNetwork.resolveAddress(level, selector).map(RednetAddress::deviceId).orElse(null);
+        }
     }
 
     private void cmdStorage(List<String> args) {
@@ -3298,10 +3758,12 @@ public class BashShell implements ShellCommandModule.Context {
             }
             return;
         }
-        for (String part : line.split("\n", -1)) {
-            output.add(part);
-            if (activeResultOutput != null) {
-                activeResultOutput.add(part);
+        for (String rawPart : line.split("\n", -1)) {
+            for (String part : ShellUsageFormatter.format(rawPart)) {
+                output.add(part);
+                if (activeResultOutput != null) {
+                    activeResultOutput.add(part);
+                }
             }
         }
         trimOutput();
@@ -3339,6 +3801,8 @@ public class BashShell implements ShellCommandModule.Context {
             histTag.add(StringTag.valueOf(h));
         }
         tag.put("History", histTag);
+        tag.put("ControlCenter", controlCenter.save());
+        tag.put("HmiProgram", hmiProgram.save());
         tag.put("Surface", terminalSurface.save(new CompoundTag()));
         tag.put("Vfs", vfs.save());
         tag.putBoolean("DiskMounted", diskMounted);
@@ -3391,6 +3855,11 @@ public class BashShell implements ShellCommandModule.Context {
             output.add(PersistedDataLimits.truncate(outTag.getString(i),
                     PersistedDataLimits.MAX_OUTPUT_LINE_CHARS));
         }
+        controlCenter.load(tag.contains("ControlCenter", Tag.TAG_COMPOUND)
+                ? tag.getCompound("ControlCenter") : new CompoundTag());
+        hmiProgram.load(tag.contains("HmiProgram", Tag.TAG_COMPOUND)
+                ? tag.getCompound("HmiProgram") : new CompoundTag());
+        if (controlCenter.active() && hmiProgram.active()) hmiProgram.close(terminalSurface);
         boolean loadedSurface = tag.contains("Surface", Tag.TAG_COMPOUND)
                 && terminalSurface.load(tag.getCompound("Surface"));
         if (!loadedSurface) syncTerminalSurface();
@@ -3445,15 +3914,23 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void syncTerminalSurface() {
+        if (hmiProgram.active()) {
+            hmiProgram.render(deviceAccess(), host == null ? null : host.getLevel(), terminalSurface);
+            return;
+        }
+        if (controlCenter.active()) {
+            controlCenter.render(terminalSurface);
+            return;
+        }
         int first = Math.max(0, output.size() - terminalSurface.height());
         for (int row = 0; row < terminalSurface.height(); row++) {
             String source = first + row < output.size() ? output.get(first + row) : "";
             for (int column = 0; column < terminalSurface.width(); column++) {
                 char value = column < source.length() ? source.charAt(column) : ' ';
-                if (terminalSurface.characterAt(column, row) != value) {
-                    terminalSurface.setCell(column, row, value,
-                            terminalSurface.foregroundAt(column, row),
-                            terminalSurface.backgroundAt(column, row));
+                if (terminalSurface.characterAt(column, row) != value
+                        || terminalSurface.foregroundAt(column, row) != SHELL_FOREGROUND
+                        || terminalSurface.backgroundAt(column, row) != SHELL_BACKGROUND) {
+                    terminalSurface.setCell(column, row, value, SHELL_FOREGROUND, SHELL_BACKGROUND);
                 }
             }
         }

@@ -29,6 +29,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 
 import java.util.Locale;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -54,6 +55,21 @@ public final class SensorProbe {
                     SensorQuality.CHUNK_UNLOADED, "target chunk is not loaded", gameTime);
         }
         try {
+            if (channel.kind() == SensorKind.CHEMICAL) {
+                BlockEntity chemicalTarget = level.getBlockEntity(target);
+                if (chemicalTarget != null) {
+                    java.util.Optional<com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.ChemicalStorage>
+                            chemicalStorage = com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry
+                            .resolve(chemicalTarget, accessSide(channel.target()));
+                    if (chemicalStorage.isPresent()) {
+                        return chemical(channel, chemicalStorage.orElseThrow(), gameTime);
+                    }
+                }
+            }
+            java.util.Optional<SensorReading> optional =
+                    com.malice.terminalcraft.integration.OptionalSensorProbeRegistry.read(
+                            level, target, accessSide(channel.target()), channel, gameTime);
+            if (optional.isPresent()) return optional.orElseThrow();
             return switch (channel.kind()) {
                 case REDSTONE -> redstone(level, sensorPos, target, channel, gameTime);
                 case BLOCK_STATE -> blockState(level, target, channel, gameTime);
@@ -66,12 +82,67 @@ public final class SensorProbe {
                 case NETWORK -> network(level, target, channel, gameTime);
                 case KINETIC -> kinetic(level, target, channel, gameTime);
                 case CHEMICAL -> SensorReading.unavailable(channel.name(), channel.kind(), channel.metric(),
-                        SensorQuality.UNSUPPORTED, "no generic Forge chemical capability is available", gameTime);
+                        SensorQuality.UNSUPPORTED,
+                        "no installed optional integration exposes a chemical capability", gameTime);
             };
         } catch (RuntimeException exception) {
             return SensorReading.unavailable(channel.name(), channel.kind(), channel.metric(),
                     SensorQuality.PARTIAL, "probe failed safely", gameTime);
         }
+    }
+
+    private static SensorReading chemical(SensorChannel channel,
+            com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.ChemicalStorage storage,
+            long time) {
+        long amount = 0;
+        long capacity = 0;
+        int tanks = 0;
+        String unit = "";
+        boolean mixedUnits = false;
+        String selector = channel.selector() == null ? "" : channel.selector();
+        List<com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.Tank> snapshot =
+                List.copyOf(storage.snapshot());
+        for (int index = 0; index < Math.min(snapshot.size(), DeviceValueLimit.CHEMICAL_TANKS); index++) {
+            com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.Tank tank = snapshot.get(index);
+            if (!matchesChemical(selector, tank)) continue;
+            tanks++;
+            if (unit.isEmpty()) unit = tank.unit();
+            else if (!unit.equals(tank.unit())) mixedUnits = true;
+            amount = saturatingAdd(amount, tank.amount());
+            capacity = saturatingAdd(capacity, tank.capacity());
+        }
+        String aggregateUnit = mixedUnits || unit.isEmpty() ? "units" : unit;
+        return switch (channel.metric()) {
+            case "amount", "stored" -> SensorReading.numeric(channel.name(), channel.kind(), channel.metric(),
+                    amount, aggregateUnit, time);
+            case "capacity" -> SensorReading.numeric(channel.name(), channel.kind(), channel.metric(),
+                    capacity, aggregateUnit, time);
+            case "fill", "fill_percent" -> SensorReading.numeric(channel.name(), channel.kind(), channel.metric(),
+                    capacity <= 0 ? 0 : amount * 100.0 / capacity, "percent", time);
+            case "tanks" -> SensorReading.numeric(channel.name(), channel.kind(), channel.metric(),
+                    tanks, "tanks", time);
+            case "present" -> SensorReading.numeric(channel.name(), channel.kind(), channel.metric(),
+                    amount > 0 ? 1 : 0, "boolean", time);
+            default -> SensorReading.unavailable(channel.name(), channel.kind(), channel.metric(),
+                    SensorQuality.UNSUPPORTED, "chemical metric is unsupported", time);
+        };
+    }
+
+    private static boolean matchesChemical(String selector,
+            com.malice.terminalcraft.integration.OptionalChemicalStorageRegistry.Tank tank) {
+        if (selector == null || selector.isBlank()) return true;
+        String normalized = selector.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.equals(tank.resourceId())
+                || normalized.equals(tank.family() + ":" + tank.resourceId());
+    }
+
+    private static long saturatingAdd(long left, long right) {
+        long bounded = Math.max(0, right);
+        return Long.MAX_VALUE - left < bounded ? Long.MAX_VALUE : left + bounded;
+    }
+
+    private static final class DeviceValueLimit {
+        private static final int CHEMICAL_TANKS = 256;
     }
 
     private static BlockPos targetPosition(BlockPos origin, String target) {

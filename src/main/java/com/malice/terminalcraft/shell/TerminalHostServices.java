@@ -79,12 +79,15 @@ public record TerminalHostServices(
                     @Override public boolean close(int channel) { return host.modemClose(channel); }
                     @Override public boolean isOpen(int channel) { return host.modemIsOpen(channel); }
                     @Override public List<Integer> openChannels() { return host.modemOpenChannels(); }
+                    @Override public int defaultChannel() { return host.modemDefaultChannel(); }
                     @Override public boolean transmit(int channel, int replyChannel, String message) { return host.modemTransmit(channel, replyChannel, message); }
                     @Override public String hostname() { return host.modemHostname(); }
                     @Override public boolean setHostname(String hostname) { return host.modemSetHostname(hostname); }
                     @Override public String networkName() { return host.modemNetworkName(); }
                     @Override public boolean setNetworkName(String networkName) { return host.modemSetNetworkName(networkName); }
                     @Override public List<String> hosts(int maximum) { return host.modemHosts(maximum); }
+                    @Override public List<String> dns(int maximum) { return host.modemDns(maximum); }
+                    @Override public String resolve(String selector) { return host.modemResolve(selector); }
                     @Override public List<String> interfaces() { return host.modemInterfaces(); }
                     @Override public List<String> topologyDiagnostics() { return host.modemTopologyDiagnostics(); }
                     @Override public List<String> packetDiagnostics() { return host.modemPacketDiagnostics(); }
@@ -103,6 +106,12 @@ public record TerminalHostServices(
                     @Override public boolean transmitSensorService(String service, String operation, String channel, int replyPort) {
                         return host.modemTransmitSensorService(service, operation, channel, replyPort);
                     }
+                    @Override public boolean registerScadaService(String service, int port) { return host.modemRegisterScadaService(service, port); }
+                    @Override public boolean unregisterScadaService(String service) { return host.modemUnregisterScadaService(service); }
+                    @Override public List<String> scadaServices() { return host.modemScadaServices(); }
+                    @Override public boolean transmitScadaService(String service, String operation, String selector, int limit, int replyPort) {
+                        return host.modemTransmitScadaService(service, operation, selector, limit, replyPort);
+                    }
                     @Override public List<String> services(int maximum) { return host.modemServices(maximum); }
                     @Override public boolean transmitService(String service, int replyPort, String message) { return host.modemTransmitService(service, replyPort, message); }
                     @Override public List<String> receive(int maximum) { return host.modemReceive(maximum); }
@@ -113,6 +122,7 @@ public record TerminalHostServices(
                 new BundledWire() {
                     @Override public boolean available(String side) { return host.hasBundledCable(side); }
                     @Override public int signal(String side, int channel) { return host.bundledSignal(side, channel); }
+                    @Override public int input(String side, int channel) { return host.bundledInput(side, channel); }
                     @Override public int output(String side, int channel) { return host.bundledOutput(side, channel); }
                     @Override public boolean setOutput(String side, int channel, int strength) { return host.setBundledOutput(side, channel, strength); }
                 },
@@ -176,12 +186,15 @@ public record TerminalHostServices(
         boolean close(int channel);
         boolean isOpen(int channel);
         List<Integer> openChannels();
+        default int defaultChannel() { return com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL; }
         boolean transmit(int channel, int replyChannel, String message);
         String hostname();
         boolean setHostname(String hostname);
         String networkName();
         boolean setNetworkName(String networkName);
         List<String> hosts(int maximum);
+        default List<String> dns(int maximum) { return List.of(); }
+        default String resolve(String selector) { return ""; }
         List<String> interfaces();
         List<String> topologyDiagnostics();
         List<String> packetDiagnostics();
@@ -198,6 +211,11 @@ public record TerminalHostServices(
         default boolean unregisterSensorService(String service) { return false; }
         default List<String> sensorServices() { return List.of(); }
         default boolean transmitSensorService(String service, String operation, String channel, int replyPort) { return false; }
+        default boolean registerScadaService(String service, int port) { return false; }
+        default boolean unregisterScadaService(String service) { return false; }
+        default List<String> scadaServices() { return List.of(); }
+        default boolean transmitScadaService(String service, String operation, String selector,
+                                             int limit, int replyPort) { return false; }
         List<String> services(int maximum);
         boolean transmitService(String service, int replyPort, String message);
         List<String> receive(int maximum);
@@ -209,6 +227,7 @@ public record TerminalHostServices(
     public interface BundledWire {
         boolean available(String side);
         int signal(String side, int channel);
+        default int input(String side, int channel) { return signal(side, channel); }
         int output(String side, int channel);
         boolean setOutput(String side, int channel, int strength);
     }

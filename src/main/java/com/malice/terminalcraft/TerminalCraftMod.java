@@ -48,14 +48,24 @@ public final class TerminalCraftMod {
             event.accept(com.malice.terminalcraft.registry.ModRegistries.MODEM_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.DISK_DRIVE_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.BUNDLED_CABLE_ITEM.get());
-            event.accept(com.malice.terminalcraft.registry.ModRegistries.NETWORK_CABLE_ITEM.get());
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.BUNDLED_NETWORK_CABLE_ITEM.get());
+            // The tag-free stack is the original unshielded conductor. Colored stacks below are
+            // the sixteen independently insulated bundled-channel breakouts.
             event.accept(com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_WIRE_ITEM.get());
+            for (net.minecraft.world.item.DyeColor color : net.minecraft.world.item.DyeColor.values()) {
+                event.accept(com.malice.terminalcraft.item.NetworkCableItem.colored(
+                        com.malice.terminalcraft.registry.ModRegistries.NETWORK_CABLE_ITEM.get().getDefaultInstance(), color));
+                event.accept(com.malice.terminalcraft.item.RedAlloyWireItem.colored(
+                        com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_WIRE_ITEM.get().getDefaultInstance(), color));
+            }
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_CAPACITOR_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.NETWORK_ROUTER_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.FLOPPY_DISK.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.POCKET_TERMINAL.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.WIRELESS_DISPLAY_LINK_ITEM.get());
             event.accept(com.malice.terminalcraft.registry.ModRegistries.VIDEO_CABLE_ITEM.get());
+            event.accept(com.malice.terminalcraft.registry.ModRegistries.GUIDE_BOOK.get());
         }
     }
 
@@ -108,6 +118,7 @@ public final class TerminalCraftMod {
             com.malice.terminalcraft.blockentity.MonitorScreensaver.tick(event.getServer());
             com.malice.terminalcraft.blockentity.DisplayTransportRuntime.tick(event.getServer());
             com.malice.terminalcraft.world.TerminalChunkLoader.reconcile(event.getServer());
+            com.malice.terminalcraft.scada.ScadaRuntime.tick(event.getServer());
         }
     }
 
@@ -119,6 +130,7 @@ public final class TerminalCraftMod {
         com.malice.terminalcraft.network.RednetNetwork.clear(event.getServer());
         com.malice.terminalcraft.network.WiredNetworkTopology.clear(event.getServer());
         com.malice.terminalcraft.world.TerminalChunkLoader.clear(event.getServer());
+        com.malice.terminalcraft.scada.ScadaRuntime.clear(event.getServer());
         LOGGER.info("TerminalCraft device registry cleared");
     }
 
@@ -155,6 +167,16 @@ public final class TerminalCraftMod {
                         com.malice.terminalcraft.client.RedAlloyWireBlockEntityRenderer::new);
             });
             LOGGER.info("TerminalCraft client setup - terminal screen registered");
+        }
+
+        @net.minecraftforge.eventbus.api.SubscribeEvent
+        public static void onItemColors(final net.minecraftforge.client.event.RegisterColorHandlersEvent.Item event) {
+            event.register((stack, tintIndex) -> tintIndex == 0
+                            ? com.malice.terminalcraft.item.NetworkCableItem.color(stack).getTextColor() : 0xFFFFFFFF,
+                    com.malice.terminalcraft.registry.ModRegistries.NETWORK_CABLE_ITEM.get());
+            event.register((stack, tintIndex) -> tintIndex == 0
+                            ? com.malice.terminalcraft.item.RedAlloyWireItem.color(stack).getTextColor() : 0xFFFFFFFF,
+                    com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_WIRE_ITEM.get());
         }
     }
 }

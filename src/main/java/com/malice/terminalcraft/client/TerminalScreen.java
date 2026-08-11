@@ -5,6 +5,7 @@ import com.malice.terminalcraft.device.TerminalBuffer;
 import com.malice.terminalcraft.menu.TerminalMenu;
 import com.malice.terminalcraft.network.ModNetwork;
 import com.malice.terminalcraft.shell.BashShell;
+import com.malice.terminalcraft.shell.ControlCenterProgram;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.Button;
@@ -53,6 +54,16 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     private boolean editorRequestPending;
     private boolean awaitingEditorClose;
     private boolean surfaceMode;
+    private List<VisualLine> renderedOutputLines = List.of();
+    private int renderedOutputStart;
+    private OutputPosition outputSelectionAnchor;
+    private OutputPosition outputSelectionCursor;
+    private boolean outputSelecting;
+    private CompletionCycle completionCycle;
+    private boolean controlInputWasActive;
+    private boolean controlWasActive;
+    private boolean surfaceModeBeforeControl;
+    private int hmiRefreshTicker;
 
     public TerminalScreen(TerminalMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -114,7 +125,17 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         }
         updateEditorMode();
         if (editorNoticeTicks > 0) editorNoticeTicks--;
-        if (editor == null && input != null && !input.isFocused()) {
+        if (menu.getShell().isAdvancedHmiActive() && !menu.getShell().isControlCenterInputActive()) {
+            if (++hmiRefreshTicker >= 20) {
+                hmiRefreshTicker = 0;
+                ModNetwork.sendControlCenterAction(menu.containerId, ControlCenterProgram.Action.POLL);
+            }
+        } else {
+            hmiRefreshTicker = 0;
+        }
+        boolean controlCanType = !menu.getShell().isControlCenterActive()
+                || menu.getShell().isControlCenterInputActive();
+        if (editor == null && controlCanType && input != null && !input.isFocused()) {
             setFocused(input);
             input.setFocused(true);
         }
@@ -128,11 +149,14 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
+        updateControlSurfaceMode();
         if (menu.getShell().isEditorActive()) {
+            renderedOutputLines = List.of();
             renderEditor(graphics);
             return;
         }
         if (surfaceMode) {
+            renderedOutputLines = List.of();
             renderSurface(graphics);
             return;
         }
@@ -149,12 +173,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         scrollOffset = Math.min(scrollOffset, maxScroll);
         int start = Math.max(0, total - MAX_VISIBLE_LINES - scrollOffset);
         int end = Math.min(total, start + MAX_VISIBLE_LINES);
+        renderedOutputLines = lines;
+        renderedOutputStart = start;
 
         int textY = contentTop() + 4;
         for (int i = start; i < end; i++) {
             VisualLine line = lines.get(i);
-            graphics.drawString(font, line.text(), outputLeft() + 2, textY,
-                    outputColor(line.source(), textColor), false);
+            drawOutputLine(graphics, line, i, textY, outputColor(line.source(), textColor));
             textY += LINE_HEIGHT;
         }
 
@@ -189,6 +214,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         if (editor != null) {
             return editorKeyPressed(keyCode, modifiers);
         }
+        if (menu.getShell().isControlCenterActive()) {
+            return controlCenterKeyPressed(keyCode, scanCode, modifiers);
+        }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             this.onClose();
             return true;
@@ -207,6 +235,15 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             input.setValue("");
             historyIndex = -1;
             historyBuffer = "";
+            clearCompletion();
+            return true;
+        }
+
+        // Ctrl+C copies selected scrollback. With no scrollback selection, the EditBox keeps
+        // its normal clipboard behavior for selected command-line text.
+        if (keyCode == GLFW.GLFW_KEY_C && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0
+                && hasOutputSelection()) {
+            copyOutputSelection();
             return true;
         }
 
@@ -249,10 +286,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             scrollOffset = Math.max(0, scrollOffset - 1);
             return true;
         }
-        // Do not tab-cycle focus away from the command line.
+        // Tab completes commands and VFS paths instead of cycling focus away from the terminal.
         if (keyCode == GLFW.GLFW_KEY_TAB) {
+            tabComplete();
             return true;
         }
+
+        clearCompletion();
 
         // Editing keys (backspace, delete, arrows, ctrl+A/C/V/X, home/end, etc.).
         if (input != null) {
@@ -287,7 +327,15 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             }
             return true;
         }
+        if (menu.getShell().isControlCenterActive()) {
+            if (menu.getShell().isControlCenterInputActive()) {
+                ensureInputFocused();
+                if (input != null) input.charTyped(codePoint, modifiers);
+            }
+            return true;
+        }
         ensureInputFocused();
+        clearCompletion();
         if (input != null) {
             input.charTyped(codePoint, modifiers);
         }
@@ -301,6 +349,34 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             int column = editorColumnAt(line, (int) mouseX - (editorLeft() + 48));
             editor.setCursor(editor.offsetForLineColumn(line, column), hasShiftDown());
             return true;
+        }
+        if (editor == null && menu.getShell().isControlCenterActive()) {
+            if (button == 0) {
+                int[] cell = surfaceCellAt(mouseX, mouseY);
+                if (cell != null) {
+                    ModNetwork.sendControlCenterAction(menu.containerId,
+                            ControlCenterProgram.Action.CLICK, cell[1], cell[0], "");
+                    return true;
+                }
+                if (menu.getShell().isControlCenterInputActive()) {
+                    boolean result = super.mouseClicked(mouseX, mouseY, button);
+                    ensureInputFocused();
+                    return result;
+                }
+            }
+            return true;
+        }
+        if (editor == null && !surfaceMode && button == 0 && insideOutput(mouseX, mouseY)) {
+            OutputPosition position = outputPositionAt(mouseX, mouseY);
+            if (position != null) {
+                outputSelectionAnchor = position;
+                outputSelectionCursor = position;
+                outputSelecting = true;
+                return true;
+            }
+        }
+        if (button == 0 && !insideOutput(mouseX, mouseY)) {
+            clearOutputSelection();
         }
         boolean result = super.mouseClicked(mouseX, mouseY, button);
         ensureInputFocused();
@@ -317,13 +393,34 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             ensureEditorCursorVisible();
             return true;
         }
+        if (!surfaceMode && button == 0 && outputSelecting) {
+            OutputPosition position = outputPositionAt(mouseX, mouseY);
+            if (position != null) {
+                outputSelectionCursor = position;
+            }
+            return true;
+        }
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (button == 0 && outputSelecting) {
+            outputSelecting = false;
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {
         if (editor != null) {
             editorScrollLine = Math.max(0, editorScrollLine + (delta > 0 ? -3 : 3));
+            return true;
+        }
+        if (menu.getShell().isControlCenterActive()) {
+            if (delta != 0) ModNetwork.sendControlCenterAction(menu.containerId,
+                    delta > 0 ? ControlCenterProgram.Action.UP : ControlCenterProgram.Action.DOWN);
             return true;
         }
         if (delta > 0) {
@@ -342,14 +439,19 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         List<VisualLine> wrapped = new ArrayList<>();
         int safeWidth = Math.max(1, width);
         for (String source : output) {
-            String safeSource = source == null ? "" : source;
-            List<FormattedCharSequence> parts = font.split(Component.literal(safeSource), safeWidth);
-            if (parts.isEmpty()) {
-                wrapped.add(new VisualLine(safeSource, Component.empty().getVisualOrderText()));
+            String safeSource = source == null ? "" : source.replace('\n', ' ');
+            if (safeSource.isEmpty()) {
+                wrapped.add(new VisualLine(safeSource, "", Component.empty().getVisualOrderText()));
                 continue;
             }
-            for (FormattedCharSequence part : parts) {
-                wrapped.add(new VisualLine(safeSource, part));
+            String remaining = safeSource;
+            while (!remaining.isEmpty()) {
+                String part = font.plainSubstrByWidth(remaining, safeWidth);
+                if (part.isEmpty()) {
+                    part = remaining.substring(0, 1);
+                }
+                wrapped.add(new VisualLine(safeSource, part, Component.literal(part).getVisualOrderText()));
+                remaining = remaining.substring(part.length());
             }
         }
         return wrapped;
@@ -372,7 +474,81 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         return defaultColor;
     }
 
-    private record VisualLine(String source, FormattedCharSequence text) {}
+    private void drawOutputLine(GuiGraphics graphics, VisualLine line, int row, int y, int color) {
+        int left = outputLeft() + 2;
+        int selectionFrom = selectedColumnStart(row, line.plain().length());
+        int selectionTo = selectedColumnEnd(row, line.plain().length());
+        if (selectionFrom < selectionTo) {
+            int startX = left + font.width(line.plain().substring(0, selectionFrom));
+            int endX = left + font.width(line.plain().substring(0, selectionTo));
+            graphics.fill(startX, y - 1, Math.max(startX + 1, endX), y + LINE_HEIGHT - 1, 0xFF315A78);
+        }
+        graphics.drawString(font, line.text(), left, y, color, false);
+    }
+
+    private int selectedColumnStart(int row, int lineLength) {
+        if (!hasOutputSelection()) return 0;
+        int first = Math.min(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        int last = Math.max(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        if (row < first || row > last) return 0;
+        if (first == last) return Math.min(outputSelectionAnchor.column(), outputSelectionCursor.column());
+        if (row == first) {
+            return outputSelectionAnchor.row() < outputSelectionCursor.row()
+                    ? outputSelectionAnchor.column() : outputSelectionCursor.column();
+        }
+        return 0;
+    }
+
+    private int selectedColumnEnd(int row, int lineLength) {
+        if (!hasOutputSelection()) return 0;
+        int first = Math.min(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        int last = Math.max(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        if (row < first || row > last) return 0;
+        if (first == last) return Math.min(lineLength,
+                Math.max(outputSelectionAnchor.column(), outputSelectionCursor.column()));
+        if (row == last) {
+            return outputSelectionAnchor.row() > outputSelectionCursor.row()
+                    ? Math.min(lineLength, outputSelectionAnchor.column())
+                    : Math.min(lineLength, outputSelectionCursor.column());
+        }
+        return lineLength;
+    }
+
+    private record VisualLine(String source, String plain, FormattedCharSequence text) {}
+
+    private record OutputPosition(int row, int column) {}
+
+    private static final class CompletionCycle {
+        private final int tokenStart;
+        private final int tokenEnd;
+        private final List<String> candidates;
+        private int index;
+        private String lastLine;
+        private int lastCursor;
+
+        private CompletionCycle(int tokenStart, int tokenEnd, List<String> candidates) {
+            this.tokenStart = tokenStart;
+            this.tokenEnd = tokenEnd;
+            this.candidates = List.copyOf(candidates);
+            this.index = -1;
+        }
+
+        private boolean continues(String line, int cursor) {
+            return line.equals(lastLine) && cursor == lastCursor;
+        }
+
+        private String apply(String line, String replacement) {
+            String next = line.substring(0, tokenStart) + replacement + line.substring(tokenEnd);
+            lastLine = next;
+            lastCursor = tokenStart + replacement.length();
+            return next;
+        }
+
+        private String nextCandidate() {
+            index = (index + 1) % candidates.size();
+            return candidates.get(index);
+        }
+    }
 
     private static boolean looksLikeEditorLine(String line) {
         // Numbered buffer lines look like "  1| code" or editor prompt "[file*]> ".
@@ -427,6 +603,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         // Server executes and syncs block-entity shell state back to the client.
         ModNetwork.sendCommand(menu.containerId, value);
         input.setValue("");
+        clearCompletion();
+        clearOutputSelection();
         scrollOffset = 0;
         ensureInputFocused();
     }
@@ -437,8 +615,49 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             minecraft.player.playSound(SoundEvents.UI_BUTTON_CLICK.value(), 0.3f, 1.9f);
         }
         ModNetwork.sendCommand(menu.containerId, command == null ? "" : command);
+        clearCompletion();
         scrollOffset = 0;
         ensureInputFocused();
+    }
+
+    private void tabComplete() {
+        if (input == null) return;
+        String line = input.getValue();
+        int cursor = input.getCursorPosition();
+        if (completionCycle != null && completionCycle.continues(line, cursor)) {
+            String next = completionCycle.apply(line, completionCycle.nextCandidate());
+            setInputValueAndCursor(next, completionCycle.lastCursor);
+            return;
+        }
+        BashShell.CompletionResult result = menu.getShell().complete(line, cursor);
+        if (!result.hasMatches()) {
+            clearCompletion();
+            return;
+        }
+
+        completionCycle = new CompletionCycle(result.tokenStart(), result.tokenEnd(), result.candidates());
+        String common = result.commonPrefix();
+        String typed = line.substring(result.tokenStart(), result.tokenEnd());
+        if (common.length() > typed.length()) {
+            String next = completionCycle.apply(line, common);
+            setInputValueAndCursor(next, completionCycle.lastCursor);
+            return;
+        }
+
+        String next = completionCycle.apply(line, completionCycle.nextCandidate());
+        setInputValueAndCursor(next, completionCycle.lastCursor);
+    }
+
+    private void setInputValueAndCursor(String value, int cursor) {
+        input.setValue(value);
+        int bounded = Math.max(0, Math.min(value.length(), cursor));
+        input.setCursorPosition(bounded);
+        input.setHighlightPos(bounded);
+        ensureInputFocused();
+    }
+
+    private void clearCompletion() {
+        completionCycle = null;
     }
 
     private void historyUp() {
@@ -489,6 +708,56 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         }
     }
 
+    private boolean insideOutput(double mouseX, double mouseY) {
+        return !renderedOutputLines.isEmpty()
+                && mouseX >= outputLeft() + 1 && mouseX < outputRight() - 1
+                && mouseY >= contentTop() + 1 && mouseY < footerTop() - 1;
+    }
+
+    private OutputPosition outputPositionAt(double mouseX, double mouseY) {
+        if (renderedOutputLines.isEmpty()) return null;
+        int visualRow = renderedOutputStart + Math.max(0,
+                Math.min(MAX_VISIBLE_LINES - 1, (int) ((mouseY - (contentTop() + 4)) / LINE_HEIGHT)));
+        visualRow = Math.max(0, Math.min(renderedOutputLines.size() - 1, visualRow));
+        VisualLine line = renderedOutputLines.get(visualRow);
+        int relativeX = Math.max(0, (int) mouseX - (outputLeft() + 2));
+        int column = 0;
+        while (column < line.plain().length()) {
+            int previous = font.width(line.plain().substring(0, column));
+            int next = font.width(line.plain().substring(0, column + 1));
+            if (relativeX < (previous + next) / 2) break;
+            column++;
+        }
+        return new OutputPosition(visualRow, column);
+    }
+
+    private boolean hasOutputSelection() {
+        return outputSelectionAnchor != null && outputSelectionCursor != null
+                && (outputSelectionAnchor.row() != outputSelectionCursor.row()
+                || outputSelectionAnchor.column() != outputSelectionCursor.column());
+    }
+
+    private void clearOutputSelection() {
+        outputSelectionAnchor = null;
+        outputSelectionCursor = null;
+        outputSelecting = false;
+    }
+
+    private void copyOutputSelection() {
+        if (!hasOutputSelection() || minecraft == null) return;
+        int first = Math.min(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        int last = Math.max(outputSelectionAnchor.row(), outputSelectionCursor.row());
+        StringBuilder copied = new StringBuilder();
+        for (int row = first; row <= last && row < renderedOutputLines.size(); row++) {
+            VisualLine line = renderedOutputLines.get(row);
+            int from = selectedColumnStart(row, line.plain().length());
+            int to = selectedColumnEnd(row, line.plain().length());
+            if (row > first) copied.append('\n');
+            if (from < to) copied.append(line.plain(), from, to);
+        }
+        minecraft.keyboardHandler.setClipboard(copied.toString());
+    }
+
     private void updateEditorMode() {
         boolean shellActive = menu.getShell().isEditorActive();
         if (!shellActive) awaitingEditorClose = false;
@@ -504,7 +773,20 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             editor = null;
             loadedEditorPath = null;
         }
-        if (input != null) input.visible = !active;
+        boolean controlActive = menu.getShell().isControlCenterActive();
+        boolean controlInput = controlActive && menu.getShell().isControlCenterInputActive();
+        updateControlSurfaceMode();
+        if (input != null) {
+            input.visible = !active && (!controlActive || controlInput);
+            if (controlInput && !controlInputWasActive) {
+                input.setValue("");
+                setFocused(input);
+                input.setFocused(true);
+            } else if (!controlInput && controlInputWasActive) {
+                input.setValue("");
+            }
+        }
+        controlInputWasActive = controlInput;
         if (saveButton != null) {
             saveButton.visible = active;
             saveCloseButton.visible = active;
@@ -513,6 +795,18 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             saveCloseButton.active = active && !editorRequestPending;
             discardButton.active = active && !editorRequestPending;
         }
+    }
+
+    /** Gives a full-screen program temporary surface ownership, then restores the prior view. */
+    private void updateControlSurfaceMode() {
+        boolean active = menu.getShell().isControlCenterActive();
+        if (active && !controlWasActive) {
+            surfaceModeBeforeControl = surfaceMode;
+            surfaceMode = true;
+        } else if (!active && controlWasActive) {
+            surfaceMode = surfaceModeBeforeControl;
+        }
+        controlWasActive = active;
     }
 
     private int editorWidth() { return Math.min(620, Math.max(360, width - 24)); }
@@ -589,7 +883,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             return;
         }
         BashShell shell = menu.getShell();
-        renderFrame(graphics, menu.isPocket() ? "POCKET TERMINAL" : "TERMINAL NODE", "SURFACE // F6 LOG");
+        boolean controlCenter = shell.isControlCenterActive();
+        renderFrame(graphics, menu.isPocket() ? "POCKET TERMINAL" : "TERMINAL NODE",
+                controlCenter ? shell.getFullScreenProgramTitle() : "SURFACE // F6 LOG");
         int areaLeft = outputLeft() + 4;
         int areaTop = contentTop() + 4;
         int areaRight = outputRight() - 4;
@@ -621,7 +917,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             graphics.fill(cursorLeft, cursorTop, cursorLeft + 1, cursorTop + cellHeight, 0xFFFFFFFF);
         }
         graphics.disableScissor();
-        graphics.drawString(font, ">", outputLeft() + 2, footerTop() + 8, 0x66FF99, false);
+        graphics.drawString(font, shell.isControlCenterInputActive() ? ":" : ">",
+                outputLeft() + 2, footerTop() + 8, 0x66FF99, false);
         renderStatusRail(graphics, shell, true);
     }
 
@@ -651,14 +948,21 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         graphics.fill(left, top + 15, left + 6, top + 21,
                 shell.getLastExitCode() == 0 ? 0xFF55E684 : 0xFFE26666);
         graphics.drawString(font, "ONLINE", left + 10, top + 14, text, false);
-        drawStatusRow(graphics, "MODE", surface ? "SURFACE" : shell.isEditorActive() ? "EDITOR" : "BASH", top + 34, text);
+        String mode = shell.isAdvancedHmiActive() ? "HMI" : shell.isControlCenterActive() ? "CONTROL" : surface ? "SURFACE"
+                : shell.isEditorActive() ? "EDITOR" : "BASH";
+        drawStatusRow(graphics, "MODE", mode, top + 34, text);
         drawStatusRow(graphics, "DIR", fitToWidth(shell.getCwd(), 70), top + 54, text);
         drawStatusRow(graphics, "EXIT", Integer.toString(shell.getLastExitCode()), top + 74, text);
         drawStatusRow(graphics, "HISTORY", Integer.toString(shell.getCommandHistory().size()), top + 94, text);
-        drawStatusRow(graphics, "VIEW", surface ? "F6 LOG" : "F6 SURFACE", top + 114, 0xFF7FADCE);
-        graphics.drawString(font, "↑↓ history", left, top + 151, 0xFF718A79, false);
-        graphics.drawString(font, "PgUp/PgDn", left, top + 163, 0xFF718A79, false);
-        graphics.drawString(font, "ESC close", left, top + 175, 0xFF718A79, false);
+        drawStatusRow(graphics, "VIEW", shell.isAdvancedHmiActive() ? "PLANT UI"
+                : shell.isControlCenterActive() ? "DEVICE UI"
+                : surface ? "F6 LOG" : "F6 SURFACE", top + 114, 0xFF7FADCE);
+        graphics.drawString(font, shell.isAdvancedHmiActive() ? "Tab widgets" : shell.isControlCenterActive() ? "Tab sections" : "↑↓ history",
+                left, top + 151, 0xFF718A79, false);
+        graphics.drawString(font, shell.isAdvancedHmiActive() ? "F2 design  F5/R" : shell.isControlCenterActive() ? "F2/N DNS  F5/R" : "PgUp/PgDn",
+                left, top + 163, 0xFF718A79, false);
+        graphics.drawString(font, shell.isControlCenterActive() ? "ESC back" : "ESC close",
+                left, top + 175, 0xFF718A79, false);
     }
 
     private void drawStatusRow(GuiGraphics graphics, String label, String value, int y, int color) {
@@ -671,6 +975,78 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     private int railLeft() { return outputRight() + 8; }
     private int contentTop() { return topPos + HEADER_HEIGHT + 5; }
     private int footerTop() { return topPos + imageHeight - FOOTER_HEIGHT; }
+
+    private boolean controlCenterKeyPressed(int keyCode, int scanCode, int modifiers) {
+        BashShell shell = menu.getShell();
+        if (shell.isControlCenterInputActive()) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+                input.setValue("");
+                ModNetwork.sendControlCenterAction(menu.containerId,
+                        ControlCenterProgram.Action.CANCEL_INPUT);
+                return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER || keyCode == GLFW.GLFW_KEY_KP_ENTER) {
+                String value = input == null ? "" : input.getValue();
+                ModNetwork.sendControlCenterAction(menu.containerId,
+                        ControlCenterProgram.Action.SUBMIT_TEXT, -1, -1, value);
+                if (input != null) input.setValue("");
+                return true;
+            }
+            ensureInputFocused();
+            if (input != null) input.keyPressed(keyCode, scanCode, modifiers);
+            return true;
+        }
+
+        boolean shift = (modifiers & GLFW.GLFW_MOD_SHIFT) != 0;
+        boolean plainKey = (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_ALT
+                | GLFW.GLFW_MOD_SUPER)) == 0;
+        boolean hmi = shell.isAdvancedHmiActive();
+        ControlCenterProgram.Action action = switch (keyCode) {
+            case GLFW.GLFW_KEY_ESCAPE -> ControlCenterProgram.Action.CLOSE;
+            case GLFW.GLFW_KEY_UP -> hmi && shift ? ControlCenterProgram.Action.RESIZE_UP : ControlCenterProgram.Action.UP;
+            case GLFW.GLFW_KEY_DOWN -> hmi && shift ? ControlCenterProgram.Action.RESIZE_DOWN : ControlCenterProgram.Action.DOWN;
+            case GLFW.GLFW_KEY_LEFT -> hmi && shift ? ControlCenterProgram.Action.RESIZE_LEFT : ControlCenterProgram.Action.LEFT;
+            case GLFW.GLFW_KEY_RIGHT -> hmi && shift ? ControlCenterProgram.Action.RESIZE_RIGHT : ControlCenterProgram.Action.RIGHT;
+            case GLFW.GLFW_KEY_PAGE_UP -> ControlCenterProgram.Action.UP;
+            case GLFW.GLFW_KEY_PAGE_DOWN -> ControlCenterProgram.Action.DOWN;
+            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> ControlCenterProgram.Action.ACTIVATE;
+            case GLFW.GLFW_KEY_TAB -> shift ? ControlCenterProgram.Action.PREVIOUS_TAB
+                    : ControlCenterProgram.Action.NEXT_TAB;
+            case GLFW.GLFW_KEY_F2 -> ControlCenterProgram.Action.RENAME;
+            case GLFW.GLFW_KEY_F5 -> ControlCenterProgram.Action.REFRESH;
+            // Letter fallbacks remain available when a modpack binds or intercepts function keys.
+            case GLFW.GLFW_KEY_N -> !hmi && plainKey ? ControlCenterProgram.Action.RENAME : null;
+            case GLFW.GLFW_KEY_R -> plainKey ? ControlCenterProgram.Action.REFRESH : null;
+            case GLFW.GLFW_KEY_A -> hmi && plainKey ? ControlCenterProgram.Action.ADD : null;
+            case GLFW.GLFW_KEY_E -> hmi && plainKey ? ControlCenterProgram.Action.EDIT : null;
+            case GLFW.GLFW_KEY_DELETE, GLFW.GLFW_KEY_BACKSPACE -> hmi && plainKey
+                    ? ControlCenterProgram.Action.DELETE : null;
+            default -> null;
+        };
+        if (action != null) ModNetwork.sendControlCenterAction(menu.containerId, action);
+        return true;
+    }
+
+    /** Converts a click in the rendered 40x16 surface back to its authoritative cell. */
+    private int[] surfaceCellAt(double mouseX, double mouseY) {
+        TerminalBuffer surface = menu.getComputer().terminalSurface();
+        if (surface == null) return null;
+        int areaLeft = outputLeft() + 4;
+        int areaTop = contentTop() + 4;
+        int areaRight = outputRight() - 4;
+        int areaBottom = footerTop() - 4;
+        int cellWidth = Math.max(1, (areaRight - areaLeft) / surface.width());
+        int cellHeight = Math.max(1, (areaBottom - areaTop) / surface.height());
+        int renderedWidth = cellWidth * surface.width();
+        int renderedHeight = cellHeight * surface.height();
+        if (mouseX < areaLeft || mouseX >= areaLeft + renderedWidth
+                || mouseY < areaTop || mouseY >= areaTop + renderedHeight) return null;
+        int column = Math.max(0, Math.min(surface.width() - 1,
+                (int) ((mouseX - areaLeft) / cellWidth)));
+        int row = Math.max(0, Math.min(surface.height() - 1,
+                (int) ((mouseY - areaTop) / cellHeight)));
+        return new int[]{column, row};
+    }
 
     private boolean editorKeyPressed(int keyCode, int modifiers) {
         boolean control = (modifiers & GLFW.GLFW_MOD_CONTROL) != 0;

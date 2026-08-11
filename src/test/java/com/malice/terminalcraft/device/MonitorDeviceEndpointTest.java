@@ -27,6 +27,7 @@ public final class MonitorDeviceEndpointTest {
 
         assertTrue(descriptor.capabilities().contains("computer_terminal"), "ComputerCraft terminal capability");
         assertTrue(hasMethod(descriptor, "term.blit"), "cell blit advertised");
+        assertTrue(hasMethod(descriptor, "term.frame"), "atomic color frame advertised");
         assertTrue(hasMethod(descriptor, "term.scroll"), "scroll advertised");
         assertTrue(hasMethod(descriptor, "term.delta"), "revisioned surface delta advertised");
         assertTrue(hasMethod(descriptor, "monitor.set_text_scale"), "monitor scale advertised");
@@ -89,6 +90,7 @@ public final class MonitorDeviceEndpointTest {
 
         assertReentrantSurfaceImport();
         assertSharedSurfaceRefreshPreservesCellColors();
+        assertAtomicFullColorFrame();
 
         System.out.println("Monitor device endpoint tests: OK");
     }
@@ -132,6 +134,37 @@ public final class MonitorDeviceEndpointTest {
                 "shared surface refresh preserves the foreground palette entry");
         assertEquals(0x2EC4B6, monitor.surface.paletteColor(3),
                 "shared surface refresh preserves the background palette entry");
+    }
+
+    private static void assertAtomicFullColorFrame() {
+        ReentrantMonitor monitor = new ReentrantMonitor();
+        UUID id = UUID.fromString("00000000-0000-0000-0000-000000000007");
+        DeviceRegistry registry = new DeviceRegistry();
+        registry.register(new MonitorDeviceEndpoint(id, "minecraft:overworld:7,64,8", monitor,
+                () -> true, () -> true));
+        DeviceAccess writable = registry.access(new DeviceCallContext(
+                UUID.fromString("00000000-0000-0000-0000-000000000098"), "hmi-renderer",
+                java.util.Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE)));
+        List<String> lines = List.of("ADVANCED HMI" + " ".repeat(28), "TEMP 72 C" + " ".repeat(31));
+        List<String> foreground = List.of("e".repeat(40), "5".repeat(40));
+        List<String> background = List.of("d".repeat(40), "f".repeat(40));
+        List<DeviceValue> palette = java.util.stream.IntStream.range(0, TerminalBuffer.PALETTE_SIZE)
+                .mapToObj(index -> DeviceValue.of(index * 0x010101)).toList();
+        DeviceResult frame = writable.call(id, "term.frame", List.of(
+                strings(lines), strings(foreground), strings(background), DeviceValue.list(palette)));
+        assertTrue(frame.isSuccess(), "atomic HMI frame succeeds");
+        assertEquals('A', monitor.surface.characterAt(0, 0), "frame writes characters");
+        assertEquals(14, monitor.surface.foregroundAt(0, 0), "frame writes foreground cells");
+        assertEquals(13, monitor.surface.backgroundAt(0, 0), "frame writes background cells");
+        assertEquals(5, monitor.surface.foregroundAt(0, 1), "second row retains independent color");
+        assertEquals(0x0A0A0A, monitor.surface.paletteColor(10), "frame writes all palette slots");
+        assertError(DeviceErrorCode.INVALID_ARGUMENT, writable.call(id, "term.frame", List.of(
+                strings(List.of("short")), strings(List.of("eeeee")), strings(List.of("fffff")),
+                DeviceValue.list(palette))), "frame width is authoritative");
+    }
+
+    private static DeviceValue strings(List<String> values) {
+        return DeviceValue.list(values.stream().map(DeviceValue::of).toList());
     }
 
     private static final class TestMonitor implements MonitorDevice {

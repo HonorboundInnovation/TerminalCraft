@@ -3,6 +3,475 @@
 All notable player-facing changes are recorded here. TerminalCraft build numbers increase with the
 final component of the version: `1.0.17` is build 17, `1.0.18` is build 18, and so on.
 
+## 1.0.63 — 2026-08-10
+
+### Solid cable colors and restored unshielded Red Alloy
+
+- Replaced the patterned Shielded Red Alloy and colored Network Cable world textures with opaque
+  neutral tint bases, making every placed cable render as its assigned dye color without the old
+  dot/ring artifacts.
+- Replaced both item textures with clean solid-color cable silhouettes that use the same dye tint.
+- Restored the tag-free Unshielded Red Alloy Wire to creative tabs alongside all sixteen shielded
+  colors and gave it a distinct name, tooltip, placement preview, wrench diagnostic, and drop.
+- Made the existing Red Alloy recipe produce twelve unshielded wires; dyeing one produces the
+  selected shielded color. The existing Network Cable recipe produces eight cables and dyeing one
+  selects its color/default channel.
+- Persisted insulation independently from color. Existing 1.0.49–1.0.62 colored wires remain
+  shielded, while original pre-insulation saves migrate as unshielded conductors.
+- Unshielded Red Alloy joins ordinary Red Alloy circuits but cannot select or leak into a Bundled
+  Red Alloy channel; only a colored shielded breakout has channel identity.
+- Added the craftable compact Red Alloy Capacitor. Any nonzero input on any face is restored to
+  strength 15 only on the directly opposing face; all six directions operate as independent
+  straight-through paths, with wrench diagnostics showing the currently active paths.
+- Changed ordinary Red Alloy Wire, Network Cable, Bundled Red Alloy Cable, and Bundled Network Cable
+  selection shapes to face-oriented half blocks: slab halves on floors/ceilings and wall halves on
+  vertical faces. Multipart installations union the occupied face halves while rendering stays thin.
+
+## 1.0.62 — 2026-08-10
+
+### Independent 16-channel computer I/O
+
+- Extended `redstone`/`rs` with explicit Bundled Red Alloy channel input, output, set, and 16-row
+  status forms while retaining the existing vanilla six-side forms.
+- Extended `wire`/`bundled` with documented external-input reads, `all` channel views, and a full
+  color-labeled input/output/effective-bus table.
+- Separated external bundled input from local computer-owned output so a host does not read its own
+  output back as input.
+- Applied the same adjacent bundled-channel contract to terminals, server racks, PLCs, and turtles;
+  PLC `BUNDLED` input bindings now consume the external-input value.
+- Enforced strict Bundled Red Alloy separation through color-selected breakouts and removed the
+  ambiguous direct-vanilla channel-zero bridge.
+- Made Bundled Network routes retain a fixed 0–15 physical lane so a packet cannot leave through a
+  differently colored breakout even when the remote modem manually listens on that packet channel.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.62.jar`
+- Size: `2,681,325` bytes
+- SHA-256: `85debd58cc72fd11ed14eaeac8074434868e7f01d1f20ad2494af760b470c06c`
+
+## 1.0.61 — 2026-08-10
+
+### Restored single-cable RedPower routing
+
+- Removed the active 4×4 matrix/grid model from ordinary Shielded Red Alloy Wire and Network Cable.
+- Restored one centered cable per occupied face for both families, with automatic straight, corner,
+  junction, multipart-face, bundled-trunk, and endpoint connections.
+- Replaced the 16-point placement overlay with one centered face marker and made a second ordinary
+  cable on the same face fail cleanly.
+- Made old 1.0.58-1.0.60 row/matrix saves collapse deterministically to one retained cable per face;
+  the first stored color is retained and Red Alloy keeps the strongest saved signal.
+- Updated wrench diagnostics, tooltips, previews, and the complete in-game Guide Book.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.61.jar`
+- Size: `2,672,297` bytes
+- SHA-256: `455bb2d4abb614479749e5b8d877003525dc8d29cb58ba962fa17fc339b15a21`
+
+## 1.0.60 — 2026-08-10
+
+### Continuous lattice lanes
+
+- Made individually placed Shielded Red Alloy and Network Cable points render continuous links to
+  adjacent same-color points instead of remaining isolated node squares.
+- Made neighboring blocks connect dynamically by lane: horizontal travel preserves the lattice row,
+  while vertical travel preserves the lattice column.
+- Added boundary-reaching visual arms for cross-block links, bundled breakouts, redstone endpoints,
+  modems, and other wired devices, with exact floor, wall, and ceiling geometry.
+- Applied the same connection rules to electrical propagation, vanilla-redstone input/output,
+  bundled Red Alloy channels, RedNet topology, bundled Network Cable, and device channel discovery.
+- Updated wrench diagnostics and the complete in-game Guide Book to describe dynamic lane assembly.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.60.jar`
+- Size: `2,676,620` bytes
+- SHA-256: `f9a528762933dc6d81a6edf4261ba2f1848de8a328e92cfdcde39996f29b7325`
+
+## 1.0.59 — 2026-08-10
+
+### Individually placed 4×4 cable points
+
+- Changed both Shielded Red Alloy Wire and Network Cable so one item places exactly the one
+  lattice point under the crosshair instead of automatically filling a four-point row.
+- Expanded persistent face occupancy from four routed runs to 16 independent points, with exact
+  point targeting, selection, removal, drops, rendering, preview colors, and wrench diagnostics.
+- Made matching-color horizontal, vertical, and diagonal neighbor points connect, and mapped edge
+  points to their exact opposite-edge point in the adjacent block.
+- Preserved 1.0.58 worlds by expanding every saved four-point row or turn into its equivalent set of
+  individually stored points when the block entity loads.
+- Updated bundled-network breakouts so only a colored edge point physically touching the trunk is
+  exposed, and revised the complete in-game Guide Book instructions.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.59.jar`
+- Size: `2,675,122` bytes
+- SHA-256: `342ae3efdfc97f1fb2571d3025746af3f726fa41e04d2762e594f3a482e9861e`
+
+## 1.0.58 — 2026-08-10
+
+### Four-by-four surface-routing lattice
+
+- Replaced the temporary centered-node interpretation with the confirmed four-by-four face lattice
+  for both Shielded Red Alloy Wire and Network Cable.
+- Made each straight lane four points long; four parallel lanes now form four rows or columns totaling
+  all 16 points on the block face.
+- Rasterized neighbor-initiated perpendicular turns between lane edge points, producing a four-point
+  outer corner-to-corner diagonal and progressively shorter inner turns.
+- Made added multipart runs inherit the existing face bank and resolve the stored mounting face when
+  a player clicks the incidental side of thin geometry, preventing false unsupported-face errors and
+  unintended bank rotation.
+- Kept configured port masks, electrical/data topology, colors, channels, and existing save data intact.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.58.jar`
+- Size: `2,674,734` bytes
+- SHA-256: `25a287079a5f7d1d890415613ee86060c9353b75d8ead4fdfa68d9f4a72f9944`
+
+## 1.0.57 — 2026-08-10
+
+### RedPower-style connected cable geometry
+
+- Replaced full-length lane placement outlines with four compact, direction-aware lane points for
+  both Shielded Red Alloy Wire and Network Cable.
+- Separated configured route intent from visible geometry: isolated runs remain compact points and
+  arms reach block edges only for reciprocal cables, bundled trunks, devices, modems, or adjacent
+  redstone/block connections.
+- Made removal of a physical neighbor retract its arm without destroying the editable route mask,
+  preserving automatic continuation, single-block elbows, and saved 1.0.56 routing data.
+- Kept world rendering, targeting/selection geometry, wrench editing, and placement previews aligned
+  to the same compact-node model.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.57.jar`
+- Size: `2,733,504` bytes
+- SHA-256: `41cb19a55199e2297a5de1fccc26c42acc69223b7a68bb40fd0e3a80777e0702`
+
+## 1.0.56 — 2026-08-10
+
+### Player-relative directional cable routing
+
+- Added a persistent six-port route mask to every individual Shielded Red Alloy Wire and Network
+  Cable lane. Each lane now controls its own front/back/left/right or wall up/down connections.
+- Made initial straight runs rotate with the player's view projected into the mounted face. Extending
+  a matching cable prefers its reciprocal incoming lane, while looking toward a perpendicular exit
+  creates a 90-degree turn entirely within the newly placed block.
+- Added exact route geometry shared by placement previews, textured world rendering, ray targeting,
+  and selection shapes. Straight banks rotate, elbows bend, junctions branch, and endpoints remain on
+  their actual block edges.
+- Restricted redstone propagation, RedNet topology, bundled-cable breakouts, device attachments, and
+  face transitions to reciprocal configured ports; crossings on different lanes remain isolated.
+- Added sneak-wrench port toggling and expanded wrench diagnostics with route directions and shape.
+- Added legacy migration: 1.0.55 and older runs load with all four valid in-plane ports, retaining
+  existing colors, lanes, channels, power, and permissive historical connectivity.
+- Updated tooltips and the complete in-game Guide Book construction instructions for both families.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.56.jar`
+- Size: `2,732,184` bytes
+- SHA-256: `7bb80dac8e360b01ee3183682305965e45118c89bdc384d0156547bab82a090d`
+
+## 1.0.55 — 2026-08-10
+
+### True four-lane surface cabling
+
+- Replaced the misleading two-by-two face-quadrant layout with four long, side-by-side lane bands
+  for both Shielded Red Alloy Wire and Network Cable.
+- Updated placement hit selection, world previews, rendered run offsets, selection/collision shapes,
+  tooltips, tests, and the in-game Guide Book to use the same four-band geometry.
+- Preserved saved lane IDs `0..3`; existing cable occupancy, colors, channels, signals, and network
+  topology remain intact while their visible positions move into the corrected parallel layout.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.55.jar`
+- Size: `2,716,071` bytes
+- SHA-256: `c8fc72d4c5222d77315f297f1bc61c7ca461c2d3e4b5178c2eb7d0c4de42af7d`
+
+## 1.0.54 — 2026-08-10
+
+### Optional SecurityCraft integration
+
+- Added an absence-safe native adapter verified against the official SecurityCraft 1.20.1 branch
+  and `[1.20.1] SecurityCraft v1.10.2.1.jar`.
+- Added automatic Device API discovery for every adjacent official `IOwnable` block entity, generic
+  `ICustomizable` option support, generic `IModuleInventory` inspection/toggling, and secret-safe
+  status for reinforced and technical block families.
+- Added specialized telemetry and controls for alarms, detectors/loggers, inventory scanners,
+  lasers, keypad/keycard readers, cameras, Secure Redstone Interfaces, Sonic Security Systems,
+  projectors, rift/trophy systems, track mines, sentries, and nearby Security Sea Boats.
+- Added native Machine Sensor metrics and ten compile-checked SecurityCraft PLC templates for
+  perimeter alarms, access windows, checkpoints, panic lockdown, airlocks, rift/trophy defense,
+  secure-redstone backhaul, and redundant voting.
+- Preserved SecurityCraft authority: detailed reads and every native write require the online
+  authenticated owning player. Passcodes, hashes, salts, list contents, keycard item data, owner
+  UUIDs, ownership changes, and module item creation/removal are never exposed.
+- Kept SecurityCraft compile-only and optional. Minimal TerminalCraft installations do not load any
+  SecurityCraft API class.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.54.jar`
+- Size: `2,716,401` bytes
+- SHA-256: `d03de382b358fb9e28cb8fbcb56e2c079225f38e25d23de08216a91e9dca70d2`
+
+## 1.0.53 — 2026-08-10
+
+### Optional Create and Mekanism automation
+
+- Added absence-safe native device projections for Create 6.0.8 kinetic blocks, Stressometers,
+  Threshold Switches, Redstone Links, and configured Sequenced Gearshifts.
+- Added native Kinetic/Machine sensor telemetry for Create speed, direction, stress, capacity,
+  network, thresholds, signals, sequencer state, and overstress.
+- Added absence-safe Mekanism 10.4.16 machine status, progress, exact Joule-container, heat,
+  redstone-mode, supported-substance, and security telemetry.
+- Added authenticated Create controls and Mekanism redstone-mode control. Mekanism non-public targets
+  fail closed; TerminalCraft does not impersonate owners or trusted users.
+- Added a provider-neutral dynamic chemical storage contract. Live tank resource IDs—including
+  add-on namespaces—flow into `chemical.tanks`, exact `chemical.count`, and Chemical Sensors without
+  a static resource allowlist.
+- Added eight compile-checked Mekanism PLC templates and exposed them in the shell, Control Center,
+  and generated in-game Guide Book library.
+- Kept Create, embedded Ponder API, and Mekanism compile-only; none is bundled or mandatory at runtime.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.53.jar`
+- Size: `2,670,936` bytes
+- SHA-256: `f2c785a1819c379380cbc2b833fc28b2041e3d74cfae4828ad380368de7b0d78`
+
+## 1.0.52 — 2026-08-10
+
+### Advanced HMI
+
+- Added persistent named advanced-HMI dashboards with up to eight pages and 32 ordered widgets per
+  page on a resolution-independent 12 by 12 layout grid.
+- Added full-color text, live value, gauge, historian trend, active-alarm panel, operator button, and
+  page-link widgets. Layouts scale across connected monitor walls up to 320 by 32 character cells.
+- Added physical monitor touch operation. Page links navigate immediately and control buttons run as
+  the touching player through SCADA roles, Device API permission checks, PLC ownership, and audit.
+- Added the top-level `hmi` graphical terminal program with live automatic repaint, dashboard/page
+  navigation, mouse selection, keyboard activation, and an engineer-only F2 layout designer.
+- Added designer move, resize, add, edit, and double-confirmed delete controls, plus persistent
+  full-screen program state and focused `help hmi` instructions.
+- Added the complete `scada hmi` shell family for dashboards, pages, and widgets; Device API
+  `hmi.list`, `hmi.page.select`, and `hmi.widget.activate`; tab completion through the existing shell
+  registry; and comprehensive searchable Guide Book examples.
+- Added an atomic `term.frame` monitor method that transfers text, per-cell foreground/background
+  colors, and a 16-color palette in one bounded operation, batching wall synchronization per tile.
+- Added headless acceptance coverage for layout authorization/persistence, live values, gauges,
+  trends, alarms, touch hit-testing, full-color frames, and invalid bindings.
+
+### Compatibility
+
+- Existing 1.0.51 tags, history, alarms, roles, audits, and legacy monitor dashboards remain valid.
+  Advanced HMI data is additive in the same bounded SCADA world record.
+- Minecraft: 1.20.1; Forge: 47.4.10; required on client and server.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.52.jar`
+- Size: `2,614,100` bytes
+- SHA-256: `3f56dda044e8a70e0594d8f691a697fbe5e722dfe6ef71432fbf49f3d0f4b691`
+
+## 1.0.51 — 2026-08-10
+
+### SCADA supervisory control
+
+- Added a persistent server-global SCADA process database with up to 256 hierarchical tags bound to
+  typed Device API methods. Bindings support scalar arguments, nested value paths, engineering
+  units, per-tag scan/stale intervals, and optional authorized write methods.
+- Added quality-aware live values with good, stale, offline, access-denied, bad-response, and
+  configuration-error states. The last known value is retained but never presented as usable after
+  quality degrades.
+- Added a bounded persistent historian with per-tag and global retention, timestamped value/quality
+  points, shell queries, Device API queries, and monitor trend-ready data.
+- Added above, below, equal, not-equal, and bad-quality alarms with severity, deadband, active,
+  acknowledged, shelved, and normal lifecycle states. Shelf timeouts use logical server time.
+- Added viewer, operator, engineer, and administrator plant roles. First-use initialization safely
+  establishes one administrator, the final administrator cannot be removed, and SCADA never
+  bypasses underlying device permissions or PLC ownership.
+- Added a persistent bounded audit trail for configuration, role changes, control acceptance or
+  rejection, value/quality transitions, and alarm lifecycle events.
+- Added automatically refreshed monitor-wall HMI dashboards filtered by tag prefix, with live values,
+  engineering units, quality, active-alarm count, and alarm markers.
+- Registered a virtual TerminalCraft SCADA device in discovery and the graphical Control Center. It
+  exposes status, tags, live reads, history, alarms, acknowledgment, authorized control, and
+  `tag_changed`/`alarm_changed` events.
+- Added an adjacent Server Rack + modem typed RedNet gateway for bounded read-only SCADA status,
+  tag, history, and alarm queries. Network packets cannot initialize, configure, acknowledge, grant
+  roles, or control equipment.
+- Added the complete `scada` terminal command family, `help scada`, `modem scada`, tab completion,
+  field-manual chapter, examples, runtime limits, and headless acceptance/protocol coverage.
+- Added explicit no-value command tags (`@method`, `scada command`, and Device API `tag.command`) so
+  PLC run/stop/reset operations remain distinct from writable setpoint tags.
+
+### Compatibility
+
+- SCADA data uses new server-global `terminalcraft_scada` SavedData and does not alter existing PLC,
+  sensor, RedNet, terminal, cable, or storage save formats.
+- Minecraft: 1.20.1; Forge: 47.4.10; required on client and server.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.51.jar`
+- Size: `2,558,409` bytes
+- SHA-256: `9e11e3adc0970784138073e31cb96d99ed4e524acc25d19ad38894f7a4365dd4`
+
+## 1.0.50 — 2026-08-10
+
+### Cable usability and field guidance
+
+- Added a live world-space placement preview for both surface cable families. Four face-quadrant
+  outlines show the chosen lane, free lanes, occupied lanes, and automatic next-free-lane fallback.
+- Added a crosshair readout before placement with the actual lane, mounting face, insulation color,
+  Red Alloy bundle channel, or Network default channel. Bundled items identify their 0–15 transport.
+- Replaced single dense wrench messages with structured multi-line diagnostics covering target face,
+  lane, color/channel, signal level, links, trunk connection, topology neighbors, face occupancy,
+  active bundled channels, and signal sources.
+- Gave Bundled Red Alloy Cable a warm red multiconductor jacket and Bundled Network Cable a separate
+  navy/cyan packet-marked model and texture family, including the inventory model.
+- Extended the in-game Markdown reader with allowlisted, bounded guide-image rows and added two
+  searchable field-manual plates illustrating four-lane placement and the separate bundle families.
+- Added headless contracts for preview quadrants, one-based diagnostic lane labels, localization,
+  distinct model/texture routing, guide image dimensions, resources, and searchable image alt text.
+
+### Compatibility
+
+- Cable registry IDs, saved run data, color/channel mapping, recipes, and electrical/network behavior
+  are unchanged from 1.0.49. The usability pass is safe for existing 1.0.49 development worlds.
+- Minecraft: 1.20.1; Forge: 47.4.10; required on client and server.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.50.jar`
+- Size: `2,463,268` bytes
+- SHA-256: `0f6aff974cab31ed29a5e9e734205fb8f356d2423511e84a70a45c1bae9160f4`
+
+## 1.0.49 — 2026-08-10
+
+### Colored surface wiring and channel trunks
+
+- Added all 16 dye colors for Shielded Red Alloy Wire and Network Cable. Minecraft dye IDs map
+  deterministically to channels 0 through 15: white is 0, cyan is 9, red is 14, and black is 15.
+- Added four independently persisted and targetable lanes to every supported block face. Placement
+  uses the clicked face quadrant and falls forward to the next free lane when necessary.
+- Shielded Red Alloy runs now preserve color/lane electrical isolation, attenuate independently,
+  retain colored drops, migrate legacy faces safely, and expose color/lane/power wrench diagnostics.
+- Colored Network Cable now advertises its default data/control channel, automatically provisions
+  that channel on an attached wired modem, and supplies it as the omitted-channel shell default.
+- Reclassified the existing `bundled_cable` world ID as the **Bundled Red Alloy Cable**, preserving
+  existing worlds and its sixteen independent redstone channels.
+- Added a separate **Bundled Network Cable** for sixteen-channel RedNet data/control trunks. Colored
+  Network Cable can enter and leave the trunk without crossing into the redstone system.
+- Added bidirectional color-matched Shielded Red Alloy breakouts on Bundled Red Alloy Cable without
+  feedback latching; the bundle derives breakout input from native redstone sources.
+- Added a special cable+dye survival recipe, creative inventory variants, color-aware item names and
+  tooltips, bundled-network recipe/model/loot resources, and searchable guide coverage.
+- Added headless color/channel, quadrant/lane, survival-resource, and dual-bundle contract checks.
+
+### Compatibility
+
+- Existing Red Alloy Wire faces migrate as red runs; existing Network Cable faces migrate as cyan
+  runs. Registry IDs for those blocks and for the original bundled redstone cable are unchanged.
+- Minecraft: 1.20.1; Forge: 47.4.10; Java: 21; required on client and server.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.49.jar`
+- Size: `1,654,203` bytes
+- SHA-256: `7c3538e1fff61f81eb99209bc4980416d57a7097aae93398443a1bdc6e393106`
+
+## 1.0.48 — 2026-08-10
+
+### In-game TerminalCraft Guide
+
+- Added a craftable `TerminalCraft Guide` item that opens a dedicated offline field-manual screen.
+- Added a searchable chapter index, mouse selection, wheel and Page Up/Page Down scrolling,
+  Left/Right chapter navigation, Ctrl+F search focus, previous/next buttons, and a non-pausing reader.
+- Bundled the complete canonical TerminalCraft Guide and Advanced Script Cookbook directly from the
+  source documentation during the build, avoiding a shorter duplicate that could drift out of date.
+- Generated two additional PLC example chapters directly from every compile-tested general and
+  Create template, keeping the in-book sample source identical to `plc template show` and the
+  graphical Control Center library.
+- Expanded the PLC language manual with scan order, bounds, names, every digital and analog binding,
+  Boolean precedence, rungs, timers, edge counters, reset-dominant latches, MOVE, SCALE, PID tuning,
+  fail-safe behavior, commissioning commands, and complete controller examples.
+- Added the guide to the TerminalCraft and standard utility creative tabs, a crafting recipe, item
+  model, localized tooltips, and bounded headless parser/resource/search coverage.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.48.jar`
+- Size: `1,620,791` bytes
+- SHA-256: `4eb832d36575d7e30b679053b2a7aa2c9482de0839682218a7ec08fac19c9f06`
+
+## 1.0.47 — 2026-08-10
+
+### Control Center interaction fixes
+
+- Fixed F2 DNS naming and every other Control Center action failing to update the open terminal
+  promptly on placed computers. Each authenticated action now sends its authoritative shell state
+  directly back to the player instead of relying on block-update timing.
+- Made `Enter` on Overview open the selected device's Methods pane; pressing it again runs the
+  selected method. Method argument and DNS prompts now become usable immediately after activation.
+- Added `N` (DNS naming) and `R` (refresh) fallbacks for modpacks that reserve `F2` or `F5`.
+- Added `help control`, `help setup`, and `control --help`, with a complete readable list of commands,
+  navigation keys, aliases, and text-entry behavior. General `help` retains the Control Center entry
+  and now points to the focused reference at the end of its output.
+- Expanded headless interaction coverage across all advertised Control Center actions and help
+  entry points.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.47.jar`
+- Size: `1,560,309` bytes
+- SHA-256: `ee2835037c0dbe03dabc0d3ffa5a82cbaa2d10ff487922112b77c3f4ad3eceac`
+
+## 1.0.46 — 2026-08-10
+
+### Visual fixes
+
+- Fixed neighboring block faces disappearing around the PLC cabinet. The inset PLC model no longer
+  claims full-cube occlusion, so placing it beside any block preserves that block's visible face.
+- Fixed colored Control Center cells remaining on the shared terminal surface after exiting.
+- The Control Center now temporarily owns surface mode and restores the terminal's previous log or
+  surface view when it closes.
+- Added focused regression coverage for the PLC occlusion contract and complete shell color reset.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.46.jar`
+- Size: `1,559,383` bytes
+- SHA-256: `bcbb45192b3f7e6597a6c6e898478d26023c1305b5c82566132b6c29657df6b5`
+
+## 1.0.45 — 2026-08-10
+
+### Device Control Center
+
+- Added the full-screen `control` program (`devmgr` and `setup` aliases) for discovering and
+  configuring devices without manually typing UUID-heavy Device API calls.
+- Added mouse and keyboard navigation across live device overview, advertised methods, and PLC
+  template tabs.
+- Added an `F2` workflow for durable human-friendly device DNS aliases and `F5` live refresh.
+- Added schema-driven method argument prompts that retain the existing server-authenticated read and
+  write permission boundaries.
+- Added remote loading of all general and Create PLC templates through the selected PLC's
+  owner-authorized `program.set` endpoint.
+- Added synchronized Control Center session state, a bounded action packet, and headless interaction
+  coverage.
+
+### Verification
+
+- Artifact: `terminalcraft-1.20.1-47.4.10-1.0.45.jar`
+- Size: `1,559,159` bytes
+- SHA-256: `6ef7c9736aba73d449322ee98d97dcc7223b9e284c7992fe57017b7f722971fc`
+
 ## 1.0.38 — 2026-08-08
 
 ### World-load hardening

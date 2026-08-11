@@ -1,9 +1,11 @@
 package com.malice.terminalcraft.network;
 
 import com.malice.terminalcraft.block.WiredNetworkNode;
+import com.malice.terminalcraft.block.BundledNetworkCableBlock;
 import com.malice.terminalcraft.block.NetworkCableBlock;
 import com.malice.terminalcraft.block.ModemBlock;
 import com.malice.terminalcraft.blockentity.ModemBlockEntity;
+import com.malice.terminalcraft.blockentity.NetworkCableBlockEntity;
 import com.malice.terminalcraft.blockentity.NetworkRouterBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -109,7 +111,7 @@ public final class WiredNetworkTopology {
     /** Bounded cache diagnostics for tests and administrator tooling. */
     public record CacheDiagnostics(long revision, long computations, long hits, int entries) {}
 
-    private record RouteKey(BlockPos source, BlockPos destination) {
+    private record RouteKey(BlockPos source, BlockPos destination, int physicalChannel) {
         private RouteKey { source = source.immutable(); destination = destination.immutable(); }
     }
 
@@ -153,7 +155,7 @@ public final class WiredNetworkTopology {
 
     /** Immutable loaded-world snapshot used by route computation without any world reads. */
     private record IndexedNode(IndexedKind kind, Set<BlockPos> neighbors, String modemNetwork,
-                               Map<Direction, IndexedRouterFace> routerFaces) {
+                               Map<Direction, IndexedRouterFace> routerFaces, int physicalChannelMask) {
         private IndexedNode {
             neighbors = neighbors.stream().map(BlockPos::immutable).collect(
                     java.util.stream.Collectors.toUnmodifiableSet());
@@ -423,23 +425,34 @@ public final class WiredNetworkTopology {
      * group of router nodes costs one hop; ordinary cable/backplane traversal costs zero hops.
      */
     public static Route route(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
+        return route(level, firstModem, secondModem, -1);
+    }
+
+    /**
+     * Finds a route on one isolated Bundled Network lane. Channels outside 0..15 use the legacy
+     * unfiltered physical topology because they are RedNet application ports, not bundle lanes.
+     */
+    public static Route route(ServerLevel level, BlockPos firstModem, BlockPos secondModem,
+                              int physicalChannel) {
         if (level == null || firstModem == null || secondModem == null || firstModem.equals(secondModem)) {
             return Route.unreachable(0, false);
         }
-        RouteKey key = new RouteKey(firstModem, secondModem);
+        int lane = physicalChannel >= 0 && physicalChannel < 16 ? physicalChannel : -1;
+        RouteKey key = new RouteKey(firstModem, secondModem, lane);
         Route cached = cache(level).get(key);
         if (cached != null) return cached;
-        return cache(level).put(key, computeRoute(level, firstModem, secondModem));
+        return cache(level).put(key, computeRoute(level, firstModem, secondModem, lane));
     }
 
-    private static Route computeRoute(ServerLevel level, BlockPos firstModem, BlockPos secondModem) {
+    private static Route computeRoute(ServerLevel level, BlockPos firstModem, BlockPos secondModem,
+                                      int physicalChannel) {
         LoadedTopologyIndex topology = index(level);
         Map<BlockPos, IndexedNode> nodes = topology.snapshot();
         if (topology.truncated()) return Route.unreachable(0, true);
         if (!isIndexedWiredModem(nodes, firstModem) || !isIndexedWiredModem(nodes, secondModem)) {
             return Route.unreachable(0, false);
         }
-        IndexedLogicalPolicy policy = new IndexedLogicalPolicy(nodes);
+        IndexedLogicalPolicy policy = new IndexedLogicalPolicy(nodes, physicalChannel);
         Set<BlockPos> targets = indexedAdjacentNetworkNodes(nodes, secondModem).stream()
                 .filter(node -> policy.allowsNode(node) && policy.allowsModemAttachment(secondModem, node))
                 .collect(java.util.stream.Collectors.toSet());
@@ -525,12 +538,17 @@ public final class WiredNetworkTopology {
     /** Per-route logical policy over indexed segment data; never reads world state. */
     private static final class IndexedLogicalPolicy {
         private final Map<BlockPos, IndexedNode> nodes;
+        private final int physicalChannel;
         private final Map<BlockPos, SegmentPolicy> byNode = new HashMap<>();
 
-        private IndexedLogicalPolicy(Map<BlockPos, IndexedNode> nodes) { this.nodes = nodes; }
+        private IndexedLogicalPolicy(Map<BlockPos, IndexedNode> nodes, int physicalChannel) {
+            this.nodes = nodes;
+            this.physicalChannel = physicalChannel;
+        }
 
         boolean allowsNode(BlockPos pos) {
-            return !isIndexedSegmentNode(nodes, pos) || segment(pos).valid();
+            return supportsPhysicalChannel(nodes, pos, physicalChannel)
+                    && (!isIndexedSegmentNode(nodes, pos) || segment(pos).valid());
         }
 
         boolean anyTruncated() { return byNode.values().stream().anyMatch(SegmentPolicy::truncated); }
@@ -560,7 +578,7 @@ public final class WiredNetworkTopology {
                 if (currentNode == null) continue;
                 for (BlockPos adjacent : currentNode.neighbors()) {
                     IndexedNode neighbor = nodes.get(adjacent);
-                    if (neighbor == null) continue;
+                    if (neighbor == null || !supportsPhysicalChannel(nodes, adjacent, physicalChannel)) continue;
                     if (neighbor.kind() == IndexedKind.SEGMENT) {
                         if (!visited.contains(adjacent)) pending.addLast(adjacent);
                     } else if (neighbor.kind() == IndexedKind.MODEM) {
@@ -823,7 +841,7 @@ public final class WiredNetworkTopology {
         if (!level.hasChunkAt(pos)) return null;
         if (isWiredModem(level, pos)) {
             return new IndexedNode(IndexedKind.MODEM, physicalNeighbors(level, pos),
-                    modemNetwork(level, pos), Map.of());
+                    modemNetwork(level, pos), Map.of(), 0xffff);
         }
         if (!isForwardingNode(level, pos)) return null;
         IndexedKind kind = isRoutingNode(level, pos) ? IndexedKind.ROUTER : IndexedKind.SEGMENT;
@@ -840,7 +858,25 @@ public final class WiredNetworkTopology {
                 }
             }
         }
-        return new IndexedNode(kind, physicalNeighbors(level, pos), "", faces);
+        return new IndexedNode(kind, physicalNeighbors(level, pos), "", faces,
+                physicalChannelMask(level, pos, kind));
+    }
+
+    private static int physicalChannelMask(ServerLevel level, BlockPos pos, IndexedKind kind) {
+        if (kind != IndexedKind.SEGMENT) return 0xffff;
+        if (level.getBlockState(pos).getBlock() instanceof BundledNetworkCableBlock) return 0xffff;
+        if (level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable) {
+            int mask = 0;
+            for (NetworkCableBlockEntity.Run run : cable.runs()) mask |= 1 << run.channel();
+            return mask;
+        }
+        return 0xffff;
+    }
+
+    private static boolean supportsPhysicalChannel(Map<BlockPos, IndexedNode> nodes, BlockPos pos, int channel) {
+        if (channel < 0) return true;
+        IndexedNode node = nodes.get(pos);
+        return node != null && (node.physicalChannelMask() & 1 << channel) != 0;
     }
 
     private static boolean isIndexedWiredModem(Map<BlockPos, IndexedNode> nodes, BlockPos pos) {

@@ -27,12 +27,40 @@ public final class BashShellSurfaceTest {
         legacyRestored.load(legacy);
         require(containsLine(legacyRestored.terminalSurface(), "surface-ready"),
                 "legacy shell snapshots reconstruct the visible surface");
+
+        BashShell controlShell = new BashShell();
+        controlShell.executeForResult("control");
+        require(controlShell.isControlCenterActive() && hasColoredCell(controlShell.terminalSurface()),
+                "Control Center owns a colored full-screen surface");
+        controlShell.handleControlCenterAction(ControlCenterProgram.Action.CLOSE, -1, -1, "",
+                com.malice.terminalcraft.device.DeviceCallContext.readOnly("surface-test"));
+        require(!controlShell.isControlCenterActive(), "Control Center closes back to the shell");
+        require(hasOnlyShellColors(controlShell.terminalSurface()),
+                "closing a full-screen program resets all foreground and background artifacts");
         System.out.println("Bash shell surface tests: OK");
     }
 
     private static boolean containsLine(TerminalBuffer surface, String expected) {
         for (String line : surface.lines()) if (line.contains(expected)) return true;
         return false;
+    }
+
+    private static boolean hasColoredCell(TerminalBuffer surface) {
+        for (int y = 0; y < surface.height(); y++) {
+            for (int x = 0; x < surface.width(); x++) {
+                if (surface.foregroundAt(x, y) != 0 || surface.backgroundAt(x, y) != 15) return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasOnlyShellColors(TerminalBuffer surface) {
+        for (int y = 0; y < surface.height(); y++) {
+            for (int x = 0; x < surface.width(); x++) {
+                if (surface.foregroundAt(x, y) != 0 || surface.backgroundAt(x, y) != 15) return false;
+            }
+        }
+        return true;
     }
 
     private static void require(boolean value, String message) {

@@ -7,6 +7,7 @@ import com.malice.terminalcraft.network.RednetDeliveryRuntime;
 import com.malice.terminalcraft.network.RednetNetworkName;
 import com.malice.terminalcraft.network.MonitorRemoteRequest;
 import com.malice.terminalcraft.network.SensorRemoteRequest;
+import com.malice.terminalcraft.network.ScadaRemoteRequest;
 import com.malice.terminalcraft.network.RednetAutoConfiguration;
 import com.malice.terminalcraft.network.RednetLease;
 import com.malice.terminalcraft.registry.ModRegistries;
@@ -42,6 +43,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
 
     private UUID modemId = UUID.randomUUID();
     private final Set<Integer> openChannels = new HashSet<>();
+    private final Set<Integer> cableDefaultChannels = new HashSet<>();
     private boolean wireless = true;
     private int range = DEFAULT_RANGE;
     private String label = "modem";
@@ -51,6 +53,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
     private final Map<String, Integer> services = new TreeMap<>();
     private final Map<String, Integer> monitorServices = new TreeMap<>();
     private final Map<String, Integer> sensorServices = new TreeMap<>();
+    private final Map<String, Integer> scadaServices = new TreeMap<>();
 
     public ModemBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.MODEM_BLOCK_ENTITY.get(), pos, state);
@@ -121,6 +124,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         }
         automaticSetup = enabled;
         if (!enabled) {
+            cableDefaultChannels.clear();
             if (level != null && !level.isClientSide) {
                 if (hostname.isBlank()) RednetNetwork.unregisterHost(level, modemId);
                 RednetNetwork.releaseLease(level, modemId);
@@ -197,6 +201,24 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
     public List<String> visibleHosts(int maximum) {
         return level == null ? List.of() : RednetNetwork.reachableHosts(
                 level, modemId, worldPosition, wireless, range, maximum);
+    }
+
+    /** Lists the bounded DNS-style hostname records currently registered in this dimension. */
+    public List<String> dnsDiagnostics(int maximum) {
+        if (level == null || level.isClientSide) return List.of();
+        return RednetNetwork.addresses(level, maximum).stream()
+                .map(address -> address.hostname() + " -> " + address.encoded())
+                .toList();
+    }
+
+    /** Resolves a hostname, raw UUID, or identity-preserving rednet address for shell diagnostics. */
+    public String resolveDiagnostics(String selector) {
+        if (level == null || level.isClientSide) return "";
+        return RednetNetwork.resolveAddress(level, selector)
+                .map(address -> "name=" + address.displayName()
+                        + " id=" + address.deviceId()
+                        + " address=" + address.encoded())
+                .orElse("");
     }
 
     /** Lists bounded, deterministic diagnostics for every reachable named neighbor. */
@@ -318,11 +340,12 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         String canonical = com.malice.terminalcraft.network.RednetHostName.normalize(requestedName).orElse("");
         if (level == null || level.isClientSide || !openChannels.contains(boundedPort)
                 || canonical.isEmpty() || (!services.containsKey(canonical) && !monitorServices.containsKey(canonical)
-                && !sensorServices.containsKey(canonical)
-                && services.size() + monitorServices.size() + sensorServices.size() >= 32)
+                && !sensorServices.containsKey(canonical) && !scadaServices.containsKey(canonical)
+                && serviceCount() >= 32)
                 || !RednetNetwork.registerService(level, modemId, canonical, boundedPort)) return false;
         monitorServices.remove(canonical);
         sensorServices.remove(canonical);
+        scadaServices.remove(canonical);
         services.put(canonical, boundedPort);
         setChanged();
         return true;
@@ -335,6 +358,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         services.remove(canonical);
         monitorServices.remove(canonical);
         sensorServices.remove(canonical);
+        scadaServices.remove(canonical);
         setChanged();
         return true;
     }
@@ -349,11 +373,12 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
                 || !openChannels.contains(checkedPort) || NetworkMonitorService.resolveTarget(this) == null) return false;
         String canonical = com.malice.terminalcraft.network.RednetHostName.normalize(requestedName).orElse("");
         if (canonical.isEmpty() || (!services.containsKey(canonical) && !monitorServices.containsKey(canonical)
-                && !sensorServices.containsKey(canonical)
-                && services.size() + monitorServices.size() + sensorServices.size() >= 32) || !RednetNetwork.registerService(
+                && !sensorServices.containsKey(canonical) && !scadaServices.containsKey(canonical)
+                && serviceCount() >= 32) || !RednetNetwork.registerService(
                 level, modemId, canonical, checkedPort, MonitorRemoteRequest.PROTOCOL)) return false;
         services.remove(canonical);
         sensorServices.remove(canonical);
+        scadaServices.remove(canonical);
         monitorServices.put(canonical, checkedPort);
         setChanged();
         return true;
@@ -389,11 +414,12 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
                 || !openChannels.contains(checkedPort) || NetworkSensorService.resolveTarget(this) == null) return false;
         String canonical = com.malice.terminalcraft.network.RednetHostName.normalize(requestedName).orElse("");
         if (canonical.isEmpty() || (!services.containsKey(canonical) && !monitorServices.containsKey(canonical)
-                && !sensorServices.containsKey(canonical) && services.size() + monitorServices.size()
-                + sensorServices.size() >= 32) || !RednetNetwork.registerService(
+                && !sensorServices.containsKey(canonical) && !scadaServices.containsKey(canonical)
+                && serviceCount() >= 32) || !RednetNetwork.registerService(
                 level, modemId, canonical, checkedPort, SensorRemoteRequest.PROTOCOL)) return false;
         services.remove(canonical);
         monitorServices.remove(canonical);
+        scadaServices.remove(canonical);
         sensorServices.put(canonical, checkedPort);
         setChanged();
         return true;
@@ -430,6 +456,53 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         }
         return RednetNetwork.transmitService(level, modemId, worldPosition, serviceName,
                 clamp(replyPort), request.encode(), wireless, range, SensorRemoteRequest.PROTOCOL);
+    }
+
+    /** Exposes the global process database through one unambiguous adjacent server rack. */
+    public boolean registerScadaService(String requestedName, int port) {
+        if (level == null || level.isClientSide || port < 0 || port > 65535
+                || !openChannels.contains(port) || NetworkScadaService.resolveTarget(this) == null) return false;
+        String canonical = com.malice.terminalcraft.network.RednetHostName.normalize(requestedName).orElse("");
+        if (canonical.isEmpty() || (!services.containsKey(canonical) && !monitorServices.containsKey(canonical)
+                && !sensorServices.containsKey(canonical) && !scadaServices.containsKey(canonical)
+                && serviceCount() >= 32) || !RednetNetwork.registerService(
+                level, modemId, canonical, port, ScadaRemoteRequest.PROTOCOL)) return false;
+        services.remove(canonical);
+        monitorServices.remove(canonical);
+        sensorServices.remove(canonical);
+        scadaServices.put(canonical, port);
+        setChanged();
+        return true;
+    }
+
+    public boolean unregisterScadaService(String requestedName) {
+        if (level == null || level.isClientSide) return false;
+        String canonical = com.malice.terminalcraft.network.RednetHostName.normalize(requestedName).orElse("");
+        if (canonical.isEmpty() || !scadaServices.containsKey(canonical)
+                || !RednetNetwork.unregisterService(level, modemId, canonical)) return false;
+        scadaServices.remove(canonical);
+        setChanged();
+        return true;
+    }
+
+    public List<String> scadaServices() {
+        return scadaServices.entrySet().stream().map(entry -> entry.getKey() + " " + entry.getValue()).toList();
+    }
+
+    boolean hasScadaServiceOnPort(int port) { return scadaServices.containsValue(port); }
+
+    public boolean transmitScadaService(String serviceName, String operation, String selector,
+                                        int limit, int replyPort) {
+        if (level == null || level.isClientSide || openChannels.isEmpty()) return false;
+        ScadaRemoteRequest request;
+        try {
+            request = new ScadaRemoteRequest(ScadaRemoteRequest.Operation.valueOf(
+                    operation.trim().toUpperCase(java.util.Locale.ROOT)), selector, limit);
+        } catch (RuntimeException invalid) {
+            return false;
+        }
+        return RednetNetwork.transmitService(level, modemId, worldPosition, serviceName, clamp(replyPort),
+                request.encode(), wireless, range, ScadaRemoteRequest.PROTOCOL);
     }
 
     public List<String> visibleServices(int maximum) {
@@ -505,6 +578,12 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
                 RednetNetwork.unregisterService(level, modemId, service);
                 sensorServices.remove(service);
             }
+            List<String> closedScadaServices = scadaServices.entrySet().stream()
+                    .filter(entry -> entry.getValue() == closedChannel).map(Map.Entry::getKey).toList();
+            for (String service : closedScadaServices) {
+                RednetNetwork.unregisterService(level, modemId, service);
+                scadaServices.remove(service);
+            }
         }
         if (removed) setChanged();
         return removed;
@@ -519,20 +598,31 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
             RednetNetwork.unregisterServices(level, modemId);
         }
         openChannels.clear();
+        cableDefaultChannels.clear();
         services.clear();
         monitorServices.clear();
         sensorServices.clear();
+        scadaServices.clear();
         setChanged();
     }
 
     /** Applies the small automatic profile used by newly placed modems and legacy empty modems. */
     private void ensureAutomaticSetup() {
         if (!automaticSetup || level == null || level.isClientSide) return;
-        if (!openChannels.contains(RednetAutoConfiguration.DEFAULT_CHANNEL)) {
-            openChannel(RednetAutoConfiguration.DEFAULT_CHANNEL);
-        }
+        Set<Integer> desired = wireless ? Set.of(RednetAutoConfiguration.DEFAULT_CHANNEL)
+                : com.malice.terminalcraft.block.NetworkCableBlock.attachedChannels(level, worldPosition);
+        if (desired.isEmpty()) desired = Set.of(RednetAutoConfiguration.DEFAULT_CHANNEL);
+        cableDefaultChannels.clear();
+        cableDefaultChannels.addAll(desired);
+        for (int channel : desired) if (!openChannels.contains(channel)) openChannel(channel);
         if (hostname.isBlank()) RednetNetwork.ensureAutomaticHost(level, modemId);
         RednetNetwork.ensureLease(level, modemId, worldPosition, wireless, networkName);
+    }
+
+    /** Channel selected when a shell command omits one; colored cable IDs map directly to 0..15. */
+    public int defaultChannel() {
+        return cableDefaultChannels.stream().min(Integer::compareTo)
+                .orElse(RednetAutoConfiguration.DEFAULT_CHANNEL);
     }
 
     /** Bounded player-facing provisioning and protocol status. */
@@ -657,6 +747,12 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
                         SensorRemoteRequest.PROTOCOL);
             }
         }
+        for (Map.Entry<String, Integer> service : scadaServices.entrySet()) {
+            if (openChannels.contains(service.getValue())) {
+                RednetNetwork.registerService(level, modemId, service.getKey(), service.getValue(),
+                        ScadaRemoteRequest.PROTOCOL);
+            }
+        }
         RednetNetwork.updatePosition(level, modemId, worldPosition);
         RednetNetwork.ensureLease(level, modemId, worldPosition, wireless, networkName);
     }
@@ -667,6 +763,7 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         RednetNetwork.tickDeliveries(level);
         NetworkMonitorService.tick(be);
         NetworkSensorService.tick(be);
+        NetworkScadaService.tick(be);
         if (level.getGameTime() % 40 == 0) {
             RednetNetwork.updatePosition(level, be.modemId, pos);
             RednetNetwork.ensureLease(level, be.modemId, pos, be.wireless, be.networkName);
@@ -681,6 +778,10 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
             return 65535;
         }
         return channel;
+    }
+
+    private int serviceCount() {
+        return services.size() + monitorServices.size() + sensorServices.size() + scadaServices.size();
     }
 
     @Override
@@ -742,6 +843,14 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
             savedSensorServices.add(entry);
         }
         tag.put("SensorServices", savedSensorServices);
+        ListTag savedScadaServices = new ListTag();
+        for (Map.Entry<String, Integer> service : scadaServices.entrySet()) {
+            CompoundTag entry = new CompoundTag();
+            entry.putString("Name", service.getKey());
+            entry.putInt("Port", service.getValue());
+            savedScadaServices.add(entry);
+        }
+        tag.put("ScadaServices", savedScadaServices);
         int[] arr = openChannels.stream().mapToInt(Integer::intValue).toArray();
         tag.put("Channels", new IntArrayTag(arr));
     }
@@ -801,6 +910,19 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
                 String name = com.malice.terminalcraft.network.RednetHostName.normalize(rawName).orElse("");
                 if (!name.isEmpty() && entry.contains("Port", Tag.TAG_INT)) {
                     sensorServices.put(name, clamp(entry.getInt("Port")));
+                }
+            }
+        }
+        scadaServices.clear();
+        if (tag.contains("ScadaServices", Tag.TAG_LIST)) {
+            ListTag savedScadaServices = tag.getList("ScadaServices", Tag.TAG_COMPOUND);
+            for (int i = 0; i < savedScadaServices.size() && serviceCount() < 32; i++) {
+                CompoundTag entry = savedScadaServices.getCompound(i);
+                String rawName = PersistedDataLimits.readString(entry, "Name", 128, "");
+                String name = com.malice.terminalcraft.network.RednetHostName.normalize(rawName).orElse("");
+                if (!name.isEmpty() && !services.containsKey(name) && !monitorServices.containsKey(name)
+                        && !sensorServices.containsKey(name) && entry.contains("Port", Tag.TAG_INT)) {
+                    scadaServices.put(name, clamp(entry.getInt("Port")));
                 }
             }
         }

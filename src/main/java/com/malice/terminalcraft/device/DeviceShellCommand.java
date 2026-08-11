@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Function;
 
 /** Pure command parser/formatter for the read-only unified device shell surface. */
 public final class DeviceShellCommand {
@@ -14,17 +15,23 @@ public final class DeviceShellCommand {
     private DeviceShellCommand() {}
 
     public static Outcome execute(DeviceAccess access, List<String> arguments) {
+        return execute(access, arguments, DeviceShellCommand::parseUuid);
+    }
+
+    /** Executes with an optional UUID selector resolver, such as the world DNS directory. */
+    public static Outcome execute(DeviceAccess access, List<String> arguments,
+                                  Function<String, UUID> selectorResolver) {
         if (access == null) return failure("device: server device registry unavailable");
         List<String> args = arguments == null ? List.of() : List.copyOf(arguments);
         if (args.isEmpty() || "list".equals(args.get(0))) return list(access, args);
         return switch (args.get(0)) {
             case "events" -> DeviceEventShellCommand.execute(access, args);
-            case "info" -> info(access, args);
-            case "call" -> call(access, args);
-            case "transfer" -> transfer(access, args);
-            case "fluid-transfer" -> fluidTransfer(access, args);
-            case "escrow" -> escrow(access, args);
-            case "fluid-escrow" -> fluidEscrow(access, args);
+            case "info" -> info(access, args, selectorResolver);
+            case "call" -> call(access, args, selectorResolver);
+            case "transfer" -> transfer(access, args, selectorResolver);
+            case "fluid-transfer" -> fluidTransfer(access, args, selectorResolver);
+            case "escrow" -> escrow(access, args, selectorResolver);
+            case "fluid-escrow" -> fluidEscrow(access, args, selectorResolver);
             default -> usage();
         };
     }
@@ -68,18 +75,20 @@ public final class DeviceShellCommand {
         return new Outcome(0, lines);
     }
 
-    private static Outcome info(DeviceAccess access, List<String> args) {
+    private static Outcome info(DeviceAccess access, List<String> args,
+                                Function<String, UUID> selectorResolver) {
         if (args.size() != 2) return usage();
-        UUID id = parseUuid(args.get(1));
+        UUID id = resolveUuid(args.get(1), selectorResolver);
         if (id == null) return failure("device: invalid UUID: " + args.get(1));
         return access.descriptor(id)
                 .map(DeviceShellCommand::describe)
                 .orElseGet(() -> failure("device: device not found: " + id));
     }
 
-    private static Outcome call(DeviceAccess access, List<String> args) {
+    private static Outcome call(DeviceAccess access, List<String> args,
+                                Function<String, UUID> selectorResolver) {
         if (args.size() < 3) return usage();
-        UUID id = parseUuid(args.get(1));
+        UUID id = resolveUuid(args.get(1), selectorResolver);
         if (id == null) return failure("device: invalid UUID: " + args.get(1));
 
         DeviceDescriptor descriptor = access.descriptor(id).orElse(null);
@@ -109,17 +118,18 @@ public final class DeviceShellCommand {
         return outcome(access.call(id, methodName, values));
     }
 
-    private static Outcome transfer(DeviceAccess access, List<String> args) {
+    private static Outcome transfer(DeviceAccess access, List<String> args,
+                                    Function<String, UUID> selectorResolver) {
         if (args.size() != 6) return usage();
         if (!(access instanceof ExactItemTransferAccess transfers)) {
             return failure("device: unsupported: exact item transfer is unavailable");
         }
 
-        UUID operationId = parseUuid(args.get(1));
+        UUID operationId = resolveUuid(args.get(1), selectorResolver);
         if (operationId == null) return failure("device: invalid operation UUID: " + args.get(1));
-        UUID sourceId = parseUuid(args.get(2));
+        UUID sourceId = resolveUuid(args.get(2), selectorResolver);
         if (sourceId == null) return failure("device: invalid source UUID: " + args.get(2));
-        UUID destinationId = parseUuid(args.get(3));
+        UUID destinationId = resolveUuid(args.get(3), selectorResolver);
         if (destinationId == null) return failure("device: invalid destination UUID: " + args.get(3));
 
         int count;
@@ -134,17 +144,18 @@ public final class DeviceShellCommand {
         return outcome(result);
     }
 
-    private static Outcome fluidTransfer(DeviceAccess access, List<String> args) {
+    private static Outcome fluidTransfer(DeviceAccess access, List<String> args,
+                                         Function<String, UUID> selectorResolver) {
         if (args.size() != 6) return usage();
         if (!(access instanceof ExactFluidTransferAccess transfers)) {
             return failure("device: unsupported: exact fluid transfer is unavailable");
         }
 
-        UUID operationId = parseUuid(args.get(1));
+        UUID operationId = resolveUuid(args.get(1), selectorResolver);
         if (operationId == null) return failure("device: invalid operation UUID: " + args.get(1));
-        UUID sourceId = parseUuid(args.get(2));
+        UUID sourceId = resolveUuid(args.get(2), selectorResolver);
         if (sourceId == null) return failure("device: invalid source UUID: " + args.get(2));
-        UUID destinationId = parseUuid(args.get(3));
+        UUID destinationId = resolveUuid(args.get(3), selectorResolver);
         if (destinationId == null) return failure("device: invalid destination UUID: " + args.get(3));
 
         int amountMb;
@@ -157,7 +168,8 @@ public final class DeviceShellCommand {
                 args.get(4), amountMb));
     }
 
-    private static Outcome fluidEscrow(DeviceAccess access, List<String> args) {
+    private static Outcome fluidEscrow(DeviceAccess access, List<String> args,
+                                       Function<String, UUID> selectorResolver) {
         if (!(access instanceof ExactFluidEscrowAccess escrow)) {
             return failure("device: unsupported: fluid escrow administration is unavailable");
         }
@@ -165,16 +177,17 @@ public final class DeviceShellCommand {
             return outcome(escrow.listFluidEscrow(LIST_LIMIT));
         }
         if (args.size() == 4 && "recover".equals(args.get(1))) {
-            UUID escrowId = parseUuid(args.get(2));
+            UUID escrowId = resolveUuid(args.get(2), selectorResolver);
             if (escrowId == null) return failure("device: invalid escrow UUID: " + args.get(2));
-            UUID destinationId = parseUuid(args.get(3));
+            UUID destinationId = resolveUuid(args.get(3), selectorResolver);
             if (destinationId == null) return failure("device: invalid destination UUID: " + args.get(3));
             return outcome(escrow.recoverFluidEscrow(escrowId, destinationId));
         }
         return usage();
     }
 
-    private static Outcome escrow(DeviceAccess access, List<String> args) {
+    private static Outcome escrow(DeviceAccess access, List<String> args,
+                                  Function<String, UUID> selectorResolver) {
         if (!(access instanceof ExactItemEscrowAccess escrow)) {
             return failure("device: unsupported: item escrow administration is unavailable");
         }
@@ -182,9 +195,9 @@ public final class DeviceShellCommand {
             return outcome(escrow.listItemEscrow(LIST_LIMIT));
         }
         if (args.size() == 4 && "recover".equals(args.get(1))) {
-            UUID escrowId = parseUuid(args.get(2));
+            UUID escrowId = resolveUuid(args.get(2), selectorResolver);
             if (escrowId == null) return failure("device: invalid escrow UUID: " + args.get(2));
-            UUID destinationId = parseUuid(args.get(3));
+            UUID destinationId = resolveUuid(args.get(3), selectorResolver);
             if (destinationId == null) return failure("device: invalid destination UUID: " + args.get(3));
             return outcome(escrow.recoverItemEscrow(escrowId, destinationId));
         }
@@ -332,8 +345,18 @@ public final class DeviceShellCommand {
         }
     }
 
+    private static UUID resolveUuid(String value, Function<String, UUID> selectorResolver) {
+        if (selectorResolver == null) return parseUuid(value);
+        try {
+            UUID resolved = selectorResolver.apply(value);
+            return resolved == null ? null : resolved;
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
     private static Outcome usage() {
-        return failure("device: usage: device list | events [limit] | info <uuid> | call <uuid> <method> [args...] | transfer <operation-uuid> <source-uuid> <destination-uuid> <item-id> <count> | fluid-transfer <operation-uuid> <source-uuid> <destination-uuid> <fluid-id> <amount-mB> | escrow list|recover ... | fluid-escrow list|recover ...");
+        return failure("device: usage: device list | dns ... | events [limit] | info <name|uuid> | call <name|uuid> <method> [args...] | transfer <operation-uuid> <source-uuid> <destination-uuid> <item-id> <count> | fluid-transfer <operation-uuid> <source-uuid> <destination-uuid> <fluid-id> <amount-mB> | escrow list|recover ... | fluid-escrow list|recover ...");
     }
 
     private static Outcome success(String line) {

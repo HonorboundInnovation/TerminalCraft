@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.shell;
 
 import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.plc.PlcProgramTemplates;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -19,8 +20,12 @@ final class PlcShellCommandModule implements ShellCommandModule {
     @Override public void register(Registrar registrar) { registrar.register("plc", this::plc); }
 
     private void plc(Context context, List<String> arguments) {
+        String requested = arguments.isEmpty() ? "status" : arguments.get(0).toLowerCase(Locale.ROOT);
         if (!(context.worldHost() instanceof ProgrammableLogicControllerBlockEntity controller)) {
-            String requested = arguments.isEmpty() ? "status" : arguments.get(0).toLowerCase(Locale.ROOT);
+            if ("template".equals(requested) || "templates".equals(requested)) {
+                handleTemplate(context, null, arguments);
+                return;
+            }
             if ("remote".equals(requested)) {
                 handleRemote(context, arguments);
                 return;
@@ -28,8 +33,10 @@ final class PlcShellCommandModule implements ShellCommandModule {
             fail(context, "plc: this terminal is not attached to a programmable logic controller");
             return;
         }
-        String operation = arguments.isEmpty() ? "status" : arguments.get(0).toLowerCase(Locale.ROOT);
-        if (requiresControl(operation) && context.callerContext() != null
+        String operation = requested;
+        boolean templateLoad = "template".equals(operation) && arguments.size() > 1
+                && "load".equalsIgnoreCase(arguments.get(1));
+        if ((requiresControl(operation) || templateLoad) && context.callerContext() != null
                 && !controller.canControl(context.callerContext().principalId())) {
             fail(context, "plc: operator is not authorized to control this PLC");
             return;
@@ -44,8 +51,10 @@ final class PlcShellCommandModule implements ShellCommandModule {
                 context.printLine("plc alarm|acknowledge | plc page <0|1|2|3|next|previous>");
                 context.printLine("plc slot save|load|clear <0-3>");
                 context.printLine("plc remote open <x> <y> <z>");
+                context.printLine("plc template categories | list [category] | show|load <name>");
                 context.setExitCode(0);
             }
+            case "template", "templates" -> handleTemplate(context, controller, arguments);
             case "status" -> {
                 context.printLine(controller.statusLine()
                         + " page=" + controller.dashboardPage()
@@ -185,6 +194,65 @@ final class PlcShellCommandModule implements ShellCommandModule {
         }, buffer -> buffer.writeBlockPos(target));
         context.printLine("plc: remote programmer opened for " + target.toShortString());
         context.setExitCode(0);
+    }
+
+    private static void handleTemplate(Context context, ProgrammableLogicControllerBlockEntity controller,
+                                       List<String> arguments) {
+        String action = arguments.size() < 2 ? "list" : arguments.get(1).toLowerCase(Locale.ROOT);
+        if ("list".equals(action)) {
+            if (arguments.size() > 3) {
+                fail(context, "plc: usage: plc template list [category]");
+                return;
+            }
+            String category = arguments.size() == 3 ? arguments.get(2).toLowerCase(Locale.ROOT) : "";
+            List<PlcProgramTemplates.Template> templates = PlcProgramTemplates.byCategory(category);
+            if (!category.isEmpty() && templates.isEmpty()) {
+                fail(context, "plc: unknown template category '" + category
+                        + "' (try plc template categories)");
+                return;
+            }
+            context.printLine(category.isEmpty() ? "PLC program templates:"
+                    : "PLC program templates [" + category + "]:");
+            for (PlcProgramTemplates.Template template : templates) {
+                context.printLine("  " + template.id() + " — " + template.title());
+                context.printLine("      " + template.description());
+            }
+            context.setExitCode(0);
+            return;
+        }
+        if ("categories".equals(action) && arguments.size() == 2) {
+            context.printLine("PLC template categories:");
+            for (String category : PlcProgramTemplates.categories()) {
+                context.printLine("  " + category + " (" + PlcProgramTemplates.byCategory(category).size() + ")");
+            }
+            context.setExitCode(0);
+            return;
+        }
+        if (("show".equals(action) || "load".equals(action)) && arguments.size() == 3) {
+            PlcProgramTemplates.Template template = PlcProgramTemplates.find(arguments.get(2)).orElse(null);
+            if (template == null) {
+                fail(context, "plc: unknown template '" + arguments.get(2) + "' (try plc template list)");
+                return;
+            }
+            if ("show".equals(action)) {
+                context.printLine("# " + template.title() + " — " + template.description());
+                for (String line : template.source().split("\\n", -1)) context.printLine(line);
+                context.setExitCode(0);
+                return;
+            }
+            if (controller == null) {
+                fail(context, "plc: template load requires an attached PLC; use plc remote open <x> <y> <z> first");
+                return;
+            }
+            if (!controller.loadProgram(template.source())) {
+                fail(context, "plc: template failed to compile: " + controller.compileError());
+                return;
+            }
+            context.printLine("plc: template loaded: " + template.id());
+            context.setExitCode(0);
+            return;
+        }
+        fail(context, "plc: usage: plc template categories | list [category] | show <name> | load <name>");
     }
 
     private static String decodeEscapes(String value) {

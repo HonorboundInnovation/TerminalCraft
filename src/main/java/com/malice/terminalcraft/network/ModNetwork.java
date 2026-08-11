@@ -9,6 +9,7 @@ import com.malice.terminalcraft.menu.PlcProgrammingMenu;
 import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
 import com.malice.terminalcraft.plc.PlcProgram;
 import com.malice.terminalcraft.shell.BashShell;
+import com.malice.terminalcraft.shell.ControlCenterProgram;
 import com.malice.terminalcraft.shell.PocketShellComputer;
 import com.malice.terminalcraft.shell.ShellComputer;
 import net.minecraft.nbt.CompoundTag;
@@ -31,7 +32,7 @@ import java.util.function.Supplier;
  * Networking for terminal command submission and shell state sync.
  */
 public final class ModNetwork {
-    private static final String PROTOCOL = "4";
+    private static final String PROTOCOL = "5";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(TerminalCraftMod.MODID, "main"),
             () -> PROTOCOL,
@@ -46,6 +47,7 @@ public final class ModNetwork {
     static final int DISPLAY_CONFIG_PACKET_ID = 4;
     static final int PLC_ACTION_PACKET_ID = 5;
     static final int PLC_RESULT_PACKET_ID = 6;
+    static final int CONTROL_CENTER_ACTION_PACKET_ID = 7;
 
     private static final int MAX_COMMAND_PACKET_LENGTH = 4096;
     private static final CommandSubmissionGuard COMMAND_GUARD = new CommandSubmissionGuard();
@@ -111,6 +113,14 @@ public final class ModNetwork {
                 PlcResultPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_CLIENT)
         );
+        CHANNEL.registerMessage(
+                CONTROL_CENTER_ACTION_PACKET_ID,
+                ControlCenterActionPacket.class,
+                ControlCenterActionPacket::encode,
+                ControlCenterActionPacket::decode,
+                ControlCenterActionPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         registered = true;
     }
 
@@ -126,6 +136,16 @@ public final class ModNetwork {
 
     public static void sendEditorClose(int containerId) {
         CHANNEL.sendToServer(new EditorActionPacket(containerId, EditorAction.CLOSE, ""));
+    }
+
+    public static void sendControlCenterAction(int containerId, ControlCenterProgram.Action action) {
+        sendControlCenterAction(containerId, action, -1, -1, "");
+    }
+
+    public static void sendControlCenterAction(int containerId, ControlCenterProgram.Action action,
+                                               int row, int column, String text) {
+        CHANNEL.sendToServer(new ControlCenterActionPacket(containerId, action, row, column,
+                text == null ? "" : text));
     }
 
     public static void sendDisplayConfig(int containerId, net.minecraft.core.BlockPos position,
@@ -147,6 +167,71 @@ public final class ModNetwork {
 
     private static void sendPlcAction(int containerId, PlcAction action, String source, int slot) {
         CHANNEL.sendToServer(new PlcActionPacket(containerId, action, source, slot));
+    }
+
+    /** Bounded navigation or text entry for the server-owned device Control Center session. */
+    public static final class ControlCenterActionPacket {
+        private static final int MAX_TEXT_LENGTH = 4096;
+        private final int containerId;
+        private final ControlCenterProgram.Action action;
+        private final int row;
+        private final int column;
+        private final String text;
+
+        private ControlCenterActionPacket(int containerId, ControlCenterProgram.Action action,
+                                          int row, int column, String text) {
+            this.containerId = containerId;
+            this.action = action == null ? ControlCenterProgram.Action.REFRESH : action;
+            this.row = row;
+            this.column = column;
+            this.text = text == null ? "" : text;
+        }
+
+        public static void encode(ControlCenterActionPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.containerId);
+            buffer.writeEnum(packet.action);
+            buffer.writeVarInt(packet.row);
+            buffer.writeVarInt(packet.column);
+            buffer.writeUtf(packet.text, MAX_TEXT_LENGTH);
+        }
+
+        public static ControlCenterActionPacket decode(FriendlyByteBuf buffer) {
+            return new ControlCenterActionPacket(buffer.readVarInt(),
+                    buffer.readEnum(ControlCenterProgram.Action.class),
+                    buffer.readVarInt(), buffer.readVarInt(), buffer.readUtf(MAX_TEXT_LENGTH));
+        }
+
+        public static void handle(ControlCenterActionPacket packet,
+                                  Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof TerminalMenu menu)
+                        || menu.containerId != packet.containerId || !menu.stillValid(player)) return;
+                BashShell shell = menu.getShell();
+                if (!shell.isControlCenterActive()) return;
+                if (packet.action == ControlCenterProgram.Action.CLICK
+                        && (packet.row < 0 || packet.row >= 16
+                        || packet.column < 0 || packet.column >= 40)) return;
+                CommandSubmissionGuard.Decision decision = COMMAND_GUARD.evaluate(
+                        player, player.level().getGameTime(), packet.text, true,
+                        MAX_TEXT_LENGTH, Config.maxCommandsPerSecond);
+                if (decision != CommandSubmissionGuard.Decision.ACCEPT) return;
+
+                DeviceCallContext deviceContext = DeviceCallContext.player(
+                        player.getUUID(), player.getGameProfile().getName(),
+                        Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+                shell.handleControlCenterAction(packet.action, packet.row, packet.column,
+                        packet.text, deviceContext);
+                ShellComputer computer = menu.getComputer();
+                computer.markShellChanged();
+                // Control Center input mode lives inside the shell snapshot. Push every action
+                // directly to the player who owns this menu so F2/text-entry/Enter transitions do
+                // not depend on placed block-entity update timing (or modpack render/update load).
+                syncShellTo(player, shell);
+            });
+            context.setPacketHandled(true);
+        }
     }
 
     /** Server-side channel edit from the display diagnostics screen. */
@@ -360,8 +445,10 @@ public final class ModNetwork {
                         Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
                 menu.submitCommand(pkt.command, deviceContext);
                 ShellComputer computer = menu.getComputer();
-                if (computer instanceof PocketShellComputer) {
+                if (computer instanceof PocketShellComputer
+                        || computer.getShell().isControlCenterActive()) {
                     // Pocket state lives on the item stack; push shell NBT to client GUI.
+                    // A newly-opened Control Center also needs an immediate authoritative snapshot.
                     syncShellTo(player, computer.getShell());
                 } else if (computer.getLevel() != null) {
                     computer.getLevel().sendBlockUpdated(

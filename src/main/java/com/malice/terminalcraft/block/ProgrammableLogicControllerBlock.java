@@ -37,6 +37,9 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
                 .mapColor(MapColor.COLOR_GRAY)
                 .strength(3.0f, 6.0f)
                 .requiresCorrectToolForDrops()
+                // The cabinet body is inset from the block boundary. Prevent Minecraft from
+                // culling an adjacent block's face into the visible space around that model.
+                .noOcclusion()
                 .isRedstoneConductor((state, level, pos) -> false));
         registerDefaultState(stateDefinition.any().setValue(FACING, Direction.NORTH));
     }

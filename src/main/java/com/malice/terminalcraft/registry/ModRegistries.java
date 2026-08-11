@@ -3,11 +3,13 @@ package com.malice.terminalcraft.registry;
 import com.malice.terminalcraft.TerminalCraftMod;
 import com.malice.terminalcraft.block.DiskDriveBlock;
 import com.malice.terminalcraft.block.BundledCableBlock;
+import com.malice.terminalcraft.block.BundledNetworkCableBlock;
 import com.malice.terminalcraft.block.ModemBlock;
 import com.malice.terminalcraft.block.MonitorBlock;
 import com.malice.terminalcraft.block.NetworkCableBlock;
 import com.malice.terminalcraft.block.NetworkRouterBlock;
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
+import com.malice.terminalcraft.block.RedAlloyCapacitorBlock;
 import com.malice.terminalcraft.block.RefinedStorageBridgeBlock;
 import com.malice.terminalcraft.block.AppliedEnergisticsBridgeBlock;
 import com.malice.terminalcraft.block.TerminalBlock;
@@ -43,7 +45,9 @@ import com.malice.terminalcraft.sensor.SensorKind;
 import com.malice.terminalcraft.item.SolidStateDriveItem;
 import com.malice.terminalcraft.item.SolidStateDriveTier;
 import com.malice.terminalcraft.item.FloppyDiskItem;
+import com.malice.terminalcraft.item.GuideBookItem;
 import com.malice.terminalcraft.item.BundledCableItem;
+import com.malice.terminalcraft.item.BundledNetworkCableItem;
 import com.malice.terminalcraft.item.PocketTerminalItem;
 import com.malice.terminalcraft.item.NetworkCableItem;
 import com.malice.terminalcraft.item.RackModuleItem;
@@ -52,12 +56,15 @@ import com.malice.terminalcraft.server.RackModuleType;
 import com.malice.terminalcraft.menu.TerminalMenu;
 import com.malice.terminalcraft.menu.DisplayDiagnosticsMenu;
 import com.malice.terminalcraft.menu.PlcProgrammingMenu;
+import com.malice.terminalcraft.recipe.CableDyeRecipe;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTab;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.crafting.RecipeSerializer;
+import net.minecraft.world.item.crafting.SimpleCraftingRecipeSerializer;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraftforge.common.extensions.IForgeMenuType;
@@ -80,6 +87,11 @@ public final class ModRegistries {
             DeferredRegister.create(ForgeRegistries.MENU_TYPES, TerminalCraftMod.MODID);
     public static final DeferredRegister<CreativeModeTab> CREATIVE_TABS =
             DeferredRegister.create(Registries.CREATIVE_MODE_TAB, TerminalCraftMod.MODID);
+    public static final DeferredRegister<RecipeSerializer<?>> RECIPE_SERIALIZERS =
+            DeferredRegister.create(ForgeRegistries.RECIPE_SERIALIZERS, TerminalCraftMod.MODID);
+
+    public static final RegistryObject<RecipeSerializer<CableDyeRecipe>> CABLE_DYE_RECIPE =
+            RECIPE_SERIALIZERS.register("cable_dyeing", () -> new SimpleCraftingRecipeSerializer<>(CableDyeRecipe::new));
 
     // Blocks
     public static final RegistryObject<Block> TERMINAL_BLOCK = BLOCKS.register("terminal", TerminalBlock::new);
@@ -88,8 +100,12 @@ public final class ModRegistries {
     public static final RegistryObject<Block> MODEM_BLOCK = BLOCKS.register("modem", ModemBlock::new);
     public static final RegistryObject<Block> DISK_DRIVE_BLOCK = BLOCKS.register("disk_drive", DiskDriveBlock::new);
     public static final RegistryObject<Block> BUNDLED_CABLE_BLOCK = BLOCKS.register("bundled_cable", BundledCableBlock::new);
+    public static final RegistryObject<Block> BUNDLED_NETWORK_CABLE_BLOCK = BLOCKS.register(
+            "bundled_network_cable", BundledNetworkCableBlock::new);
     public static final RegistryObject<Block> NETWORK_CABLE_BLOCK = BLOCKS.register("network_cable", NetworkCableBlock::new);
     public static final RegistryObject<Block> RED_ALLOY_WIRE_BLOCK = BLOCKS.register("red_alloy_wire", RedAlloyWireBlock::new);
+    public static final RegistryObject<Block> RED_ALLOY_CAPACITOR_BLOCK = BLOCKS.register(
+            "red_alloy_capacitor", RedAlloyCapacitorBlock::new);
     public static final RegistryObject<Block> NETWORK_ROUTER_BLOCK = BLOCKS.register("network_router", NetworkRouterBlock::new);
     public static final RegistryObject<Block> SERVER_RACK_BLOCK = BLOCKS.register("server_rack", ServerRackBlock::new);
     public static final RegistryObject<Block> REFINED_STORAGE_BRIDGE_BLOCK = BLOCKS.register(
@@ -141,10 +157,14 @@ public final class ModRegistries {
             () -> new BlockItem(DISK_DRIVE_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> BUNDLED_CABLE_ITEM = ITEMS.register("bundled_cable",
             () -> new BundledCableItem(BUNDLED_CABLE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> BUNDLED_NETWORK_CABLE_ITEM = ITEMS.register("bundled_network_cable",
+            () -> new BundledNetworkCableItem(BUNDLED_NETWORK_CABLE_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> NETWORK_CABLE_ITEM = ITEMS.register("network_cable",
             () -> new NetworkCableItem(NETWORK_CABLE_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> RED_ALLOY_WIRE_ITEM = ITEMS.register("red_alloy_wire",
             () -> new RedAlloyWireItem(RED_ALLOY_WIRE_BLOCK.get(), new Item.Properties()));
+    public static final RegistryObject<Item> RED_ALLOY_CAPACITOR_ITEM = ITEMS.register("red_alloy_capacitor",
+            () -> new BlockItem(RED_ALLOY_CAPACITOR_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> NETWORK_ROUTER_ITEM = ITEMS.register("network_router",
             () -> new BlockItem(NETWORK_ROUTER_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> SERVER_RACK_ITEM = ITEMS.register("server_rack",
@@ -191,6 +211,7 @@ public final class ModRegistries {
             () -> new RackModuleItem(RackModuleType.ROUTER));
     public static final RegistryObject<Item> FLOPPY_DISK = ITEMS.register("floppy_disk", FloppyDiskItem::new);
     public static final RegistryObject<Item> POCKET_TERMINAL = ITEMS.register("pocket_terminal", PocketTerminalItem::new);
+    public static final RegistryObject<Item> GUIDE_BOOK = ITEMS.register("guide_book", GuideBookItem::new);
 
     // Block entities
     public static final RegistryObject<BlockEntityType<RefinedStorageBridgeBlockEntity>> REFINED_STORAGE_BRIDGE_BLOCK_ENTITY =
@@ -203,7 +224,8 @@ public final class ModRegistries {
                             APPLIED_ENERGISTICS_BRIDGE_BLOCK.get()).build(null));
     public static final RegistryObject<BlockEntityType<NetworkCableBlockEntity>> NETWORK_CABLE_BLOCK_ENTITY =
             BLOCK_ENTITIES.register("network_cable",
-                    () -> BlockEntityType.Builder.of(NetworkCableBlockEntity::new, NETWORK_CABLE_BLOCK.get()).build(null));
+                    () -> BlockEntityType.Builder.of(NetworkCableBlockEntity::new,
+                            NETWORK_CABLE_BLOCK.get(), BUNDLED_NETWORK_CABLE_BLOCK.get()).build(null));
     public static final RegistryObject<BlockEntityType<RedAlloyWireBlockEntity>> RED_ALLOY_WIRE_BLOCK_ENTITY =
             BLOCK_ENTITIES.register("red_alloy_wire",
                     () -> BlockEntityType.Builder.of(RedAlloyWireBlockEntity::new, RED_ALLOY_WIRE_BLOCK.get()).build(null));
@@ -278,8 +300,15 @@ public final class ModRegistries {
                         output.accept(MODEM_ITEM.get());
                         output.accept(DISK_DRIVE_ITEM.get());
                         output.accept(BUNDLED_CABLE_ITEM.get());
-                        output.accept(NETWORK_CABLE_ITEM.get());
+                        output.accept(BUNDLED_NETWORK_CABLE_ITEM.get());
                         output.accept(RED_ALLOY_WIRE_ITEM.get());
+                        for (net.minecraft.world.item.DyeColor color : net.minecraft.world.item.DyeColor.values()) {
+                            output.accept(com.malice.terminalcraft.item.NetworkCableItem.colored(
+                                    NETWORK_CABLE_ITEM.get().getDefaultInstance(), color));
+                            output.accept(com.malice.terminalcraft.item.RedAlloyWireItem.colored(
+                                    RED_ALLOY_WIRE_ITEM.get().getDefaultInstance(), color));
+                        }
+                        output.accept(RED_ALLOY_CAPACITOR_ITEM.get());
                         output.accept(NETWORK_ROUTER_ITEM.get());
                         output.accept(SERVER_RACK_ITEM.get());
                         output.accept(REFINED_STORAGE_BRIDGE_ITEM.get());
@@ -308,6 +337,7 @@ public final class ModRegistries {
                         output.accept(ROUTER_BLADE.get());
                         output.accept(FLOPPY_DISK.get());
                         output.accept(POCKET_TERMINAL.get());
+                        output.accept(GUIDE_BOOK.get());
                     })
                     .build());
 
@@ -323,5 +353,6 @@ public final class ModRegistries {
         BLOCK_ENTITIES.register(modBus);
         MENUS.register(modBus);
         CREATIVE_TABS.register(modBus);
+        RECIPE_SERIALIZERS.register(modBus);
     }
 }

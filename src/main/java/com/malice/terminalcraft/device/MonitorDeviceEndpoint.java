@@ -28,6 +28,12 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
                     number("since_revision", "Last acknowledged surface revision"),
                     number("max_cells", "Maximum number of cells to return"),
                     optionalNumber("offset", "Cell-page offset from the current delta")), DeviceValueType.MAP);
+    private static final DeviceMethodDescriptor TERM_FRAME = write("term.frame",
+            "Atomically applies bounded full-color rows to a monitor wall", List.of(
+                    list("lines", "Full-width character rows"),
+                    list("text_colors", "Full-width hexadecimal foreground rows"),
+                    list("background_colors", "Full-width hexadecimal background rows"),
+                    list("palette", "Sixteen 24-bit RGB palette entries")));
 
     private static final List<DeviceMethodDescriptor> TERM_METHODS = List.of(
             read("term.get_size", "Returns width and height", List.of(), DeviceValueType.MAP),
@@ -48,6 +54,7 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
             read("term.is_color", "Returns whether this is a color terminal", List.of(), DeviceValueType.BOOLEAN),
             read("term.get_palette_color", "Returns a palette entry as RGB and channels", List.of(COLOR), DeviceValueType.MAP),
             write("term.set_palette_color", "Sets a palette entry from 24-bit RGB", List.of(COLOR, number("rgb", "24-bit RGB"))),
+            TERM_FRAME,
             TERM_DELTA,
             read("monitor.get_text_scale", "Returns monitor text scale", List.of(), DeviceValueType.NUMBER),
             write("monitor.set_text_scale", "Sets monitor text scale from 0.5 to 5", List.of(number("scale", "Half-step scale")))
@@ -157,6 +164,7 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
                 terminal.setPaletteColor(colorIndex(args, 0), integer(args, 1, 0, 0xFFFFFF, "rgb"));
                 syncActivePalette();
             }, false);
+            case "term.frame" -> applyFrame(args);
             case "term.delta" -> surfaceDelta(longValue(args, 0, "since_revision"),
                     integer(args, 1, 1, 128, "max_cells"),
                     args.size() > 2 ? integer(args, 2, 0, Integer.MAX_VALUE, "offset") : 0);
@@ -229,6 +237,26 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
                 Map.entry("palette", DeviceValue.list(colors)),
                 Map.entry("next_offset", DeviceValue.of(delta.nextOffset())),
                 Map.entry("total_cells", DeviceValue.of(delta.totalCells())))));
+    }
+
+    private DeviceResult applyFrame(List<DeviceValue> args) {
+        if (args.size() != 4) return failure("term.frame requires lines, text colors, background colors, and palette");
+        List<String> lines = stringList(args.get(0), maxLines, "lines");
+        List<String> foreground = stringList(args.get(1), maxLines, "text colors");
+        List<String> background = stringList(args.get(2), maxLines, "background colors");
+        List<Integer> palette = integerList(args.get(3), TerminalBuffer.PALETTE_SIZE, 0, 0xFFFFFF, "palette");
+        if (lines.size() != foreground.size() || lines.size() != background.size()) {
+            return failure("term.frame row lists must have equal lengths");
+        }
+        for (int row = 0; row < lines.size(); row++) {
+            if (lines.get(row).length() != maxLineLength || foreground.get(row).length() != maxLineLength
+                    || background.get(row).length() != maxLineLength) {
+                return failure("term.frame rows must match the monitor width " + maxLineLength);
+            }
+        }
+        monitor.renderFrame(lines, foreground, background, palette);
+        lastLines = safeLines(monitor.lines());
+        return DeviceResult.success();
     }
 
     private DeviceResult paletteColor(int index) {
@@ -327,8 +355,39 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
         return Integer.numberOfTrailingZeros(flag);
     }
 
+    private static List<String> stringList(DeviceValue value, int maximum, String name) {
+        if (!(value instanceof DeviceValue.ListValue list) || list.values().size() > maximum) {
+            throw new IllegalArgumentException(name + " list is outside bounds");
+        }
+        List<String> result = new ArrayList<>(list.values().size());
+        for (DeviceValue entry : list.values()) {
+            if (!(entry instanceof DeviceValue.StringValue text)) {
+                throw new IllegalArgumentException(name + " must contain strings");
+            }
+            result.add(text.value());
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<Integer> integerList(DeviceValue value, int exactSize,
+                                             int minimum, int maximum, String name) {
+        if (!(value instanceof DeviceValue.ListValue list) || list.values().size() != exactSize) {
+            throw new IllegalArgumentException(name + " must contain exactly " + exactSize + " numbers");
+        }
+        List<Integer> result = new ArrayList<>(exactSize);
+        for (DeviceValue entry : list.values()) {
+            if (!(entry instanceof DeviceValue.NumberValue number) || number.value() != Math.rint(number.value())
+                    || number.value() < minimum || number.value() > maximum) {
+                throw new IllegalArgumentException(name + " contains an invalid number");
+            }
+            result.add((int) number.value());
+        }
+        return List.copyOf(result);
+    }
+
     private static DeviceParameterDescriptor string(String name, String description) { return new DeviceParameterDescriptor(name, DeviceValueType.STRING, true, description); }
     private static DeviceParameterDescriptor number(String name, String description) { return new DeviceParameterDescriptor(name, DeviceValueType.NUMBER, true, description); }
+    private static DeviceParameterDescriptor list(String name, String description) { return new DeviceParameterDescriptor(name, DeviceValueType.LIST, true, description); }
     private static DeviceParameterDescriptor optionalNumber(String name, String description) { return new DeviceParameterDescriptor(name, DeviceValueType.NUMBER, false, description); }
     private static DeviceParameterDescriptor bool(String name, String description) { return new DeviceParameterDescriptor(name, DeviceValueType.BOOLEAN, true, description); }
     private static DeviceMethodDescriptor read(String name, String description, List<DeviceParameterDescriptor> params, DeviceValueType type) { return new DeviceMethodDescriptor(name, description, params, type, DeviceCallContext.READ); }

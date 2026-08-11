@@ -21,6 +21,16 @@ public final class RednetShellCommandTest {
         assertResult(shell.executeForResult("modem hostname"), 0, List.of("(unregistered)"), "initial hostname");
         assertResult(shell.executeForResult("modem hostname Factory-01"), 0,
                 List.of("hostname factory-01"), "hostname registration");
+        assertResult(shell.executeForResult("modem dns list"), 0,
+                List.of("factory-01 -> rednet:123e4567-e89b-12d3-a456-426614174000/factory-01",
+                        "warehouse -> rednet:223e4567-e89b-12d3-a456-426614174000/warehouse"),
+                "DNS record listing");
+        assertResult(shell.executeForResult("modem dns resolve factory-01"), 0,
+                List.of("name=factory-01 id=123e4567-e89b-12d3-a456-426614174000 address=rednet:123e4567-e89b-12d3-a456-426614174000/factory-01"),
+                "DNS hostname lookup");
+        assertResult(shell.executeForResult("modem resolve 123e4567-e89b-12d3-a456-426614174000"), 0,
+                List.of("name=factory-01 id=123e4567-e89b-12d3-a456-426614174000 address=rednet:123e4567-e89b-12d3-a456-426614174000/factory-01"),
+                "DNS UUID lookup");
         assertResult(shell.executeForResult("modem network"), 0,
                 List.of("(automatic)"), "initial network assignment");
         assertResult(shell.executeForResult("modem network Factory-LAN"), 0,
@@ -122,6 +132,8 @@ public final class RednetShellCommandTest {
     }
 
     private static final class FakeHost implements TerminalHost {
+        private static final String MODEM_ID = "123e4567-e89b-12d3-a456-426614174000";
+        private static final String WAREHOUSE_ID = "223e4567-e89b-12d3-a456-426614174000";
         private String hostname = "";
         private String networkName = "";
         private String destination = "";
@@ -152,6 +164,19 @@ public final class RednetShellCommandTest {
             return true;
         }
         @Override public List<String> modemHosts(int maximum) { return List.of("factory-01", "warehouse"); }
+        @Override public List<String> modemDns(int maximum) {
+            return List.of("factory-01 -> rednet:" + MODEM_ID + "/factory-01",
+                    "warehouse -> rednet:" + WAREHOUSE_ID + "/warehouse");
+        }
+        @Override public String modemResolve(String selector) {
+            if ("factory-01".equals(selector) || MODEM_ID.equals(selector)) {
+                return "name=factory-01 id=" + MODEM_ID + " address=rednet:" + MODEM_ID + "/factory-01";
+            }
+            if ("warehouse".equals(selector) || WAREHOUSE_ID.equals(selector)) {
+                return "name=warehouse id=" + WAREHOUSE_ID + " address=rednet:" + WAREHOUSE_ID + "/warehouse";
+            }
+            return "";
+        }
         @Override public List<String> modemInterfaces() {
             return List.of("address=rednet:test transport=wired dimension=minecraft:overworld position=1,2,3 ports=80,81");
         }

@@ -1,0 +1,10 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    {"item": "terminalcraft:red_alloy_wire"},
+    {"item": "minecraft:redstone_torch"},
+    {"item": "minecraft:copper_ingot"},
+    {"item": "minecraft:quartz"}
+  ],
+  "result": {"item": "terminalcraft:red_alloy_capacitor", "count": 1}
+}

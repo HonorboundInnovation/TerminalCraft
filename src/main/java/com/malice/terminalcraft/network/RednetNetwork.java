@@ -25,6 +25,7 @@ public final class RednetNetwork {
     private static final Map<RednetRuntimeScope.Endpoint, List<PendingMessage>> QUEUES = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope, List<Subscription>> SUBS = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope, RednetHostDirectory> HOSTS = new ConcurrentHashMap<>();
+    private static final Set<RednetRuntimeScope> PERSISTENT_ALIAS_SCOPES = ConcurrentHashMap.newKeySet();
     private static final Map<RednetRuntimeScope, RednetServiceDirectory> SERVICES = new ConcurrentHashMap<>();
     private static final Map<RednetRuntimeScope, RednetDuplicateFilter> DIRECTED_DUPLICATES =
             new ConcurrentHashMap<>();
@@ -208,20 +209,94 @@ public final class RednetNetwork {
         if (level == null || level.isClientSide || modemId == null) {
             return RednetRegistrationResult.of(RednetRegistrationResult.Status.INVALID, "");
         }
-        return HOSTS.computeIfAbsent(scope(level), ignored -> new RednetHostDirectory())
-                .registerDetailed(modemId, hostname);
+        return hostDirectory(level).registerDetailed(modemId, hostname);
+    }
+
+    /** Registers a durable secondary alias for any live TerminalCraft device UUID. */
+    public static RednetRegistrationResult registerDeviceAlias(
+            Level level, UUID deviceId, String hostname) {
+        if (!(level instanceof ServerLevel serverLevel) || deviceId == null) {
+            return RednetRegistrationResult.of(RednetRegistrationResult.Status.INVALID, "");
+        }
+        RednetRegistrationResult result = hostDirectory(level).registerAliasDetailed(deviceId, hostname);
+        if (!result.accepted()) return result;
+        if (!RednetDeviceAliasSavedData.get(serverLevel.getServer()).register(
+                serverLevel.dimension().location().toString(), deviceId, result.name())
+                && result.status() == RednetRegistrationResult.Status.CREATED) {
+            hostDirectory(level).unregisterAlias(deviceId, result.name());
+            return RednetRegistrationResult.of(RednetRegistrationResult.Status.DIRECTORY_FULL, result.name());
+        }
+        return result;
+    }
+
+    /** Removes one durable secondary alias from a device UUID. */
+    public static boolean unregisterDeviceAlias(Level level, UUID deviceId, String hostname) {
+        if (!(level instanceof ServerLevel serverLevel) || deviceId == null) return false;
+        String dimension = serverLevel.dimension().location().toString();
+        RednetHostDirectory directory = hostDirectory(level);
+        if (!RednetDeviceAliasSavedData.get(serverLevel.getServer()).unregister(dimension, deviceId, hostname)) {
+            return false;
+        }
+        return directory.unregisterAlias(deviceId, hostname);
+    }
+
+    /** Removes all durable secondary aliases owned by one device UUID. */
+    public static int unregisterDeviceAliases(Level level, UUID deviceId) {
+        if (!(level instanceof ServerLevel serverLevel) || deviceId == null) return 0;
+        String dimension = serverLevel.dimension().location().toString();
+        RednetHostDirectory directory = hostDirectory(level);
+        RednetDeviceAliasSavedData data = RednetDeviceAliasSavedData.get(serverLevel.getServer());
+        List<RednetDeviceAliasSavedData.Alias> owned = data.aliases(dimension, RednetDeviceAliasSavedData.MAX_ALIASES)
+                .stream().filter(alias -> alias.deviceId().equals(deviceId)).toList();
+        int removed = data.unregisterAll(dimension, deviceId);
+        for (RednetDeviceAliasSavedData.Alias alias : owned) {
+            directory.unregisterAlias(deviceId, alias.name());
+        }
+        return removed;
     }
 
     public static void unregisterHost(Level level, UUID modemId) {
         if (level == null || level.isClientSide || modemId == null) return;
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        if (directory != null) directory.unregister(modemId);
+        hostDirectory(level).unregister(modemId);
     }
 
     public static String hostname(Level level, UUID modemId) {
         if (level == null || level.isClientSide || modemId == null) return "";
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        return directory == null ? "" : directory.name(modemId);
+        return hostDirectory(level).name(modemId);
+    }
+
+    /**
+     * Resolves a DNS-style RedNet selector to its authoritative UUID and current alias.  Aliases
+     * are mutable convenience names; UUID and explicit {@code rednet:} addresses remain stable.
+     */
+    public static java.util.Optional<RednetAddress> resolveAddress(Level level, String selector) {
+        if (level == null || level.isClientSide || selector == null || selector.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        RednetHostDirectory directory = hostDirectory(level);
+        String requested = selector.trim();
+        UUID id = null;
+        String resolvedName = "";
+        RednetAddress explicit = RednetAddress.parse(requested).orElse(null);
+        if (explicit != null) {
+            id = explicit.deviceId();
+        } else {
+            try {
+                id = UUID.fromString(requested);
+            } catch (IllegalArgumentException ignored) {
+                id = directory.resolve(requested).orElse(null);
+                if (id != null) resolvedName = RednetHostName.normalize(requested).orElse("");
+            }
+        }
+        if (id == null) return java.util.Optional.empty();
+        return java.util.Optional.of(new RednetAddress(id,
+                resolvedName.isEmpty() ? directory.name(id) : resolvedName));
+    }
+
+    /** Lists the bounded, deterministic name-to-UUID records currently registered in this scope. */
+    public static List<RednetAddress> addresses(Level level, int maximum) {
+        if (level == null || level.isClientSide) return List.of();
+        return hostDirectory(level).addresses(maximum);
     }
 
     /** Returns the stable logical identity with its current optional directory alias. */
@@ -232,8 +307,7 @@ public final class RednetNetwork {
 
     public static List<String> hosts(Level level, int maximum) {
         if (level == null || level.isClientSide) return List.of();
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        return directory == null ? List.of() : directory.names(maximum);
+        return hostDirectory(level).names(maximum);
     }
 
     public static boolean registerService(Level level, UUID modemId, String serviceName, int port) {
@@ -297,7 +371,7 @@ public final class RednetNetwork {
                 boolean reachable = subscriptions.stream().anyMatch(sub ->
                         sub.modemId.equals(service.modemId()) && sub.channel == service.port()
                                 && canReach(level, senderPos, sub.pos, wireless, sub.wireless,
-                                Math.min(range, sub.range)));
+                                Math.min(range, sub.range), service.port()));
                 if (reachable) result.add(new RednetServiceEndpoint(service.name(),
                         new RednetAddress(service.modemId(), hostname(level, service.modemId())),
                         service.port(), service.protocol()));
@@ -318,9 +392,9 @@ public final class RednetNetwork {
     public static List<String> reachableHosts(Level level, UUID senderId, BlockPos senderPos,
                                               boolean wireless, int range, int maximum) {
         if (level == null || level.isClientSide || senderId == null || senderPos == null) return List.of();
-        RednetHostDirectory directory = HOSTS.get(scope(level));
+        RednetHostDirectory directory = hostDirectory(level);
         List<Subscription> subscriptions = SUBS.get(scope(level));
-        if (directory == null || subscriptions == null) return List.of();
+        if (subscriptions == null) return List.of();
         int limit = Math.max(0, Math.min(maximum, 128));
         List<String> result = new ArrayList<>();
         synchronized (subscriptions) {
@@ -329,7 +403,7 @@ public final class RednetNetwork {
                 if (target == null || target.equals(senderId)) continue;
                 boolean reachable = subscriptions.stream().anyMatch(sub -> sub.modemId.equals(target)
                         && canReach(level, senderPos, sub.pos, wireless, sub.wireless,
-                        Math.min(range, sub.range)));
+                        Math.min(range, sub.range), sub.channel));
                 if (reachable) result.add(name);
                 if (result.size() >= limit) break;
             }
@@ -396,8 +470,7 @@ public final class RednetNetwork {
     /** Lists bounded, deterministic live routes to named neighboring modems. */
     public static List<RednetRoute> neighbors(Level level, UUID sourceId, int maximum) {
         if (level == null || level.isClientSide || sourceId == null) return List.of();
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        if (directory == null) return List.of();
+        RednetHostDirectory directory = hostDirectory(level);
         int limit = Math.max(0, Math.min(maximum, 128));
         if (limit == 0) return List.of();
         List<RednetRoute> result = new ArrayList<>();
@@ -415,8 +488,7 @@ public final class RednetNetwork {
         if (level == null || level.isClientSide || sourceId == null || destination == null) {
             return java.util.Optional.empty();
         }
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        UUID destinationId = directory == null ? null : directory.resolve(destination).orElse(null);
+        UUID destinationId = resolveAddress(level, destination).map(RednetAddress::deviceId).orElse(null);
         return destinationId == null ? java.util.Optional.empty() : route(level, sourceId, destinationId);
     }
 
@@ -596,7 +668,7 @@ public final class RednetNetwork {
                     continue; // do not echo to self
                 }
                 Reachability reachability = reachability(level, senderPos, sub.pos, wireless, sub.wireless,
-                        Math.min(range, sub.range));
+                        Math.min(range, sub.range), channel);
                 if (!reachability.reachable()) continue;
                 PendingMessage recipientMessage = new PendingMessage(
                         envelope.forwarded(reachability.routerHops()), senderPos);
@@ -630,12 +702,28 @@ public final class RednetNetwork {
             reject(scope(level), RejectionKind.MALFORMED);
             return false;
         }
-        RednetHostDirectory directory = HOSTS.get(scope(level));
-        UUID target = directory == null ? null : directory.resolve(destination).orElse(null);
-        if (target == null || target.equals(senderId)) return false;
-        return transmitToTarget(level, senderId, senderPos, target,
-                RednetHostName.normalize(destination).orElse(""), port, replyPort, message,
+        ResolvedDestination resolved = resolveDestination(level, destination).orElse(null);
+        if (resolved == null || resolved.deviceId().equals(senderId)) return false;
+        return transmitToTarget(level, senderId, senderPos, resolved.deviceId(),
+                resolved.label(), port, replyPort, message,
                 wireless, range, "terminalcraft:rednet-host", NetworkEnvelope.TEXT_PAYLOAD);
+    }
+
+    private record ResolvedDestination(UUID deviceId, String label) {}
+
+    private static java.util.Optional<ResolvedDestination> resolveDestination(Level level, String selector) {
+        RednetAddress address = resolveAddress(level, selector).orElse(null);
+        if (address == null) return java.util.Optional.empty();
+        String requested = selector.trim();
+        if (RednetAddress.parse(requested).isPresent()) {
+            return java.util.Optional.of(new ResolvedDestination(address.deviceId(), address.encoded()));
+        }
+        try {
+            UUID.fromString(requested);
+            return java.util.Optional.of(new ResolvedDestination(address.deviceId(), address.deviceId().toString()));
+        } catch (IllegalArgumentException ignored) {
+            return java.util.Optional.of(new ResolvedDestination(address.deviceId(), address.displayName()));
+        }
     }
 
     private static boolean transmitToTarget(Level level, UUID senderId, BlockPos senderPos, UUID target,
@@ -704,22 +792,20 @@ public final class RednetNetwork {
         if (level == null || level.isClientSide || senderId == null || senderPos == null
                 || message == null || message.length() > MAX_MESSAGE_LENGTH) return null;
         RednetRuntimeScope runtimeScope = scope(level);
-        RednetHostDirectory directory = HOSTS.get(runtimeScope);
-        UUID target = directory == null ? null : directory.resolve(destination).orElse(null);
-        String canonical = RednetHostName.normalize(destination).orElse("");
-        if (target == null || target.equals(senderId) || canonical.isEmpty()) return null;
+        ResolvedDestination resolved = resolveDestination(level, destination).orElse(null);
+        if (resolved == null || resolved.deviceId().equals(senderId) || resolved.label().isEmpty()) return null;
         if (!admitTraffic(level, senderId, message)) return null;
         String source = hostname(level, senderId);
         NetworkEnvelope envelope;
         try {
             envelope = new NetworkEnvelope(NetworkEnvelope.CURRENT_VERSION, UUID.randomUUID(),
-                    source.isEmpty() ? senderId.toString() : source, canonical,
+                    source.isEmpty() ? senderId.toString() : source, resolved.label(),
                     clampChannel(port), clampChannel(replyPort), "terminalcraft:rednet-reliable",
                     message, level.getGameTime(), NetworkEnvelope.MAX_HOPS, null);
         } catch (IllegalArgumentException invalid) {
             return null;
         }
-        ReliableRoute route = new ReliableRoute(senderId, senderPos.immutable(), target,
+        ReliableRoute route = new ReliableRoute(senderId, senderPos.immutable(), resolved.deviceId(),
                 wireless, range);
         RELIABLE_ROUTES.computeIfAbsent(runtimeScope, ignored -> new ConcurrentHashMap<>())
                 .put(envelope.messageId(), route);
@@ -968,6 +1054,7 @@ public final class RednetNetwork {
         if (server == null) return;
         SUBS.keySet().removeIf(scope -> scope.belongsTo(server));
         HOSTS.keySet().removeIf(scope -> scope.belongsTo(server));
+        PERSISTENT_ALIAS_SCOPES.removeIf(scope -> scope.belongsTo(server));
         SERVICES.keySet().removeIf(scope -> scope.belongsTo(server));
         DIRECTED_DUPLICATES.keySet().removeIf(scope -> scope.belongsTo(server));
         DELIVERIES.keySet().removeIf(scope -> scope.belongsTo(server));
@@ -1014,7 +1101,7 @@ public final class RednetNetwork {
                     : java.util.Optional.empty();
         }
         WiredNetworkTopology.Route physical = WiredNetworkTopology.route(
-                serverLevel, source.position(), target.position());
+                serverLevel, source.position(), target.position(), destination.channel);
         return physical.reachable() && !physical.truncated()
                 ? java.util.Optional.of(new RednetRoute(source, target, physical.routerHops(),
                         physical.routerPasses()))
@@ -1026,13 +1113,15 @@ public final class RednetNetwork {
     }
 
     private static boolean canReach(Level level, BlockPos a, BlockPos b,
-                                    boolean senderWireless, boolean receiverWireless, int range) {
-        return reachability(level, a, b, senderWireless, receiverWireless, range).reachable();
+                                    boolean senderWireless, boolean receiverWireless, int range,
+                                    int physicalChannel) {
+        return reachability(level, a, b, senderWireless, receiverWireless, range, physicalChannel).reachable();
     }
 
     /** Resolves transport reachability and the exact router cost applied to a recipient envelope. */
     private static Reachability reachability(Level level, BlockPos a, BlockPos b,
-                                             boolean senderWireless, boolean receiverWireless, int range) {
+                                             boolean senderWireless, boolean receiverWireless, int range,
+                                             int physicalChannel) {
         if (senderWireless && receiverWireless) {
             int r = Math.max(1, range);
             return a.closerThan(b, r + 0.5) ? new Reachability(true, 0) : Reachability.UNREACHABLE;
@@ -1040,7 +1129,7 @@ public final class RednetNetwork {
         if (senderWireless != receiverWireless || !(level instanceof ServerLevel serverLevel)) {
             return Reachability.UNREACHABLE;
         }
-        WiredNetworkTopology.Route route = WiredNetworkTopology.route(serverLevel, a, b);
+        WiredNetworkTopology.Route route = WiredNetworkTopology.route(serverLevel, a, b, physicalChannel);
         return route.reachable() && !route.truncated()
                 ? new Reachability(true, route.routerHops()) : Reachability.UNREACHABLE;
     }
@@ -1074,8 +1163,8 @@ public final class RednetNetwork {
         RednetRuntimeScope runtimeScope = scope(level);
         List<Subscription> subscriptions = SUBS.get(runtimeScope);
         int subscriptionCount = subscriptions == null ? 0 : queueSize(SUBS, runtimeScope);
-        RednetHostDirectory hosts = HOSTS.get(runtimeScope);
-        int hostCount = hosts == null ? 0 : hosts.names(RednetHostDirectory.MAX_HOSTS).size();
+        RednetHostDirectory hosts = hostDirectory(level);
+        int hostCount = hosts.names(RednetHostDirectory.MAX_HOSTS).size();
         RednetServiceDirectory services = SERVICES.get(runtimeScope);
         int serviceCount = services == null ? 0
                 : services.services(RednetServiceDirectory.MAX_SERVICES).size();
@@ -1234,6 +1323,22 @@ public final class RednetNetwork {
             return 65535;
         }
         return channel;
+    }
+
+    private static RednetHostDirectory hostDirectory(Level level) {
+        if (!(level instanceof ServerLevel serverLevel)) {
+            throw new IllegalArgumentException("RedNet runtime state requires a server level");
+        }
+        RednetRuntimeScope runtimeScope = scope(level);
+        RednetHostDirectory directory = HOSTS.computeIfAbsent(runtimeScope, ignored -> new RednetHostDirectory());
+        if (PERSISTENT_ALIAS_SCOPES.add(runtimeScope)) {
+            String dimension = serverLevel.dimension().location().toString();
+            for (RednetDeviceAliasSavedData.Alias alias : RednetDeviceAliasSavedData
+                    .get(serverLevel.getServer()).aliases(dimension, RednetDeviceAliasSavedData.MAX_ALIASES)) {
+                directory.registerAliasDetailed(alias.deviceId(), alias.name());
+            }
+        }
+        return directory;
     }
 
     private static RednetRuntimeScope scope(Level level) {

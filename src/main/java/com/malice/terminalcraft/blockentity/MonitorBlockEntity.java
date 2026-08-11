@@ -310,6 +310,10 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         int column = tileColumn * MAX_LINE_LEN + Math.min(MAX_LINE_LEN - 1, Math.max(0, (int) (horizontal * MAX_LINE_LEN)));
         int row = tileRow * MAX_LINES + Math.min(MAX_LINES - 1, Math.max(0, (int) ((1.0 - localY) * MAX_LINES)));
         DisplayTransportRuntime.handleTouch(group.anchor(), column, row, player);
+        if (player instanceof net.minecraft.server.level.ServerPlayer serverPlayer) {
+            com.malice.terminalcraft.scada.ScadaRuntime.handleMonitorTouch(
+                    serverPlayer.server, group.anchor().getDeviceId(), column, row, serverPlayer);
+        }
         ServerDeviceManager.publishEvent(group.anchor(), "touch", level.getGameTime(),
                 (DeviceValue.MapValue) DeviceValue.map(java.util.Map.of(
                         "x", DeviceValue.of(column),

@@ -67,12 +67,17 @@ public interface TerminalHost {
     default boolean modemClose(int channel) { return false; }
     default boolean modemIsOpen(int channel) { return false; }
     default List<Integer> modemOpenChannels() { return List.of(); }
+    default int modemDefaultChannel() { return com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL; }
     default boolean modemTransmit(int channel, int replyChannel, String message) { return false; }
     default String modemHostname() { return ""; }
     default boolean modemSetHostname(String hostname) { return false; }
     default String modemNetworkName() { return ""; }
     default boolean modemSetNetworkName(String networkName) { return false; }
     default List<String> modemHosts(int maximum) { return List.of(); }
+    /** Lists the bounded RedNet name records visible to the attached modem. */
+    default List<String> modemDns(int maximum) { return List.of(); }
+    /** Resolves a RedNet hostname, UUID, or encoded rednet address. */
+    default String modemResolve(String selector) { return ""; }
     default List<String> modemInterfaces() { return List.of(); }
     default List<String> modemTopologyDiagnostics() { return List.of(); }
     default List<String> modemPacketDiagnostics() { return List.of(); }
@@ -89,6 +94,11 @@ public interface TerminalHost {
     default boolean modemUnregisterSensorService(String service) { return false; }
     default List<String> modemSensorServices() { return List.of(); }
     default boolean modemTransmitSensorService(String service, String operation, String channel, int replyPort) { return false; }
+    default boolean modemRegisterScadaService(String service, int port) { return false; }
+    default boolean modemUnregisterScadaService(String service) { return false; }
+    default List<String> modemScadaServices() { return List.of(); }
+    default boolean modemTransmitScadaService(String service, String operation, String selector,
+                                              int limit, int replyPort) { return false; }
     default List<String> modemServices(int maximum) { return List.of(); }
     default boolean modemTransmitService(String service, int replyPort, String message) { return false; }
     default List<String> modemReceive(int max) { return List.of(); }
@@ -102,6 +112,8 @@ public interface TerminalHost {
     default boolean hasBundledCable(String side) { return false; }
     /** Returns the effective 0..15 signal, or -1 when the side/channel is unavailable. */
     default int bundledSignal(String side, int channel) { return -1; }
+    /** Returns external 0..15 input without echoing this computer's local output source. */
+    default int bundledInput(String side, int channel) { return bundledSignal(side, channel); }
     /** Returns this cable segment's computer-driven 0..15 source, or -1 when unavailable. */
     default int bundledOutput(String side, int channel) { return -1; }
     /** Sets this cable segment's computer-driven source. */

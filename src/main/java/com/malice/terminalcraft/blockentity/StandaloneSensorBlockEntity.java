@@ -4,6 +4,9 @@ import com.malice.terminalcraft.block.StandaloneSensorBlock;
 import com.malice.terminalcraft.device.DeviceValue;
 import com.malice.terminalcraft.device.ServerDeviceManager;
 import com.malice.terminalcraft.device.StandaloneSensorDeviceEndpoint;
+import com.malice.terminalcraft.network.RednetAutoConfiguration;
+import com.malice.terminalcraft.network.RednetNetwork;
+import com.malice.terminalcraft.network.SensorRemoteRequest;
 import com.malice.terminalcraft.persistence.PersistedDataLimits;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.registry.ModRegistries;
@@ -39,6 +42,7 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
     private boolean invert;
     private boolean enabled = true;
     private SensorReading reading;
+    private boolean wirelessReady;
 
     public StandaloneSensorBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.STANDALONE_SENSOR_BLOCK_ENTITY.get(), pos, state);
@@ -54,6 +58,11 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
     public String getDeviceAddress() {
         String dimension = level == null ? "unbound" : level.dimension().location().toString();
         return dimension + ":" + worldPosition.getX() + "," + worldPosition.getY() + "," + worldPosition.getZ();
+    }
+
+    /** Stable DNS-style RedNet name for the sensor's wireless telemetry endpoint. */
+    public String wirelessHostname() {
+        return RednetAutoConfiguration.sensorHostname(deviceId);
     }
 
     public String getLabel() { return label; }
@@ -150,6 +159,8 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
 
     public static void serverTick(Level level, BlockPos pos, BlockState state, StandaloneSensorBlockEntity sensor) {
         if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel)) return;
+        sensor.ensureWireless(serverLevel);
+        NetworkSensorService.tickWireless(serverLevel, sensor.deviceId, pos, sensor);
         ServerDeviceManager.ensureRegistered(sensor, sensor.deviceId, sensor.getDeviceAddress(),
                 () -> new StandaloneSensorDeviceEndpoint(sensor.deviceId, sensor.getDeviceAddress(), sensor,
                         () -> !sensor.isRemoved(), () -> !sensor.isRemoved()));
@@ -160,6 +171,22 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
         sensor.reading = next;
         if (!same(previous, next)) sensor.publishChange(next, time);
         sensor.setChanged();
+    }
+
+    private void ensureWireless(net.minecraft.server.level.ServerLevel serverLevel) {
+        if (wirelessReady) return;
+        String hostname = wirelessHostname();
+        if (!RednetNetwork.registerHost(serverLevel, deviceId, hostname)
+                && !hostname.equals(RednetNetwork.hostname(serverLevel, deviceId))) return;
+        RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
+                worldPosition, true, RednetAutoConfiguration.SENSOR_WIRELESS_RANGE);
+        if (!RednetNetwork.registerService(serverLevel, deviceId, hostname,
+                RednetAutoConfiguration.SENSOR_CHANNEL, SensorRemoteRequest.PROTOCOL)) {
+            RednetNetwork.closeAll(serverLevel, deviceId);
+            RednetNetwork.unregisterHost(serverLevel, deviceId);
+            return;
+        }
+        wirelessReady = true;
     }
 
     private void publishChange(SensorReading sample, long time) {
@@ -220,10 +247,16 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
         invert = tag.getBoolean("Invert");
         enabled = !tag.contains("Enabled") || tag.getBoolean("Enabled");
         reading = null;
+        wirelessReady = false;
     }
 
     @Override
     public void setRemoved() {
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            RednetNetwork.closeAll(serverLevel, deviceId);
+            RednetNetwork.unregisterServices(serverLevel, deviceId);
+            RednetNetwork.unregisterHost(serverLevel, deviceId);
+        }
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }

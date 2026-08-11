@@ -13,6 +13,12 @@ public final class RednetAutoConfigurationTest {
                 "automatic hostname must be deterministic and readable");
         check(RednetHostName.normalize(RednetAutoConfiguration.hostname(id)).isPresent(),
                 "automatic hostname must obey RedNet hostname rules");
+        check(RednetAutoConfiguration.SENSOR_CHANNEL == 42
+                        && RednetAutoConfiguration.SENSOR_WIRELESS_RANGE == 64,
+                "wireless sensors must use the documented default channel and range");
+        check(RednetAutoConfiguration.sensorHostname(id).equals("sensor-123456781234")
+                        && RednetHostName.normalize(RednetAutoConfiguration.sensorHostname(id)).isPresent(),
+                "sensor hostname must be deterministic and DNS-compatible");
         check(RednetAutoConfiguration.isDefaultChannel(42)
                         && !RednetAutoConfiguration.isDefaultChannel(41),
                 "default-channel predicate must be exact");

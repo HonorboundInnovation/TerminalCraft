@@ -13,6 +13,7 @@ public final class ShellSyncPolicyTest {
         assertEquals(1, ModNetwork.SHELL_SYNC_PACKET_ID, "shell sync packet ID");
         assertEquals(2, ModNetwork.EDITOR_ACTION_PACKET_ID, "editor action packet ID");
         assertEquals(3, ModNetwork.EDITOR_RESULT_PACKET_ID, "editor result packet ID");
+        assertEquals(7, ModNetwork.CONTROL_CENTER_ACTION_PACKET_ID, "control center action packet ID");
 
         assertTrue(!ShellSyncPolicy.isAdmissible(null), "null snapshot rejected");
         assertTrue(ShellSyncPolicy.isAdmissible(new CompoundTag()), "empty snapshot accepted");

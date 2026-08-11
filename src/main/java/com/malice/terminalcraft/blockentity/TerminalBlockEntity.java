@@ -316,6 +316,13 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     }
 
     @Override
+    public int modemDefaultChannel() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? com.malice.terminalcraft.network.RednetAutoConfiguration.DEFAULT_CHANNEL
+                : modem.defaultChannel();
+    }
+
+    @Override
     public boolean modemTransmit(int channel, int replyChannel, String message) {
         ModemBlockEntity modem = findModem(null);
         return modem != null && modem.transmit(channel, replyChannel, message);
@@ -388,6 +395,18 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     }
 
     @Override
+    public List<String> modemDns(int maximum) {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.dnsDiagnostics(maximum);
+    }
+
+    @Override
+    public String modemResolve(String selector) {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? "" : modem.resolveDiagnostics(selector);
+    }
+
+    @Override
     public boolean modemTransmitTo(String hostname, int port, int replyPort, String message) {
         ModemBlockEntity modem = findModem(null);
         return modem != null && modem.transmitTo(hostname, port, replyPort, message);
@@ -445,6 +464,31 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     public boolean modemTransmitSensorService(String service, String operation, String channel, int replyPort) {
         ModemBlockEntity modem = findModem(null);
         return modem != null && modem.transmitSensorService(service, operation, channel, replyPort);
+    }
+
+    @Override
+    public boolean modemRegisterScadaService(String service, int port) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.registerScadaService(service, port);
+    }
+
+    @Override
+    public boolean modemUnregisterScadaService(String service) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.unregisterScadaService(service);
+    }
+
+    @Override
+    public List<String> modemScadaServices() {
+        ModemBlockEntity modem = findModem(null);
+        return modem == null ? List.of() : modem.scadaServices();
+    }
+
+    @Override
+    public boolean modemTransmitScadaService(String service, String operation, String selector,
+                                             int limit, int replyPort) {
+        ModemBlockEntity modem = findModem(null);
+        return modem != null && modem.transmitScadaService(service, operation, selector, limit, replyPort);
     }
 
     @Override
@@ -552,6 +596,13 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
         BundledCableBlockEntity cable = findBundledCable(side);
         return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
                 ? -1 : cable.getSignal(channel);
+    }
+
+    @Override
+    public int bundledInput(String side, int channel) {
+        BundledCableBlockEntity cable = findBundledCable(side);
+        return cable == null || channel < 0 || channel >= BundledCableBlockEntity.CHANNELS
+                ? -1 : cable.getExternalInput(channel);
     }
 
     @Override

@@ -3,6 +3,9 @@ package com.malice.terminalcraft.blockentity;
 import com.malice.terminalcraft.device.DeviceValue;
 import com.malice.terminalcraft.device.ServerDeviceManager;
 import com.malice.terminalcraft.device.SensorArrayDeviceEndpoint;
+import com.malice.terminalcraft.network.RednetAutoConfiguration;
+import com.malice.terminalcraft.network.RednetNetwork;
+import com.malice.terminalcraft.network.SensorRemoteRequest;
 import com.malice.terminalcraft.persistence.PersistedDataLimits;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import com.malice.terminalcraft.registry.ModRegistries;
@@ -38,6 +41,7 @@ public class SensorArrayBlockEntity extends BlockEntity {
     private String label = "sensor-array";
     private final List<SensorChannel> channels = new ArrayList<>();
     private final Map<String, SensorReading> readings = new LinkedHashMap<>();
+    private boolean wirelessReady;
 
     public SensorArrayBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.SENSOR_ARRAY_BLOCK_ENTITY.get(), pos, state);
@@ -48,6 +52,11 @@ public class SensorArrayBlockEntity extends BlockEntity {
     public String getDeviceAddress() {
         String dimension = level == null ? "unbound" : level.dimension().location().toString();
         return dimension + ":" + worldPosition.getX() + "," + worldPosition.getY() + "," + worldPosition.getZ();
+    }
+
+    /** Stable DNS-style RedNet name for the sensor's wireless telemetry endpoint. */
+    public String wirelessHostname() {
+        return RednetAutoConfiguration.sensorHostname(deviceId);
     }
 
     public String getLabel() { return label; }
@@ -157,6 +166,8 @@ public class SensorArrayBlockEntity extends BlockEntity {
 
     public static void serverTick(Level level, BlockPos pos, BlockState state, SensorArrayBlockEntity array) {
         if (!(level instanceof net.minecraft.server.level.ServerLevel serverLevel)) return;
+        array.ensureWireless(serverLevel);
+        NetworkSensorService.tickWireless(serverLevel, array.deviceId, pos, array);
         ServerDeviceManager.ensureRegistered(array, array.deviceId, array.getDeviceAddress(),
                 () -> new SensorArrayDeviceEndpoint(array.deviceId, array.getDeviceAddress(), array,
                         () -> !array.isRemoved(), () -> !array.isRemoved()));
@@ -167,6 +178,22 @@ public class SensorArrayBlockEntity extends BlockEntity {
             SensorReading previous = array.readings.put(channel.name(), next);
             if (!same(previous, next)) array.publishChange(next, time);
         }
+    }
+
+    private void ensureWireless(net.minecraft.server.level.ServerLevel serverLevel) {
+        if (wirelessReady) return;
+        String hostname = wirelessHostname();
+        if (!RednetNetwork.registerHost(serverLevel, deviceId, hostname)
+                && !hostname.equals(RednetNetwork.hostname(serverLevel, deviceId))) return;
+        RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
+                worldPosition, true, RednetAutoConfiguration.SENSOR_WIRELESS_RANGE);
+        if (!RednetNetwork.registerService(serverLevel, deviceId, hostname,
+                RednetAutoConfiguration.SENSOR_CHANNEL, SensorRemoteRequest.PROTOCOL)) {
+            RednetNetwork.closeAll(serverLevel, deviceId);
+            RednetNetwork.unregisterHost(serverLevel, deviceId);
+            return;
+        }
+        wirelessReady = true;
     }
 
     private void publishChange(SensorReading reading, long time) {
@@ -233,6 +260,7 @@ public class SensorArrayBlockEntity extends BlockEntity {
     @Override
     public void load(CompoundTag tag) {
         super.load(tag);
+        wirelessReady = false;
         if (tag.hasUUID("SensorId")) deviceId = tag.getUUID("SensorId");
         label = PersistedDataLimits.readString(tag, "Label", PersistedDataLimits.MAX_LABEL_CHARS, "sensor-array");
         channels.clear();
@@ -258,6 +286,11 @@ public class SensorArrayBlockEntity extends BlockEntity {
 
     @Override
     public void setRemoved() {
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            RednetNetwork.closeAll(serverLevel, deviceId);
+            RednetNetwork.unregisterServices(serverLevel, deviceId);
+            RednetNetwork.unregisterHost(serverLevel, deviceId);
+        }
         ServerDeviceManager.invalidate(this);
         super.setRemoved();
     }

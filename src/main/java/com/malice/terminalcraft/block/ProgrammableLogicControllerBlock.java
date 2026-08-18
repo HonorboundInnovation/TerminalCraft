@@ -81,6 +81,7 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
                 && player instanceof ServerPlayer serverPlayer) {
             NetworkHooks.openScreen(serverPlayer, plc, buffer -> {
                 buffer.writeBlockPos(pos);
+                buffer.writeUtf(plc.programSource(), com.malice.terminalcraft.plc.PlcProgram.MAX_SOURCE_CHARS);
             });
             return InteractionResult.CONSUME;
         }
@@ -88,6 +89,12 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     }
 
     @Override @SuppressWarnings("deprecation") public boolean isSignalSource(BlockState state) { return true; }
+
+    @Override
+    public boolean canConnectRedstone(BlockState state, BlockGetter level, BlockPos pos,
+                                      @Nullable Direction side) {
+        return side != null;
+    }
 
     @Override @SuppressWarnings("deprecation") public int getSignal(
             BlockState state, BlockGetter level, BlockPos pos, Direction side) {
@@ -105,7 +112,7 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     @Override @SuppressWarnings("deprecation") public void onRemove(
             BlockState state, Level level, BlockPos pos, BlockState replacement, boolean moving) {
         if (!state.is(replacement.getBlock()) && level.getBlockEntity(pos) instanceof ProgrammableLogicControllerBlockEntity plc) {
-            plc.stop();
+            plc.onBlockRemoved();
             level.removeBlockEntity(pos);
             level.updateNeighborsAt(pos, this);
             for (Direction direction : Direction.values()) level.updateNeighborsAt(pos.relative(direction), this);

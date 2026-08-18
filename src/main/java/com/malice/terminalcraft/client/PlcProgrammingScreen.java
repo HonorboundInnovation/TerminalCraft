@@ -24,6 +24,7 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     private int scrollLine;
     private int scrollColumn;
     private boolean requestPending;
+    private ModNetwork.PlcAction pendingAction;
     private boolean ladderMode;
     private PlcLadderModel ladder;
     private String draggedSignal;
@@ -40,12 +41,14 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     @Override
     protected void init() {
         super.init();
+        String openingSource = editor == null ? menu.initialSource()
+                : ladderMode && ladder != null ? ladder.toSource() : editor.text();
         imageWidth = Math.max(300, Math.min(PANEL_WIDTH, width - 12));
         imageHeight = Math.max(220, Math.min(PANEL_HEIGHT, height - 12));
         leftPos = (width - imageWidth) / 2;
         topPos = (height - imageHeight) / 2;
-        editor = new TextEditorBuffer(currentSource());
-        ladder = PlcLadderModel.fromSource(currentSource());
+        editor = new TextEditorBuffer(openingSource);
+        ladder = PlcLadderModel.fromSource(openingSource);
         addToolbarButtons();
     }
 
@@ -88,15 +91,6 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     protected void containerTick() {
         super.containerTick();
         if (noticeTicks > 0) noticeTicks--;
-        ProgrammableLogicControllerBlockEntity plc = currentPlc();
-        String visibleSource = ladderMode && ladder != null ? ladder.toSource() : editor == null ? "" : editor.text();
-        if (plc != null && editor != null && !editor.dirty() && !requestPending
-                && !plc.programSource().equals(visibleSource)) {
-            editor.setInitialText(plc.programSource());
-            ladder = PlcLadderModel.fromSource(plc.programSource());
-            scrollLine = 0;
-            scrollColumn = 0;
-        }
     }
 
     @Override
@@ -275,14 +269,10 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
                 instanceof ProgrammableLogicControllerBlockEntity plc ? plc : null;
     }
 
-    private String currentSource() {
-        ProgrammableLogicControllerBlockEntity plc = currentPlc();
-        return plc == null ? "" : plc.programSource();
-    }
-
     private void compile() {
         if (editor == null || requestPending) return;
         requestPending = true;
+        pendingAction = ModNetwork.PlcAction.COMPILE;
         ModNetwork.sendPlcCompile(menu.containerId, ladderMode && ladder != null ? ladder.toSource() : editor.text());
         notice = "Compiling…";
         noticeTicks = 80;
@@ -308,6 +298,7 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     private void action(ModNetwork.PlcAction action) {
         if (requestPending) return;
         requestPending = true;
+        pendingAction = action;
         ModNetwork.sendPlcAction(menu.containerId, action);
         notice = "Sending " + action.name().toLowerCase() + "…";
         noticeTicks = 80;
@@ -316,6 +307,7 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     private void saveSlot(int slot) {
         if (editor == null || requestPending) return;
         requestPending = true;
+        pendingAction = ModNetwork.PlcAction.SAVE_SLOT;
         ModNetwork.sendPlcSlot(menu.containerId, ModNetwork.PlcAction.SAVE_SLOT, slot, editor.text());
         notice = "Saving program slot " + slot + "…";
         noticeTicks = 80;
@@ -324,15 +316,27 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     private void loadSlot(int slot) {
         if (requestPending) return;
         requestPending = true;
+        pendingAction = ModNetwork.PlcAction.LOAD_SLOT;
         ModNetwork.sendPlcSlot(menu.containerId, ModNetwork.PlcAction.LOAD_SLOT, slot, "");
         notice = "Loading program slot " + slot + "…";
         noticeTicks = 80;
     }
 
-    public static void applyResult(int containerId, boolean success, String message) {
+    public static void applyResult(int containerId, boolean success, String message, String source) {
         if (net.minecraft.client.Minecraft.getInstance().screen instanceof PlcProgrammingScreen screen
                 && screen.menu.containerId == containerId) {
+            ModNetwork.PlcAction completed = screen.pendingAction;
             screen.requestPending = false;
+            screen.pendingAction = null;
+            if (success && screen.editor != null && (completed == ModNetwork.PlcAction.COMPILE
+                    || completed == ModNetwork.PlcAction.SAVE_SLOT
+                    || completed == ModNetwork.PlcAction.LOAD_SLOT)) {
+                String authoritative = source == null ? "" : source;
+                screen.editor.setInitialText(authoritative);
+                screen.ladder = PlcLadderModel.fromSource(authoritative);
+                screen.scrollLine = 0;
+                screen.scrollColumn = 0;
+            }
             screen.notice = (success ? "OK: " : "Error: ") + (message == null ? "" : message);
             screen.noticeTicks = 120;
         }

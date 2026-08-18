@@ -76,7 +76,8 @@ public class TerminalMenu extends AbstractContainerMenu {
         byte type = buf.readByte();
         if (type == TYPE_POCKET) {
             InteractionHand hand = buf.readEnum(InteractionHand.class);
-            PocketShellComputer pocket = new PocketShellComputer(playerInventory.player, hand);
+            BlockPos boundPeripheral = buf.readBoolean() ? buf.readBlockPos() : null;
+            PocketShellComputer pocket = new PocketShellComputer(playerInventory.player, hand, boundPeripheral);
             return new TerminalMenu(containerId, playerInventory, pocket);
         }
 

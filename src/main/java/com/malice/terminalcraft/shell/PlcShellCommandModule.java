@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.shell;
 
 import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.plc.PlcProgram;
 import com.malice.terminalcraft.plc.PlcProgramTemplates;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
@@ -191,7 +192,10 @@ final class PlcShellCommandModule implements ShellCommandModule {
             @Override public AbstractContainerMenu createMenu(int id, Inventory inventory, Player ignored) {
                 return new com.malice.terminalcraft.menu.PlcProgrammingMenu(id, inventory, plc, true);
             }
-        }, buffer -> buffer.writeBlockPos(target));
+        }, buffer -> {
+            buffer.writeBlockPos(target);
+            buffer.writeUtf(plc.programSource(), PlcProgram.MAX_SOURCE_CHARS);
+        });
         context.printLine("plc: remote programmer opened for " + target.toShortString());
         context.setExitCode(0);
     }

@@ -1,6 +1,1 @@
-{
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "terminalcraft:item/network_cable_custom"
-  }
-}
+{"parent":"terminalcraft:block/network_cable_inventory"}

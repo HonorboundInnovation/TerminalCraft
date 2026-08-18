@@ -14,7 +14,10 @@ public final class PlcProgramTest {
         counterCountsRisingEdgesOnly();
         malformedProgramsFailClosed();
         unavailableIoStopsAndZerosOutputs();
+        pureEvaluationDefersAllOutputWrites();
         analogTransferScalesSignals();
+        sensorPercentComparisonsDriveMutuallyExclusivePumps();
+        retainedRuntimeStateSurvivesControllerReload();
         pidLoopProducesBoundedOutput();
         sensorBindingsCompileAsInputsOnly();
         builtInTemplatesCompile();
@@ -198,6 +201,33 @@ public final class PlcProgramTest {
         require(io.outputs.getOrDefault("EAST", -1) == 0, "fault writes safe output");
     }
 
+    private static void pureEvaluationDefersAllOutputWrites() {
+        PlcProgram.CompileResult result = PlcProgram.compile("""
+                IN ENABLE REDSTONE NORTH
+                OUT FIRST BUNDLED WEST 0
+                OUT SECOND BUNDLED WEST 1
+                RUNG FIRST = ENABLE
+                RUNG SECOND = NOT ENABLE
+                """);
+        require(result.successful(), "transactional output program compiles");
+        PlcProgram.Controller controller = new PlcProgram.Controller();
+        controller.load(result.program());
+        controller.start();
+        FakeIo io = new FakeIo();
+        io.inputs.put("NORTH", 15);
+
+        PlcProgram.ScanResult scan = controller.evaluate(io);
+        require(scan.success(), "pure PLC evaluation succeeds");
+        require(io.outputs.isEmpty(), "pure PLC evaluation performs no outside writes");
+        require(scan.desiredOutputs().size() == 2, "evaluation returns one complete output snapshot");
+        require(scan.desiredOutputs().entrySet().stream()
+                        .anyMatch(entry -> entry.getKey().channel() == 0 && entry.getValue() == 15),
+                "output snapshot contains asserted channel");
+        require(scan.desiredOutputs().entrySet().stream()
+                        .anyMatch(entry -> entry.getKey().channel() == 1 && entry.getValue() == 0),
+                "output snapshot contains cleared channel");
+    }
+
     private static void analogTransferScalesSignals() {
         PlcProgram.CompileResult result = PlcProgram.compile("""
                 SCAN 1
@@ -214,6 +244,72 @@ public final class PlcProgramTest {
         require(controller.scan(io).success(), "analog scan succeeds");
         require(io.outputs.getOrDefault("EAST", -1) == 9, "analog value transfers to output");
         require(controller.analogValues().getOrDefault("SENSOR", -1) == 9, "analog input is observable");
+    }
+
+    private static void sensorPercentComparisonsDriveMutuallyExclusivePumps() {
+        PlcProgram.CompileResult result = PlcProgram.compile("""
+                SCAN 1
+                AIN LEVEL SENSOR value
+                OUT FILL_STOP BUNDLED WEST 0
+                OUT DRAIN_STOP BUNDLED WEST 1
+                LATCH FILLING SET LEVEL == 0 RESET LEVEL == 100
+                RUNG FILL_STOP = NOT FILLING
+                RUNG DRAIN_STOP = FILLING
+                """);
+        require(result.successful(), "percentage sensor pump program compiles: " + result.error());
+        PlcProgram.Controller controller = new PlcProgram.Controller();
+        controller.load(result.program());
+        controller.start();
+        FakeIo io = new FakeIo();
+
+        io.analogInputs.put("LEVEL", 0.0);
+        require(controller.scan(io).success(), "empty percentage scan succeeds");
+        require(io.outputs.getOrDefault("WEST:0", -1) == 0 && io.outputs.getOrDefault("WEST:1", -1) == 15,
+                "empty tank runs fill pump only");
+        require(!io.bothPumpStopsOff, "empty transition never leaves both pump-stop channels off");
+
+        io.analogInputs.put("LEVEL", 50.0);
+        require(controller.scan(io).success(), "mid-level percentage scan succeeds");
+        require(io.outputs.getOrDefault("WEST:0", -1) == 0 && io.outputs.getOrDefault("WEST:1", -1) == 15,
+                "mid-level holds fill state");
+
+        io.analogInputs.put("LEVEL", 100.0);
+        require(controller.scan(io).success(), "full percentage scan succeeds");
+        require(io.outputs.getOrDefault("WEST:0", -1) == 15 && io.outputs.getOrDefault("WEST:1", -1) == 0,
+                "full tank runs drain pump only");
+        require(!io.bothPumpStopsOff, "full transition never leaves both pump-stop channels off");
+    }
+
+    private static void retainedRuntimeStateSurvivesControllerReload() {
+        PlcProgram.CompileResult result = PlcProgram.compile("""
+                AIN LEVEL SENSOR value
+                OUT LEFT BUNDLED WEST 0
+                OUT RIGHT BUNDLED WEST 1
+                LATCH MODE SET LEVEL == 0 RESET LEVEL == 100
+                RUNG LEFT = NOT MODE
+                RUNG RIGHT = MODE
+                """);
+        require(result.successful(), "retained-state program compiles");
+        FakeIo io = new FakeIo();
+        io.analogInputs.put("LEVEL", 0.0);
+        PlcProgram.Controller original = new PlcProgram.Controller();
+        original.load(result.program());
+        original.start();
+        require(original.evaluate(io).success(), "latch is set before simulated chunk unload");
+
+        PlcProgram.RuntimeState saved = original.runtimeState();
+        PlcProgram.Controller reloaded = new PlcProgram.Controller();
+        reloaded.load(result.program());
+        reloaded.restoreRuntimeState(saved);
+        reloaded.start();
+        io.analogInputs.put("LEVEL", 50.0);
+        PlcProgram.ScanResult scan = reloaded.evaluate(io);
+        require(scan.success(), "controller evaluates after runtime restore");
+        require(reloaded.latchValues().getOrDefault("MODE", false),
+                "latch memory survives a Minecraft chunk/world reload");
+        require(scan.desiredOutputs().entrySet().stream()
+                        .anyMatch(entry -> entry.getKey().channel() == 1 && entry.getValue() == 15),
+                "restored controller holds its previous mode between thresholds");
     }
 
     private static void pidLoopProducesBoundedOutput() {
@@ -245,6 +341,14 @@ public final class PlcProgramTest {
         require(result.successful(), "sensor bindings compile as PLC inputs: " + result.error());
         require(result.program().inputs().get(0).kind() == PlcProgram.BindingKind.SENSOR,
                 "sensor input retains its source kind");
+        PlcProgram.CompileResult remote = PlcProgram.compile("""
+                AIN TANK SENSOR sensor-a1b2c3 value
+                OUT PUMP REDSTONE EAST
+                RUNG PUMP = TANK >= 100
+                """);
+        require(remote.successful(), "network sensor hostname and channel compile: " + remote.error());
+        require("sensor-a1b2c3/value".equals(remote.program().inputs().get(0).side()),
+                "network sensor binding retains hostname and channel");
         require(!PlcProgram.compile("OUT BAD SENSOR tank_level\nRUNG BAD = ON").successful(),
                 "sensor bindings are rejected on outputs");
     }
@@ -255,15 +359,27 @@ public final class PlcProgramTest {
 
     private static final class FakeIo implements PlcProgram.Io {
         private final Map<String, Integer> inputs = new HashMap<>();
+        private final Map<String, Double> analogInputs = new HashMap<>();
         private final Map<String, Integer> outputs = new HashMap<>();
+        private boolean bothPumpStopsOff;
         private boolean failReads;
 
         @Override public int read(PlcProgram.Binding binding) {
             return failReads ? -1 : inputs.getOrDefault(binding.side().toUpperCase(), 0);
         }
 
+        @Override public double readAnalog(PlcProgram.Binding binding) {
+            if (failReads) return -1;
+            return analogInputs.getOrDefault(binding.name(), (double) read(binding));
+        }
+
         @Override public boolean write(PlcProgram.Binding binding, int strength) {
             outputs.put(binding.side().toUpperCase(), strength);
+            if (binding.kind() == PlcProgram.BindingKind.BUNDLED) {
+                outputs.put(binding.side().toUpperCase() + ":" + binding.channel(), strength);
+                bothPumpStopsOff |= outputs.getOrDefault("WEST:0", 0) == 0
+                        && outputs.getOrDefault("WEST:1", 0) == 0;
+            }
             return true;
         }
     }

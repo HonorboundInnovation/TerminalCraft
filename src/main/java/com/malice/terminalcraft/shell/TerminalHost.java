@@ -17,6 +17,8 @@ public interface TerminalHost {
     /** World anchor exposed to server-side UI commands; block-entity hosts inherit these methods. */
     default Level getLevel() { return null; }
     default BlockPos getBlockPos() { return null; }
+    /** Optional peripheral selected for only this open terminal session. */
+    default BlockPos boundPeripheralPosition() { return null; }
     /**
      * Composed shell-facing services. Override this method in migrated hosts; the default adapter
      * preserves compatibility with existing implementations of the legacy methods below.

@@ -141,6 +141,10 @@ dependencies {
 }
 
 tasks.named('processResources', ProcessResources).configure {
+    // HQ cable previews are source assets only. They are not referenced by any live blockstate
+    // and baking them needlessly increases the client resource/model footprint.
+    exclude 'assets/terminalcraft/models/block/**/*_hq_*.json'
+
     var replaceProperties = [
             minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
             forge_version: forge_version, forge_version_range: forge_version_range,

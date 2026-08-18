@@ -91,6 +91,18 @@ public class SensorArrayBlockEntity extends BlockEntity {
         return reading == null ? -1 : reading.signal(channel);
     }
 
+    /** Returns the native numeric sensor value, such as 0..100 fill percent, or -1 when unusable. */
+    public double numericValue(String requested) {
+        SensorChannel channel = channel(requested);
+        SensorReading reading = channel == null ? null : readings.get(channel.name());
+        if (reading == null && channel != null && level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            reading = SensorProbe.read(serverLevel, worldPosition, channel, serverLevel.getGameTime());
+            readings.put(channel.name(), reading);
+        }
+        return reading != null && reading.numeric() && reading.quality() == SensorQuality.OK
+                ? reading.numericValue() : -1;
+    }
+
     public boolean configure(String requestedName, SensorKind kind, String target, String metric,
                              String selector, int interval) {
         if (kind == null) return false;
@@ -153,6 +165,7 @@ public class SensorArrayBlockEntity extends BlockEntity {
     public List<String> summary() {
         List<String> result = new ArrayList<>();
         result.add("sensor-array " + label + " channels=" + channels.size() + "/" + MAX_CHANNELS);
+        result.add("network=" + wirelessHostname() + " wired=yes wireless=yes");
         for (SensorChannel channel : channels) {
             SensorReading reading = readings.get(channel.name());
             result.add(channel.name() + " " + channel.kind().id() + " target=" + channel.target()
@@ -187,6 +200,9 @@ public class SensorArrayBlockEntity extends BlockEntity {
                 && !hostname.equals(RednetNetwork.hostname(serverLevel, deviceId))) return;
         RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
                 worldPosition, true, RednetAutoConfiguration.SENSOR_WIRELESS_RANGE);
+        RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
+                worldPosition, false, 0);
+        com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
         if (!RednetNetwork.registerService(serverLevel, deviceId, hostname,
                 RednetAutoConfiguration.SENSOR_CHANNEL, SensorRemoteRequest.PROTOCOL)) {
             RednetNetwork.closeAll(serverLevel, deviceId);

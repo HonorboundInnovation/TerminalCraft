@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  * Networking for terminal command submission and shell state sync.
  */
 public final class ModNetwork {
-    private static final String PROTOCOL = "5";
+    private static final String PROTOCOL = "6";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(TerminalCraftMod.MODID, "main"),
             () -> PROTOCOL,
@@ -312,7 +312,8 @@ public final class ModNetwork {
                 if (!(player.level().getBlockEntity(menu.targetPosition())
                         instanceof ProgrammableLogicControllerBlockEntity plc)) return;
                 if (!plc.canControl(player)) {
-                    sendPlcResult(player, menu.containerId, false, "PLC is owned by another operator");
+                    sendPlcResult(player, menu.containerId, false,
+                            "PLC is owned by another operator", plc.programSource());
                     return;
                 }
                 boolean success;
@@ -325,7 +326,12 @@ public final class ModNetwork {
                     case RUN -> {
                         plc.start();
                         success = plc.compileError().isEmpty() && plc.isRunning();
-                        message = success ? "Controller running" : "Controller could not start";
+                        if (success) message = "Controller running";
+                        else if (!plc.compileError().isEmpty()) message = plc.compileError();
+                        else if (!plc.controllerFault().isEmpty()) {
+                            message = "Reset required: " + plc.controllerFault();
+                        } else if (plc.programSource().isBlank()) message = "No program is loaded";
+                        else message = "Program contains no executable PLC instructions";
                     }
                     case STOP -> { plc.stop(); success = true; message = "Controller stopped"; }
                     case RESET -> { plc.resetController(); success = true; message = "Controller reset"; }
@@ -347,7 +353,8 @@ public final class ModNetwork {
                 }
                 plc.getLevel().sendBlockUpdated(plc.getBlockPos(), plc.getBlockState(), plc.getBlockState(), 3);
                 sendPlcResult(player, menu.containerId, success,
-                        message == null || message.isBlank() ? "PLC action failed" : message);
+                        message == null || message.isBlank() ? "PLC action failed" : message,
+                        plc.programSource());
             });
             context.setPacketHandled(true);
         }
@@ -355,37 +362,42 @@ public final class ModNetwork {
         private static boolean validSlot(int slot) { return slot >= 0 && slot <= 3; }
     }
 
-    private static void sendPlcResult(ServerPlayer player, int containerId, boolean success, String message) {
+    private static void sendPlcResult(ServerPlayer player, int containerId, boolean success,
+                                      String message, String source) {
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                new PlcResultPacket(containerId, success, message));
+                new PlcResultPacket(containerId, success, message, source));
     }
 
     public static final class PlcResultPacket {
         private final int containerId;
         private final boolean success;
         private final String message;
+        private final String source;
 
-        private PlcResultPacket(int containerId, boolean success, String message) {
+        private PlcResultPacket(int containerId, boolean success, String message, String source) {
             this.containerId = containerId;
             this.success = success;
             this.message = message == null ? "" : message;
+            this.source = source == null ? "" : source;
         }
 
         public static void encode(PlcResultPacket packet, FriendlyByteBuf buffer) {
             buffer.writeVarInt(packet.containerId);
             buffer.writeBoolean(packet.success);
             buffer.writeUtf(packet.message, 512);
+            buffer.writeUtf(packet.source, PlcProgram.MAX_SOURCE_CHARS);
         }
 
         public static PlcResultPacket decode(FriendlyByteBuf buffer) {
-            return new PlcResultPacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readUtf(512));
+            return new PlcResultPacket(buffer.readVarInt(), buffer.readBoolean(), buffer.readUtf(512),
+                    buffer.readUtf(PlcProgram.MAX_SOURCE_CHARS));
         }
 
         public static void handle(PlcResultPacket packet, Supplier<NetworkEvent.Context> contextSupplier) {
             NetworkEvent.Context context = contextSupplier.get();
             context.enqueueWork(() -> DistExecutor.unsafeRunWhenOn(Dist.CLIENT,
                     () -> () -> com.malice.terminalcraft.client.PlcProgrammingScreen.applyResult(
-                            packet.containerId, packet.success, packet.message)));
+                            packet.containerId, packet.success, packet.message, packet.source)));
             context.setPacketHandled(true);
         }
     }

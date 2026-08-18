@@ -16,24 +16,12 @@
         9
       ],
       "faces": {
-        "down": {
-          "texture": "#cable"
-        },
-        "up": {
-          "texture": "#cable"
-        },
-        "north": {
-          "texture": "#cable"
-        },
-        "south": {
-          "texture": "#cable"
-        },
-        "west": {
-          "texture": "#cable"
-        },
-        "east": {
-          "texture": "#cable"
-        }
+        "down": {"texture": "#cable", "tintindex": 0},
+        "up": {"texture": "#cable", "tintindex": 0},
+        "north": {"texture": "#cable", "tintindex": 0},
+        "south": {"texture": "#cable", "tintindex": 0},
+        "west": {"texture": "#cable", "tintindex": 0},
+        "east": {"texture": "#cable", "tintindex": 0}
       }
     }
   ]

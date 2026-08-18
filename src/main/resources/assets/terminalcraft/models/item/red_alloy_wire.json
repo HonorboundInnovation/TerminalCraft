@@ -1,6 +1,1 @@
-{
-  "parent": "minecraft:item/generated",
-  "textures": {
-    "layer0": "terminalcraft:item/red_alloy_wire_custom"
-  }
-}
+{"parent":"terminalcraft:block/red_alloy_wire_inventory"}

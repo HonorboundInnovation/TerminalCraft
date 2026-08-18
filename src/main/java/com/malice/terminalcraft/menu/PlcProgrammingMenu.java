@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.menu;
 
 import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.plc.PlcProgram;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -16,6 +17,7 @@ public final class PlcProgrammingMenu extends AbstractContainerMenu {
     private final BlockPos targetPosition;
     private final ContainerLevelAccess access;
     private final boolean remote;
+    private final String initialSource;
 
     public PlcProgrammingMenu(int containerId, Inventory inventory,
                               ProgrammableLogicControllerBlockEntity plc) {
@@ -29,29 +31,34 @@ public final class PlcProgrammingMenu extends AbstractContainerMenu {
         targetPosition = plc.getBlockPos().immutable();
         access = ContainerLevelAccess.create(plc.getLevel(), targetPosition);
         this.remote = remote;
+        initialSource = plc.programSource();
     }
 
     private PlcProgrammingMenu(int containerId, Inventory inventory, BlockPos position,
-                               ProgrammableLogicControllerBlockEntity plc) {
+                               ProgrammableLogicControllerBlockEntity plc, String initialSource) {
         super(ModRegistries.PLC_PROGRAMMING_MENU.get(), containerId);
         targetPosition = position.immutable();
         access = ContainerLevelAccess.create(plc.getLevel(), targetPosition);
         remote = false;
+        this.initialSource = initialSource == null ? "" : initialSource;
     }
 
     public static PlcProgrammingMenu fromNetwork(int containerId, Inventory inventory, FriendlyByteBuf buffer) {
         BlockPos position = buffer.readBlockPos();
+        String initialSource = buffer.readUtf(PlcProgram.MAX_SOURCE_CHARS);
         BlockEntity entity = inventory.player.level().getBlockEntity(position);
         if (entity instanceof ProgrammableLogicControllerBlockEntity plc) {
-            return new PlcProgrammingMenu(containerId, inventory, position, plc);
+            return new PlcProgrammingMenu(containerId, inventory, position, plc, initialSource);
         }
         ProgrammableLogicControllerBlockEntity fallback = new ProgrammableLogicControllerBlockEntity(
                 position, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get().defaultBlockState());
-        return new PlcProgrammingMenu(containerId, inventory, position, fallback);
+        return new PlcProgrammingMenu(containerId, inventory, position, fallback, initialSource);
     }
 
     public BlockPos targetPosition() { return targetPosition; }
     public boolean remote() { return remote; }
+    /** Server-authoritative source captured at the instant this menu was opened. */
+    public String initialSource() { return initialSource; }
 
     public ProgrammableLogicControllerBlockEntity plc() {
         if (access == ContainerLevelAccess.NULL) return null;

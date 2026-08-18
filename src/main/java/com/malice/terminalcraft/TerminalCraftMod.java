@@ -9,6 +9,9 @@ public final class TerminalCraftMod {
     public static final String MODID = "terminalcraft";
 
     private static final org.slf4j.Logger LOGGER = com.mojang.logging.LogUtils.getLogger();
+    private static final java.util.Set<net.minecraft.server.MinecraftServer> STOPPING_SERVERS =
+            java.util.Collections.newSetFromMap(
+                    java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>()));
 
     public TerminalCraftMod() {
         net.minecraftforge.eventbus.api.IEventBus modBus =
@@ -71,6 +74,7 @@ public final class TerminalCraftMod {
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerStarting(final net.minecraftforge.event.server.ServerStartingEvent event) {
+        STOPPING_SERVERS.remove(event.getServer());
         LOGGER.info("TerminalCraft server ready - shells available");
     }
 
@@ -91,11 +95,13 @@ public final class TerminalCraftMod {
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onChunkLoaded(final net.minecraftforge.event.level.ChunkEvent.Load event) {
         if (event.getLevel() instanceof net.minecraft.server.level.ServerLevel level) {
+            if (isStopping(level.getServer())) return;
             net.minecraft.world.level.ChunkPos position = event.getChunk().getPos();
             // Chunk-load callbacks can run while the full-chunk future is still completing. Defer
             // topology discovery and use getChunkNow so diagnostics never recursively request the
             // same chunk from inside its own completion path.
             level.getServer().execute(() -> {
+                if (isStopping(level.getServer())) return;
                 net.minecraft.world.level.chunk.LevelChunk loaded =
                         level.getChunkSource().getChunkNow(position.x, position.z);
                 if (loaded != null) {
@@ -114,7 +120,8 @@ public final class TerminalCraftMod {
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerTick(final net.minecraftforge.event.TickEvent.ServerTickEvent event) {
-        if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+        if (event.phase == net.minecraftforge.event.TickEvent.Phase.END
+                && !isStopping(event.getServer())) {
             com.malice.terminalcraft.blockentity.MonitorScreensaver.tick(event.getServer());
             com.malice.terminalcraft.blockentity.DisplayTransportRuntime.tick(event.getServer());
             com.malice.terminalcraft.world.TerminalChunkLoader.reconcile(event.getServer());
@@ -123,7 +130,16 @@ public final class TerminalCraftMod {
     }
 
     @net.minecraftforge.eventbus.api.SubscribeEvent
+    public void onServerStopping(final net.minecraftforge.event.server.ServerStoppingEvent event) {
+        STOPPING_SERVERS.add(event.getServer());
+        // Drop the largest world-wide topology snapshot before vanilla begins its final save.
+        // The stopped callback remains as a second cleanup point for normal shutdown paths.
+        com.malice.terminalcraft.network.WiredNetworkTopology.clear(event.getServer());
+    }
+
+    @net.minecraftforge.eventbus.api.SubscribeEvent
     public void onServerStopped(final net.minecraftforge.event.server.ServerStoppedEvent event) {
+        STOPPING_SERVERS.remove(event.getServer());
         com.malice.terminalcraft.blockentity.MonitorScreensaver.clear(event.getServer());
         com.malice.terminalcraft.blockentity.DisplayTransportRuntime.clear(event.getServer());
         com.malice.terminalcraft.device.ServerDeviceManager.clear(event.getServer());
@@ -132,6 +148,11 @@ public final class TerminalCraftMod {
         com.malice.terminalcraft.world.TerminalChunkLoader.clear(event.getServer());
         com.malice.terminalcraft.scada.ScadaRuntime.clear(event.getServer());
         LOGGER.info("TerminalCraft device registry cleared");
+    }
+
+    /** True from the first stopping event until all TerminalCraft runtime state is cleared. */
+    public static boolean isStopping(net.minecraft.server.MinecraftServer server) {
+        return STOPPING_SERVERS.contains(server);
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(

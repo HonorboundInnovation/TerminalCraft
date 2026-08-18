@@ -24,10 +24,13 @@ import java.util.HashSet;
  * RUNG MOTOR = START AND DELAY.DONE AND NOT STOP OR MOTOR
  * </pre>
  *
- * <p>Bindings use {@code REDSTONE side}, {@code BUNDLED side channel}, or {@code SENSOR channel}
- * for a sensor array adjacent to the PLC. Expressions are boolean
- * and support {@code AND}, {@code OR}, {@code NOT}, parentheses, {@code ON}, and {@code OFF}.
- * Timers count game ticks, counters count rising edges, and latches are reset-dominant.</p>
+ * <p>Bindings use {@code REDSTONE side}, {@code BUNDLED side channel}, {@code SENSOR channel},
+ * or {@code SENSOR hostname channel}
+ * for a sensor array or standalone sensor adjacent to the PLC. Expressions are boolean and
+ * support {@code AND}, {@code OR}, {@code NOT}, parentheses, {@code ON}, and {@code OFF}; numeric
+ * comparisons can compare analog values with {@code ==}, {@code !=}, {@code <}, {@code <=},
+ * {@code >}, and {@code >=}. Timers count game ticks, counters count rising edges, and latches are
+ * reset-dominant.</p>
  */
 public final class PlcProgram {
     public static final int MAX_SOURCE_CHARS = 16 * 1024;
@@ -134,15 +137,46 @@ public final class PlcProgram {
         /** Returns a 0..15 signal, or a negative value when the binding cannot be read. */
         int read(Binding binding);
 
+        /**
+         * Returns the numeric value for an analog input. Ordinary redstone and bundled inputs
+         * remain 0..15; sensor analog inputs may expose their native measured value, such as a
+         * 0..100 fill percentage. The default preserves the legacy 0..15 behavior.
+         */
+        default double readAnalog(Binding binding) { return read(binding); }
+
         /** Writes a 0..15 signal and returns false when the binding cannot be driven. */
         boolean write(Binding binding, int strength);
     }
 
     public record ScanResult(boolean success, String fault, Map<String, Boolean> signals,
-                             long scanCount) {
+                             long scanCount, Map<Binding, Integer> desiredOutputs) {
         public ScanResult {
             signals = Map.copyOf(signals);
+            desiredOutputs = Map.copyOf(desiredOutputs);
             fault = fault == null ? "" : fault;
+        }
+
+        public ScanResult(boolean success, String fault, Map<String, Boolean> signals, long scanCount) {
+            this(success, fault, signals, scanCount, Map.of());
+        }
+    }
+
+    /** Generic retained controller memory used across Minecraft chunk unloads and world restarts. */
+    public record RuntimeState(Map<String, Integer> timerElapsed,
+                               Map<String, Integer> counterValues,
+                               Map<String, Boolean> counterPrevious,
+                               Map<String, Boolean> latchValues,
+                               Map<String, Double> pidIntegral,
+                               Map<String, Double> pidPreviousError,
+                               long scanCount) {
+        public RuntimeState {
+            timerElapsed = Map.copyOf(timerElapsed);
+            counterValues = Map.copyOf(counterValues);
+            counterPrevious = Map.copyOf(counterPrevious);
+            latchValues = Map.copyOf(latchValues);
+            pidIntegral = Map.copyOf(pidIntegral);
+            pidPreviousError = Map.copyOf(pidPreviousError);
+            scanCount = Math.max(0, scanCount);
         }
     }
 
@@ -156,6 +190,7 @@ public final class PlcProgram {
         private final Map<String, Boolean> counterPrevious = new LinkedHashMap<>();
         private final Map<String, Boolean> latchValue = new LinkedHashMap<>();
         private final Map<String, Integer> analogValues = new LinkedHashMap<>();
+        private final Map<String, Double> numericValues = new LinkedHashMap<>();
         private final Map<String, Integer> pidOutputs = new LinkedHashMap<>();
         private final Map<String, Double> pidIntegral = new LinkedHashMap<>();
         private final Map<String, Double> pidPreviousError = new LinkedHashMap<>();
@@ -172,7 +207,37 @@ public final class PlcProgram {
         public Map<String, Integer> counterValues() { return Map.copyOf(counterValue); }
         public Map<String, Boolean> latchValues() { return Map.copyOf(latchValue); }
         public Map<String, Integer> analogValues() { return Map.copyOf(analogValues); }
+        public Map<String, Double> numericValues() { return Map.copyOf(numericValues); }
         public Map<String, Integer> pidOutputs() { return Map.copyOf(pidOutputs); }
+
+        public RuntimeState runtimeState() {
+            return new RuntimeState(timerElapsed, counterValue, counterPrevious, latchValue,
+                    pidIntegral, pidPreviousError, scanCount);
+        }
+
+        /** Restores only names present in the currently compiled, bounded program. */
+        public void restoreRuntimeState(RuntimeState state) {
+            if (state == null) return;
+            for (Timer timer : program.timers()) {
+                timerElapsed.put(timer.name(), Math.max(0, Math.min(timer.presetTicks(),
+                        state.timerElapsed().getOrDefault(timer.name(), 0))));
+            }
+            for (Counter counter : program.counters()) {
+                counterValue.put(counter.name(), Math.max(0, Math.min(counter.preset(),
+                        state.counterValues().getOrDefault(counter.name(), 0))));
+                counterPrevious.put(counter.name(), state.counterPrevious().getOrDefault(counter.name(), false));
+            }
+            for (Latch latch : program.latches()) {
+                latchValue.put(latch.name(), state.latchValues().getOrDefault(latch.name(), false));
+                signals.put(latch.name(), latchValue.get(latch.name()));
+            }
+            for (PidLoop pid : program.pidLoops()) {
+                pidIntegral.put(pid.name(), finiteBounded(state.pidIntegral().get(pid.name()), -256.0, 256.0));
+                pidPreviousError.put(pid.name(), finiteBounded(state.pidPreviousError().get(pid.name()),
+                        -1_000_000.0, 1_000_000.0));
+            }
+            scanCount = state.scanCount();
+        }
 
         public void load(Compiled next) {
             program = next == null
@@ -204,6 +269,7 @@ public final class PlcProgram {
             counterPrevious.clear();
             latchValue.clear();
             analogValues.clear();
+            numericValues.clear();
             pidOutputs.clear();
             pidIntegral.clear();
             pidPreviousError.clear();
@@ -220,20 +286,26 @@ public final class PlcProgram {
             }
         }
 
-        public ScanResult scan(Io io) {
-            if (!running) return new ScanResult(true, "", signals, scanCount);
-            if (io == null) return fail(null, "I/O bridge unavailable");
+        /**
+         * Evaluates one scan without changing the outside world.  Minecraft block entities use
+         * this method so all output targets can be validated and committed together after the
+         * complete program has succeeded.
+         */
+        public ScanResult evaluate(Io io) {
+            if (!running) return new ScanResult(true, "", signals, scanCount, Map.of());
+            if (io == null) return fail("I/O bridge unavailable");
 
             for (Binding input : program.inputs()) {
-                int value = io.read(input);
-                if (value < 0) return fail(io, "input unavailable: " + input.name());
-                value = clampSignal(value);
-                analogValues.put(input.name(), value);
-                signals.put(input.name(), value > 0);
+                boolean analog = program.analogInputs().contains(input.name());
+                double value = analog ? io.readAnalog(input) : io.read(input);
+                if (!Double.isFinite(value) || value < 0) return fail("input unavailable: " + input.name());
+                numericValues.put(input.name(), value);
+                analogValues.put(input.name(), displayValue(value));
+                signals.put(input.name(), value > 0.0);
             }
 
             for (Timer timer : program.timers()) {
-                boolean active = timer.expression().evaluate(signals);
+                boolean active = timer.expression().evaluate(signals, numericValues);
                 int elapsed = active
                         ? Math.min(timer.presetTicks(), timerElapsed.getOrDefault(timer.name(), 0)
                                 + program.scanIntervalTicks())
@@ -244,7 +316,7 @@ public final class PlcProgram {
             }
 
             for (Counter counter : program.counters()) {
-                boolean active = counter.expression().evaluate(signals);
+                boolean active = counter.expression().evaluate(signals, numericValues);
                 boolean previous = counterPrevious.getOrDefault(counter.name(), false);
                 int value = counterValue.getOrDefault(counter.name(), 0);
                 if (active && !previous) value = Math.min(counter.preset(), value + 1);
@@ -256,25 +328,26 @@ public final class PlcProgram {
 
             for (Latch latch : program.latches()) {
                 boolean value = latchValue.getOrDefault(latch.name(), false);
-                if (latch.setExpression().evaluate(signals)) value = true;
-                if (latch.resetExpression().evaluate(signals)) value = false;
+                if (latch.setExpression().evaluate(signals, numericValues)) value = true;
+                if (latch.resetExpression().evaluate(signals, numericValues)) value = false;
                 latchValue.put(latch.name(), value);
                 signals.put(latch.name(), value);
             }
 
             Map<String, Boolean> outputs = new LinkedHashMap<>();
             for (Rule rule : program.rules()) {
-                boolean value = rule.expression().evaluate(signals);
+                boolean value = rule.expression().evaluate(signals, numericValues);
                 signals.put(rule.name(), value);
                 outputs.put(rule.name(), value);
             }
             for (AnalogTransfer transfer : program.analogTransfers()) {
-                int source = numericValue(transfer.source());
-                int scaled = transfer.sourceMax() == transfer.sourceMin() ? transfer.targetMin()
+                double source = numericValue(transfer.source());
+                double scaled = transfer.sourceMax() == transfer.sourceMin() ? transfer.targetMin()
                         : transfer.targetMin() + (source - transfer.sourceMin())
                         * (transfer.targetMax() - transfer.targetMin())
                         / (transfer.sourceMax() - transfer.sourceMin());
-                analogValues.put(transfer.target(), clampSignal(scaled));
+                numericValues.put(transfer.target(), scaled);
+                analogValues.put(transfer.target(), clampSignal((int) Math.round(scaled)));
                 signals.put(transfer.target(), scaled > 0);
             }
             for (PidLoop pid : program.pidLoops()) {
@@ -289,37 +362,88 @@ public final class PlcProgram {
                 pidIntegral.put(pid.name(), integral);
                 pidPreviousError.put(pid.name(), error);
                 pidOutputs.put(pid.name(), output);
+                numericValues.put(pid.output(), (double) output);
                 analogValues.put(pid.output(), output);
                 signals.put(pid.output(), output > 0);
             }
+            Map<Binding, Integer> desiredOutputs = new LinkedHashMap<>();
             for (Binding output : program.outputs()) {
                 int strength = program.analogOutputs().contains(output.name())
                         ? analogValues.getOrDefault(output.name(), 0)
                         : (outputs.getOrDefault(output.name(), signals.getOrDefault(output.name(), false)) ? 15 : 0);
-                if (!io.write(output, strength)) {
-                    return fail(io, "output unavailable: " + output.name());
-                }
+                desiredOutputs.put(output, strength);
             }
             scanCount++;
-            return new ScanResult(true, "", signals, scanCount);
+            return new ScanResult(true, "", signals, scanCount, desiredOutputs);
         }
 
-        private ScanResult fail(Io io, String message) {
-            running = false;
-            fault = message == null ? "PLC fault" : message;
-            if (io != null) {
-                for (Binding output : program.outputs()) {
-                    try { io.write(output, 0); } catch (RuntimeException ignored) { /* safe best effort */ }
+        /**
+         * Compatibility entry point for headless callers.  World-backed PLCs deliberately use
+         * {@link #evaluate(Io)} and perform their own atomic commit on the server thread.
+         */
+        public ScanResult scan(Io io) {
+            ScanResult result = evaluate(io);
+            if (!result.success()) {
+                zeroOutputs(io);
+                return result;
+            }
+            List<Map.Entry<Binding, Integer>> outputStrengths = new ArrayList<>(result.desiredOutputs().entrySet());
+            // Turn an output on before turning another output off. This keeps active-low
+            // interlocked devices from seeing a transient all-zero state during a scan.
+            for (Map.Entry<Binding, Integer> output : outputStrengths) {
+                if (output.getValue() <= 0) continue;
+                if (!io.write(output.getKey(), output.getValue())) {
+                    ScanResult failed = fail("output unavailable: " + output.getKey().name());
+                    zeroOutputs(io);
+                    return failed;
                 }
             }
-            return new ScanResult(false, fault, signals, scanCount);
+            for (Map.Entry<Binding, Integer> output : outputStrengths) {
+                if (output.getValue() > 0) continue;
+                if (!io.write(output.getKey(), 0)) {
+                    ScanResult failed = fail("output unavailable: " + output.getKey().name());
+                    zeroOutputs(io);
+                    return failed;
+                }
+            }
+            return result;
         }
 
-        private int numericValue(String reference) {
-            try { return clampSignal((int) Math.round(Double.parseDouble(reference))); }
-            catch (NumberFormatException ignored) {
-                return analogValues.getOrDefault(reference, signals.getOrDefault(reference, false) ? 15 : 0);
+        /** Stops execution after a world-side validation or commit fault. */
+        public ScanResult stopWithFault(String message) {
+            return fail(message);
+        }
+
+        private ScanResult fail(String message) {
+            running = false;
+            fault = message == null ? "PLC fault" : message;
+            return new ScanResult(false, fault, signals, scanCount, Map.of());
+        }
+
+        private void zeroOutputs(Io io) {
+            if (io == null) return;
+            for (Binding output : program.outputs()) {
+                try { io.write(output, 0); } catch (RuntimeException ignored) { /* safe best effort */ }
             }
+        }
+
+        private double numericValue(String reference) {
+            try { return Double.parseDouble(reference); }
+            catch (NumberFormatException ignored) {
+                return numericValues.getOrDefault(reference,
+                        signals.getOrDefault(reference, false) ? 15.0 : 0.0);
+            }
+        }
+
+        private static int displayValue(double value) {
+            if (value >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
+            if (value <= Integer.MIN_VALUE) return Integer.MIN_VALUE;
+            return (int) Math.round(value);
+        }
+
+        private static double finiteBounded(Double value, double minimum, double maximum) {
+            if (value == null || !Double.isFinite(value)) return 0.0;
+            return Math.max(minimum, Math.min(maximum, value));
         }
 
         private static int clampSignal(int value) { return Math.max(0, Math.min(15, value)); }
@@ -367,13 +491,13 @@ public final class PlcProgram {
                     }
                     case "IN", "INPUT" -> {
                         Binding binding = parseBinding(tokens, index,
-                                "IN <name> REDSTONE <side> | IN <name> BUNDLED <side> <channel> | IN <name> SENSOR <channel>");
+                                "IN <name> REDSTONE <side> | IN <name> BUNDLED <side> <channel> | IN <name> SENSOR [hostname] <channel>");
                         if (!bindingNames.add(binding.name())) throw lineError(index, "duplicate binding: " + binding.name());
                         inputs.add(binding);
                     }
                     case "AIN", "ANALOG_IN" -> {
                         Binding binding = parseBinding(tokens, index,
-                                "AIN <name> REDSTONE <side> | AIN <name> BUNDLED <side> <channel> | AIN <name> SENSOR <channel>");
+                                "AIN <name> REDSTONE <side> | AIN <name> BUNDLED <side> <channel> | AIN <name> SENSOR [hostname] <channel>");
                         if (!bindingNames.add(binding.name())) throw lineError(index, "duplicate binding: " + binding.name());
                         inputs.add(binding);
                         analogInputs.add(binding.name());
@@ -409,8 +533,8 @@ public final class PlcProgram {
                         require(tokens, 8, index,
                                 "SCALE <target> = <source> <in_min> <in_max> <out_min> <out_max>");
                         if (!"=".equals(tokens.get(2))) throw lineError(index, "missing '=' in SCALE");
-                        int inputMin = integer(tokens.get(4), 0, 15, index, "input minimum");
-                        int inputMax = integer(tokens.get(5), 0, 15, index, "input maximum");
+                        int inputMin = integer(tokens.get(4), 0, 100, index, "input minimum");
+                        int inputMax = integer(tokens.get(5), 0, 100, index, "input maximum");
                         if (inputMin == inputMax) throw lineError(index, "scale input range must not be zero");
                         analogTransfers.add(new AnalogTransfer(tokens.get(1), tokens.get(3), inputMin, inputMax,
                                 integer(tokens.get(6), 0, 15, index, "output minimum"),
@@ -537,6 +661,11 @@ public final class PlcProgram {
         if (kind == BindingKind.BUNDLED) {
             require(tokens, 5, line, usage);
             channel = integer(tokens.get(4), 0, 15, line, "bundled channel");
+        } else if (kind == BindingKind.SENSOR && tokens.size() == 5) {
+            if (tokens.get(3).contains("/") || tokens.get(4).contains("/")) {
+                throw lineError(line, "sensor hostname and channel must not contain /");
+            }
+            return new Binding(name, kind, tokens.get(3) + "/" + tokens.get(4), -1);
         } else if (tokens.size() != 4) {
             throw lineError(line, usage);
         }
@@ -553,32 +682,76 @@ public final class PlcProgram {
     }
 
     public interface Expression {
-        boolean evaluate(Map<String, Boolean> signals);
+        boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues);
         Set<String> references();
     }
 
     private record Literal(boolean value) implements Expression {
-        @Override public boolean evaluate(Map<String, Boolean> signals) { return value; }
+        @Override public boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues) { return value; }
         @Override public Set<String> references() { return Set.of(); }
     }
     private record Signal(String name) implements Expression {
-        @Override public boolean evaluate(Map<String, Boolean> signals) { return signals.getOrDefault(name, false); }
+        @Override public boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues) {
+            return signals.getOrDefault(name, false);
+        }
         @Override public Set<String> references() { return Set.of(name); }
     }
     private record Not(Expression value) implements Expression {
-        @Override public boolean evaluate(Map<String, Boolean> signals) { return !value.evaluate(signals); }
+        @Override public boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues) {
+            return !value.evaluate(signals, numericValues);
+        }
         @Override public Set<String> references() { return value.references(); }
     }
     private record Binary(Expression left, Expression right, boolean and) implements Expression {
-        @Override public boolean evaluate(Map<String, Boolean> signals) {
-            return and ? left.evaluate(signals) && right.evaluate(signals)
-                    : left.evaluate(signals) || right.evaluate(signals);
+        @Override public boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues) {
+            return and ? left.evaluate(signals, numericValues) && right.evaluate(signals, numericValues)
+                    : left.evaluate(signals, numericValues) || right.evaluate(signals, numericValues);
         }
         @Override public Set<String> references() {
             Set<String> refs = new HashSet<>(left.references());
             refs.addAll(right.references());
             return Set.copyOf(refs);
         }
+    }
+    private record Comparison(String left, String operator, String right) implements Expression {
+        @Override public boolean evaluate(Map<String, Boolean> signals, Map<String, Double> numericValues) {
+            double leftValue = numericOperand(left, signals, numericValues);
+            double rightValue = numericOperand(right, signals, numericValues);
+            return switch (operator) {
+                case "==" -> Double.compare(leftValue, rightValue) == 0;
+                case "!=" -> Double.compare(leftValue, rightValue) != 0;
+                case "<" -> leftValue < rightValue;
+                case "<=" -> leftValue <= rightValue;
+                case ">" -> leftValue > rightValue;
+                case ">=" -> leftValue >= rightValue;
+                default -> false;
+            };
+        }
+
+        @Override public Set<String> references() {
+            Set<String> refs = new HashSet<>();
+            addReference(refs, left);
+            addReference(refs, right);
+            return Set.copyOf(refs);
+        }
+    }
+
+    private static double numericOperand(String operand, Map<String, Boolean> signals,
+                                         Map<String, Double> numericValues) {
+        try { return Double.parseDouble(operand); }
+        catch (NumberFormatException ignored) {
+            return numericValues.getOrDefault(operand, signals.getOrDefault(operand, false) ? 1.0 : 0.0);
+        }
+    }
+
+    private static void addReference(Set<String> references, String operand) {
+        if (!isNumeric(operand) && !"ON".equals(operand) && !"OFF".equals(operand)
+                && !"TRUE".equals(operand) && !"FALSE".equals(operand)) references.add(operand);
+    }
+
+    private static boolean isNumeric(String value) {
+        try { Double.parseDouble(value); return true; }
+        catch (NumberFormatException ignored) { return false; }
     }
 
     private static Expression parseExpression(String source, int line) {
@@ -621,9 +794,26 @@ public final class PlcProgram {
             String token = tokens.get(index++);
             if ("ON".equals(token) || "TRUE".equals(token)) return new Literal(true);
             if ("OFF".equals(token) || "FALSE".equals(token)) return new Literal(false);
-            if (!token.matches("[A-Z_][A-Z0-9_.]*")) throw new IllegalArgumentException("invalid expression token: " + token);
+            if (!token.matches("[A-Z_][A-Z0-9_.]*")) {
+                if (isNumeric(token)) throw new IllegalArgumentException("numeric value requires a comparison operator");
+                throw new IllegalArgumentException("invalid expression token: " + token);
+            }
+            if (!atEnd() && isComparisonOperator(peek())) {
+                String operator = tokens.get(index++);
+                if (atEnd()) throw new IllegalArgumentException("comparison is missing a right-hand value");
+                String right = tokens.get(index++);
+                if (!right.matches("[A-Z_][A-Z0-9_.]*") && !isNumeric(right)) {
+                    throw new IllegalArgumentException("invalid comparison value: " + right);
+                }
+                return new Comparison(token, operator, right);
+            }
             return new Signal(token);
         }
+    }
+
+    private static boolean isComparisonOperator(String token) {
+        return "==".equals(token) || "!=".equals(token) || "<".equals(token)
+                || "<=".equals(token) || ">".equals(token) || ">=".equals(token);
     }
 
     private static List<String> expressionTokens(String source) {
@@ -632,7 +822,25 @@ public final class PlcProgram {
         for (int i = 0; i < source.length(); i++) {
             char c = source.charAt(i);
             if (Character.isWhitespace(c)) { flush(current, result); continue; }
-            if (c == '(' || c == ')' || c == '!') { flush(current, result); result.add(String.valueOf(c)); continue; }
+            if (c == '(' || c == ')') { flush(current, result); result.add(String.valueOf(c)); continue; }
+            if (c == '!') {
+                flush(current, result);
+                if (i + 1 < source.length() && source.charAt(i + 1) == '=') { result.add("!="); i++; }
+                else result.add("!");
+                continue;
+            }
+            if (c == '<' || c == '>') {
+                flush(current, result);
+                if (i + 1 < source.length() && source.charAt(i + 1) == '=') { result.add(c + "="); i++; }
+                else result.add(String.valueOf(c));
+                continue;
+            }
+            if (c == '=') {
+                flush(current, result);
+                if (i + 1 < source.length() && source.charAt(i + 1) == '=') { result.add("=="); i++; }
+                else result.add("=");
+                continue;
+            }
             if (c == '&' || c == '|') {
                 flush(current, result);
                 if (i + 1 < source.length() && source.charAt(i + 1) == c) i++;
@@ -651,7 +859,19 @@ public final class PlcProgram {
         for (int i = 0; i < line.length(); i++) {
             char c = line.charAt(i);
             if (Character.isWhitespace(c)) { flush(current, result); }
-            else if (c == '=') { flush(current, result); result.add("="); }
+            else if ((c == '!' || c == '<' || c == '>')
+                    && i + 1 < line.length() && line.charAt(i + 1) == '=') {
+                flush(current, result);
+                result.add(String.valueOf(c) + "=");
+                i++;
+            }
+            else if (c == '=') {
+                flush(current, result);
+                if (i + 1 < line.length() && line.charAt(i + 1) == '=') {
+                    result.add("==");
+                    i++;
+                } else result.add("=");
+            }
             else { current.append(c); }
         }
         flush(current, result);

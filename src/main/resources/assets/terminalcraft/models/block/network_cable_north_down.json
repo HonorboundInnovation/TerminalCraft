@@ -17,22 +17,28 @@
       ],
       "faces": {
         "down": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         },
         "up": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         },
         "north": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         },
         "south": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         },
         "west": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         },
         "east": {
-          "texture": "#wire"
+          "texture": "#wire",
+          "tintindex": 0
         }
       }
     }

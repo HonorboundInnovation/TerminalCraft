@@ -1,5 +1,7 @@
 package com.malice.terminalcraft.item;
 
+import com.malice.terminalcraft.blockentity.SensorArrayBlockEntity;
+import com.malice.terminalcraft.blockentity.StandaloneSensorBlockEntity;
 import com.malice.terminalcraft.menu.TerminalMenu;
 import com.malice.terminalcraft.network.RednetNetwork;
 import com.malice.terminalcraft.persistence.PersistedDataLimits;
@@ -9,9 +11,11 @@ import com.malice.terminalcraft.shell.PocketShellComputer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.Entity;
@@ -21,7 +25,9 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.network.NetworkHooks;
 import org.jetbrains.annotations.Nullable;
 
@@ -113,21 +119,42 @@ public class PocketTerminalItem extends Item {
         if (level.isClientSide) return InteractionResultHolder.success(stack);
         if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResultHolder.pass(stack);
 
+        openTerminal(serverPlayer, hand, null);
+        return InteractionResultHolder.consume(stack);
+    }
+
+    @Override
+    public InteractionResult useOn(UseOnContext context) {
+        Player player = context.getPlayer();
+        if (player == null || !player.isShiftKeyDown()) return InteractionResult.PASS;
+        BlockPos target = context.getClickedPos();
+        BlockEntity entity = context.getLevel().getBlockEntity(target);
+        if (!(entity instanceof SensorArrayBlockEntity) && !(entity instanceof StandaloneSensorBlockEntity)) {
+            return InteractionResult.PASS;
+        }
+        if (context.getLevel().isClientSide) return InteractionResult.SUCCESS;
+        if (!(player instanceof ServerPlayer serverPlayer)) return InteractionResult.PASS;
+        openTerminal(serverPlayer, context.getHand(), target);
+        return InteractionResult.CONSUME;
+    }
+
+    private static void openTerminal(ServerPlayer serverPlayer, InteractionHand hand, BlockPos boundSensor) {
         MenuProvider provider = new MenuProvider() {
             @Override public Component getDisplayName() {
                 return Component.translatable("item.terminalcraft.pocket_terminal");
             }
 
             @Override public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player p) {
-                return new TerminalMenu(containerId, inventory, new PocketShellComputer(p, hand));
+                return new TerminalMenu(containerId, inventory, new PocketShellComputer(p, hand, boundSensor));
             }
         };
 
         NetworkHooks.openScreen(serverPlayer, provider, buf -> {
             buf.writeByte(TerminalMenu.TYPE_POCKET);
             buf.writeEnum(hand);
+            buf.writeBoolean(boundSensor != null);
+            if (boundSensor != null) buf.writeBlockPos(boundSensor);
         });
-        return InteractionResultHolder.consume(stack);
     }
 
     @Override
@@ -135,6 +162,7 @@ public class PocketTerminalItem extends Item {
         tooltip.add(Component.literal("Label: " + getLabel(stack)));
         tooltip.add(Component.literal("Built-in wireless modem: " + getOpenChannels(stack).size() + " channel(s) open"));
         tooltip.add(Component.literal("Right-click to open bash"));
+        tooltip.add(Component.literal("Shift-right-click a sensor to configure or calibrate it"));
     }
 
     private static int clampChannel(int channel) {

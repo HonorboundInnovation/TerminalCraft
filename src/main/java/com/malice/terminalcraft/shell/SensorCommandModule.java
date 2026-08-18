@@ -5,6 +5,8 @@ import com.malice.terminalcraft.blockentity.StandaloneSensorBlockEntity;
 import com.malice.terminalcraft.sensor.SensorChannel;
 import com.malice.terminalcraft.sensor.SensorKind;
 import com.malice.terminalcraft.sensor.SensorReading;
+import com.malice.terminalcraft.sensor.SensorNetworkResolver;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntity;
 
@@ -13,15 +15,39 @@ import java.util.Locale;
 
 /** Beginner-friendly shell surface for configuring an adjacent Sensor Array. */
 final class SensorCommandModule implements ShellCommandModule {
+    private static final java.util.Set<String> OPERATIONS = java.util.Set.of(
+            "help", "list", "status", "read", "get", "configure", "set", "enable", "disable",
+            "remove", "clear", "calibrate", "range", "interval", "rate", "name", "discover");
+
     @Override
     public void register(Registrar registrar) {
         registrar.register("sensor", this::sensor, "sensors");
     }
 
     private void sensor(Context context, List<String> args) {
-        BlockEntity target = findSensor(context.worldHost());
+        String selector = !args.isEmpty() && args.get(0).startsWith("@")
+                ? args.get(0).substring(1) : "";
+        if (!selector.isEmpty()) args = args.subList(1, args.size());
+        if (selector.isEmpty() && args.size() >= 2
+                && !OPERATIONS.contains(args.get(0).toLowerCase(Locale.ROOT))) {
+            selector = args.get(0);
+            args = args.subList(1, args.size());
+        }
+        if (!args.isEmpty() && "discover".equalsIgnoreCase(args.get(0))) {
+            List<String> sensors = SensorNetworkResolver.describeReachable(context.worldHost());
+            if (sensors.isEmpty()) fail(context, "sensor: no reachable network sensors");
+            else {
+                sensors.forEach(context::printLine);
+                context.setExitCode(0);
+            }
+            return;
+        }
+        BlockEntity target = selector.isEmpty() ? findSensor(context.worldHost())
+                : SensorNetworkResolver.resolve(context.worldHost(), selector);
         if (target == null) {
-            fail(context, "sensor: no adjacent Sensor Array or individual sensor");
+            fail(context, selector.isEmpty()
+                    ? "sensor: no adjacent or bound Sensor Array or individual sensor"
+                    : "sensor: sensor is unknown, unloaded, or not reachable: " + selector);
             return;
         }
         if (args.isEmpty() || "help".equalsIgnoreCase(args.get(0))) {
@@ -60,11 +86,16 @@ final class SensorCommandModule implements ShellCommandModule {
                 if (target instanceof SensorArrayBlockEntity array) interval(context, array, args);
                 else interval(context, (StandaloneSensorBlockEntity) target, args);
             }
+            case "name" -> name(context, target, args);
             default -> fail(context, "sensor: unknown operation; use sensor help");
         }
     }
 
     private static void help(Context context) {
+        context.printLine("sensor [@hostname] <operation> (omit hostname for adjacent/bound sensor)");
+        context.printLine("sensor discover");
+        context.printLine("sensor name <simple-name>");
+        context.printLine("sensor <simple-name> <operation>");
         context.printLine("sensor list|status");
         context.printLine("sensor read <channel>");
         context.printLine("sensor configure <channel> <kind> <target> <metric> [selector] [ticks]");
@@ -238,13 +269,32 @@ final class SensorCommandModule implements ShellCommandModule {
         context.setExitCode(0);
     }
 
+    private static void name(Context context, BlockEntity target, List<String> args) {
+        if (args.size() != 2 || !args.get(1).matches("[A-Za-z][A-Za-z0-9_-]{0,31}")) {
+            fail(context, "sensor: usage: sensor name <simple-name>");
+            return;
+        }
+        String name = args.get(1).toLowerCase(Locale.ROOT);
+        if (target instanceof SensorArrayBlockEntity array) array.setLabel(name);
+        else ((StandaloneSensorBlockEntity) target).setLabel(name);
+        context.printLine("sensor: name set to " + name);
+        context.setExitCode(0);
+    }
+
     private static BlockEntity findSensor(TerminalHost host) {
         if (host == null || host.getLevel() == null || host.getBlockPos() == null) return null;
+        BlockPos bound = host.boundPeripheralPosition();
+        if (bound != null) {
+            BlockEntity entity = host.getLevel().getBlockEntity(bound);
+            if (entity instanceof SensorArrayBlockEntity || entity instanceof StandaloneSensorBlockEntity) {
+                return entity;
+            }
+        }
         for (Direction direction : Direction.values()) {
             BlockEntity entity = host.getLevel().getBlockEntity(host.getBlockPos().relative(direction));
             if (entity instanceof SensorArrayBlockEntity || entity instanceof StandaloneSensorBlockEntity) return entity;
         }
-        return null;
+        return SensorNetworkResolver.resolveSingle(host);
     }
 
     private static void fail(Context context, String message) {

@@ -4,6 +4,10 @@ import com.malice.terminalcraft.block.WiredNetworkNode;
 import com.malice.terminalcraft.block.BundledNetworkCableBlock;
 import com.malice.terminalcraft.block.NetworkCableBlock;
 import com.malice.terminalcraft.block.ModemBlock;
+import com.malice.terminalcraft.block.ProgrammableLogicControllerBlock;
+import com.malice.terminalcraft.block.SensorArrayBlock;
+import com.malice.terminalcraft.block.StandaloneSensorBlock;
+import com.malice.terminalcraft.block.TerminalBlock;
 import com.malice.terminalcraft.blockentity.ModemBlockEntity;
 import com.malice.terminalcraft.blockentity.NetworkCableBlockEntity;
 import com.malice.terminalcraft.blockentity.NetworkRouterBlockEntity;
@@ -11,9 +15,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.core.SectionPos;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -318,7 +325,7 @@ public final class WiredNetworkTopology {
             if (!isRoutingNode(level, nodePos)) return false;
             String modemNetwork = modemNetwork(level, modemPos);
             Direction face = directionFromTo(nodePos, modemPos);
-            if (face != null && level.getBlockEntity(nodePos) instanceof NetworkRouterBlockEntity router) {
+            if (face != null && loadedBlockEntity(level, nodePos) instanceof NetworkRouterBlockEntity router) {
                 return router.isInterfaceEnabled(face)
                         && compatible(modemNetwork, router.getInterfaceNetwork(face));
             }
@@ -337,7 +344,7 @@ public final class WiredNetworkTopology {
             for (BlockPos node : scan.nodes()) {
                 for (Direction direction : Direction.values()) {
                     BlockPos routerPos = node.relative(direction);
-                    if (!(level.getBlockEntity(routerPos) instanceof NetworkRouterBlockEntity router)
+                    if (!(loadedBlockEntity(level, routerPos) instanceof NetworkRouterBlockEntity router)
                             || !hasPhysicalEdge(level, node, routerPos) || !isRoutingNode(level, routerPos)
                             || !router.isInterfaceEnabled(direction.getOpposite())) continue;
                     String network = router.getInterfaceNetwork(direction.getOpposite());
@@ -650,9 +657,9 @@ public final class WiredNetworkTopology {
                     subnet = describeSubnet(level, scan).id();
                     for (BlockPos node : scan.nodes()) subnetByNode.put(node, subnet);
                 }
-                boolean enabled = !(level.getBlockEntity(router) instanceof NetworkRouterBlockEntity blockEntity)
+                boolean enabled = !(loadedBlockEntity(level, router) instanceof NetworkRouterBlockEntity blockEntity)
                         || blockEntity.isInterfaceEnabled(face);
-                String networkName = level.getBlockEntity(router) instanceof NetworkRouterBlockEntity blockEntity
+                String networkName = loadedBlockEntity(level, router) instanceof NetworkRouterBlockEntity blockEntity
                         ? blockEntity.getInterfaceNetwork(face) : "";
                 result.add(new RouterAttachment(router, face, subnet, networkName, enabled));
             }
@@ -774,14 +781,14 @@ public final class WiredNetworkTopology {
         if (!hasPhysicalEdge(level, from, to)) return false;
         Direction direction = directionFromTo(from, to);
         if (direction == null) return true;
-        if (level.getBlockEntity(from) instanceof NetworkRouterBlockEntity source
+        if (loadedBlockEntity(level, from) instanceof NetworkRouterBlockEntity source
                 && !source.isInterfaceEnabled(direction)) return false;
-        return !(level.getBlockEntity(to) instanceof NetworkRouterBlockEntity destination)
+        return !(loadedBlockEntity(level, to) instanceof NetworkRouterBlockEntity destination)
                 || destination.isInterfaceEnabled(direction.getOpposite());
     }
 
     private static String modemNetwork(ServerLevel level, BlockPos modemPos) {
-        return level.getBlockEntity(modemPos) instanceof ModemBlockEntity modem && !modem.isWireless()
+        return loadedBlockEntity(level, modemPos) instanceof ModemBlockEntity modem && !modem.isWireless()
                 ? modem.getNetworkName() : "";
     }
 
@@ -812,7 +819,9 @@ public final class WiredNetworkTopology {
     /** Physical graph neighbors, including surface-cable external corners but excluding false face contacts. */
     private static Set<BlockPos> physicalNeighbors(ServerLevel level, BlockPos pos) {
         Set<BlockPos> result = new HashSet<>();
-        if (level.getBlockState(pos).getBlock() instanceof NetworkCableBlock) {
+        BlockState state = loadedState(level, pos);
+        if (state == null) return result;
+        if (state.getBlock() instanceof NetworkCableBlock && neighborhoodLoaded(level, pos, 2)) {
             result.addAll(NetworkCableBlock.networkNeighbors(level, pos));
         }
         for (Direction direction : Direction.values()) {
@@ -828,18 +837,21 @@ public final class WiredNetworkTopology {
     }
 
     private static boolean hasPhysicalEdge(ServerLevel level, BlockPos first, BlockPos second) {
-        if (level.getBlockState(first).getBlock() instanceof NetworkCableBlock) {
+        BlockState firstState = loadedState(level, first);
+        BlockState secondState = loadedState(level, second);
+        if (firstState == null || secondState == null) return false;
+        if (firstState.getBlock() instanceof NetworkCableBlock && neighborhoodLoaded(level, first, 2)) {
             return NetworkCableBlock.networkNeighbors(level, first).contains(second);
         }
-        if (level.getBlockState(second).getBlock() instanceof NetworkCableBlock) {
+        if (secondState.getBlock() instanceof NetworkCableBlock && neighborhoodLoaded(level, second, 2)) {
             return NetworkCableBlock.networkNeighbors(level, second).contains(first);
         }
         return directionFromTo(first, second) != null;
     }
 
     private static IndexedNode snapshotNode(ServerLevel level, BlockPos pos) {
-        if (!level.hasChunkAt(pos)) return null;
-        if (isWiredModem(level, pos)) {
+        if (loadedState(level, pos) == null) return null;
+        if (isWiredEndpoint(level, pos)) {
             return new IndexedNode(IndexedKind.MODEM, physicalNeighbors(level, pos),
                     modemNetwork(level, pos), Map.of(), 0xffff);
         }
@@ -847,7 +859,7 @@ public final class WiredNetworkTopology {
         IndexedKind kind = isRoutingNode(level, pos) ? IndexedKind.ROUTER : IndexedKind.SEGMENT;
         Map<Direction, IndexedRouterFace> faces = new java.util.EnumMap<>(Direction.class);
         if (kind == IndexedKind.ROUTER) {
-            if (level.getBlockEntity(pos) instanceof NetworkRouterBlockEntity router) {
+            if (loadedBlockEntity(level, pos) instanceof NetworkRouterBlockEntity router) {
                 for (Direction direction : Direction.values()) {
                     faces.put(direction, new IndexedRouterFace(router.isInterfaceEnabled(direction),
                             router.getInterfaceNetwork(direction)));
@@ -864,8 +876,9 @@ public final class WiredNetworkTopology {
 
     private static int physicalChannelMask(ServerLevel level, BlockPos pos, IndexedKind kind) {
         if (kind != IndexedKind.SEGMENT) return 0xffff;
-        if (level.getBlockState(pos).getBlock() instanceof BundledNetworkCableBlock) return 0xffff;
-        if (level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable) {
+        BlockState state = loadedState(level, pos);
+        if (state != null && state.getBlock() instanceof BundledNetworkCableBlock) return 0xffff;
+        if (loadedBlockEntity(level, pos) instanceof NetworkCableBlockEntity cable) {
             int mask = 0;
             for (NetworkCableBlockEntity.Run run : cable.runs()) mask |= 1 << run.channel();
             return mask;
@@ -931,8 +944,23 @@ public final class WiredNetworkTopology {
     }
 
     private static boolean isWiredModem(ServerLevel level, BlockPos pos) {
-        return level.hasChunkAt(pos) && level.getBlockEntity(pos) instanceof ModemBlockEntity modem
-                && !modem.isWireless();
+        return isWiredEndpoint(level, pos);
+    }
+
+    private static boolean isWiredEndpoint(ServerLevel level, BlockPos pos) {
+        // This method runs from the chunk-load event itself. Never call Level#getBlockEntity here:
+        // it may synchronously request a neighboring chunk and make the server thread wait on the
+        // very chunk-loading queue it is currently draining.
+        LevelChunk chunk = level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+        if (chunk == null) return false;
+        BlockState state = chunk.getBlockState(pos);
+        if (state.getBlock() instanceof StandaloneSensorBlock
+                || state.getBlock() instanceof SensorArrayBlock
+                || state.getBlock() instanceof TerminalBlock
+                || state.getBlock() instanceof ProgrammableLogicControllerBlock) return true;
+        if (!(state.getBlock() instanceof ModemBlock)) return false;
+        BlockEntity entity = chunk.getBlockEntity(pos);
+        return entity instanceof ModemBlockEntity modem && !modem.isWireless();
     }
 
     private static boolean isSegmentNode(ServerLevel level, BlockPos pos) {
@@ -940,16 +968,46 @@ public final class WiredNetworkTopology {
     }
 
     private static boolean isRoutingNode(ServerLevel level, BlockPos pos) {
-        if (!level.hasChunkAt(pos)) return false;
-        BlockState state = level.getBlockState(pos);
+        BlockState state = loadedState(level, pos);
+        if (state == null) return false;
         return state.getBlock() instanceof WiredNetworkNode node
                 && node.forwardsWiredTraffic(level, pos, state)
                 && node.routesWiredTraffic(level, pos, state);
     }
 
     private static boolean isForwardingNode(ServerLevel level, BlockPos pos) {
-        if (!level.hasChunkAt(pos)) return false;
-        BlockState state = level.getBlockState(pos);
+        BlockState state = loadedState(level, pos);
+        if (state == null) return false;
         return state.getBlock() instanceof WiredNetworkNode node && node.forwardsWiredTraffic(level, pos, state);
+    }
+
+    @Nullable
+    private static LevelChunk loadedChunk(ServerLevel level, BlockPos pos) {
+        return level.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+    }
+
+    @Nullable
+    private static BlockState loadedState(ServerLevel level, BlockPos pos) {
+        LevelChunk chunk = loadedChunk(level, pos);
+        return chunk == null ? null : chunk.getBlockState(pos);
+    }
+
+    @Nullable
+    private static BlockEntity loadedBlockEntity(ServerLevel level, BlockPos pos) {
+        LevelChunk chunk = loadedChunk(level, pos);
+        return chunk == null ? null : chunk.getBlockEntity(pos);
+    }
+
+    private static boolean neighborhoodLoaded(ServerLevel level, BlockPos center, int radius) {
+        int minChunkX = (center.getX() - radius) >> 4;
+        int maxChunkX = (center.getX() + radius) >> 4;
+        int minChunkZ = (center.getZ() - radius) >> 4;
+        int maxChunkZ = (center.getZ() + radius) >> 4;
+        for (int chunkX = minChunkX; chunkX <= maxChunkX; chunkX++) {
+            for (int chunkZ = minChunkZ; chunkZ <= maxChunkZ; chunkZ++) {
+                if (level.getChunkSource().getChunkNow(chunkX, chunkZ) == null) return false;
+            }
+        }
+        return true;
     }
 }

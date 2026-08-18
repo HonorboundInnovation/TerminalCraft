@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** Persistent multipart occupancy and sixteen-channel state for one bundled-cable space. */
@@ -86,6 +87,30 @@ public class BundledCableBlockEntity extends BlockEntity {
         localOutput[index] = bounded;
         setChanged();
         recomputeComponent();
+    }
+
+    /**
+     * Applies several channel sources as one Minecraft-world transaction.  PLC scans use this so
+     * an interlocked pair cannot be observed halfway through a scan and the connected component is
+     * traversed at most once for the complete output snapshot.
+     *
+     * @return true when at least one local channel changed
+     */
+    public boolean setLocalOutputs(Map<Integer, Integer> strengths) {
+        if (strengths == null || strengths.isEmpty()) return false;
+        boolean changed = false;
+        for (Map.Entry<Integer, Integer> entry : strengths.entrySet()) {
+            int channel = requireChannel(entry.getKey());
+            int bounded = Math.max(0, Math.min(15, entry.getValue()));
+            if (localOutput[channel] == bounded) continue;
+            localOutput[channel] = bounded;
+            changed = true;
+        }
+        if (changed) {
+            setChanged();
+            recomputeComponent();
+        }
+        return changed;
     }
 
     /** Updates the sixteen color-selected breakout sources; direct uncolored redstone is isolated. */

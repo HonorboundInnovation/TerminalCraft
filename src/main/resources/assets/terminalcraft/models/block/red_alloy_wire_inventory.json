@@ -1,0 +1,32 @@
+{
+  "textures": {
+    "particle": "terminalcraft:block/red_alloy_wire_custom",
+    "wire": "terminalcraft:block/red_alloy_wire_custom"
+  },
+  "elements": [
+    {
+      "from": [0, 7, 7],
+      "to": [16, 9, 9],
+      "faces": {
+        "down": {"texture": "#wire", "tintindex": 0},
+        "up": {"texture": "#wire", "tintindex": 0},
+        "north": {"texture": "#wire", "tintindex": 0},
+        "south": {"texture": "#wire", "tintindex": 0},
+        "west": {"texture": "#wire", "tintindex": 0},
+        "east": {"texture": "#wire", "tintindex": 0}
+      }
+    },
+    {
+      "from": [2, 6.5, 7.5],
+      "to": [14, 9.5, 8.5],
+      "faces": {
+        "down": {"texture": "#wire", "tintindex": 0},
+        "up": {"texture": "#wire", "tintindex": 0},
+        "north": {"texture": "#wire", "tintindex": 0},
+        "south": {"texture": "#wire", "tintindex": 0},
+        "west": {"texture": "#wire", "tintindex": 0},
+        "east": {"texture": "#wire", "tintindex": 0}
+      }
+    }
+  ]
+}

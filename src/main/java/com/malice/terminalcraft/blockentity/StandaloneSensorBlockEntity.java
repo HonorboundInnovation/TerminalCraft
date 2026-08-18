@@ -14,6 +14,7 @@ import com.malice.terminalcraft.sensor.SensorChannel;
 import com.malice.terminalcraft.sensor.SensorKind;
 import com.malice.terminalcraft.sensor.SensorProbe;
 import com.malice.terminalcraft.sensor.SensorReading;
+import com.malice.terminalcraft.sensor.SensorQuality;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.Connection;
@@ -101,6 +102,14 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
         return sample == null ? -1 : sample.signal(configuration());
     }
 
+    /** Returns the native numeric sensor value, such as 0..100 fill percent, or -1 when unusable. */
+    public double numericValue() {
+        if (!enabled) return -1;
+        SensorReading sample = reading();
+        return sample != null && sample.numeric() && sample.quality() == SensorQuality.OK
+                ? sample.numericValue() : -1;
+    }
+
     public boolean configure(String requestedMetric, String requestedSelector, int requestedInterval) {
         try {
             SensorChannel next = SensorChannel.create(CHANNEL, sensorKind(), target(), requestedMetric,
@@ -151,6 +160,7 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
         SensorReading sample = reading;
         return List.of(
                 "standalone-sensor " + label + " kind=" + sensorKind().id() + " target=" + target(),
+                "network=" + wirelessHostname() + " wired=yes wireless=yes",
                 "value metric=" + metric + " " + (enabled ? "on" : "off")
                         + (sample == null ? " sample=(pending)" : " sample=" + display(sample)),
                 "calibration=" + minimum + ".." + maximum + (invert ? " inverted" : "")
@@ -180,6 +190,9 @@ public class StandaloneSensorBlockEntity extends BlockEntity {
                 && !hostname.equals(RednetNetwork.hostname(serverLevel, deviceId))) return;
         RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
                 worldPosition, true, RednetAutoConfiguration.SENSOR_WIRELESS_RANGE);
+        RednetNetwork.open(serverLevel, deviceId, RednetAutoConfiguration.SENSOR_CHANNEL,
+                worldPosition, false, 0);
+        com.malice.terminalcraft.network.WiredNetworkTopology.invalidate(serverLevel, worldPosition);
         if (!RednetNetwork.registerService(serverLevel, deviceId, hostname,
                 RednetAutoConfiguration.SENSOR_CHANNEL, SensorRemoteRequest.PROTOCOL)) {
             RednetNetwork.closeAll(serverLevel, deviceId);

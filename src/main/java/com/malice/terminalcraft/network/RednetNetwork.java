@@ -548,7 +548,9 @@ public final class RednetNetwork {
         SUBS.computeIfAbsent(key, k -> new ArrayList<>());
         List<Subscription> list = SUBS.get(key);
         synchronized (list) {
-            list.removeIf(s -> s.modemId.equals(modemId) && s.channel == chOpen);
+            // One logical device may expose the same service over both a cable and wireless.
+            list.removeIf(s -> s.modemId.equals(modemId) && s.channel == chOpen
+                    && s.wireless == wireless);
             list.add(new Subscription(modemId, chOpen, pos, wireless, range));
         }
         QUEUES.computeIfAbsent(key.endpoint(modemId), id -> new ArrayList<>());

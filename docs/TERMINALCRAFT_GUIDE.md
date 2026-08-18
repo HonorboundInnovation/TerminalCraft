@@ -123,7 +123,7 @@ A placed, persistent Bash-style computer. Use it as the normal workstation for s
 
 ### Pocket Terminal
 
-A stack-size-one handheld computer opened by using the item. Its shell state, label, stable modem identity, and open channels are stored on the item. It includes a built-in wireless modem with a default 64-block range and up to 128 open channels, and rebinding follows the carrying player. It is not a placed world host and therefore cannot provide every adjacency-based operation available to a placed terminal.
+A stack-size-one handheld computer opened by using the item. Its shell state, label, stable modem identity, and open channels are stored on the item. It includes a built-in wireless modem with a default 64-block range and up to 128 open channels, and rebinding follows the carrying player. Shift-right-click any Sensor Array or individual sensor with the Pocket Terminal to open a session in which that clicked sensor is treated as adjacent; `sensor configure`, `sensor calibrate`, and the other local sensor commands then target it directly.
 
 ### TerminalCraft Guide
 
@@ -283,7 +283,7 @@ sensor read tank_level
 sensor calibrate tank_level 0 100
 ```
 
-PLC programs can consume the calibrated 0-15 output from an adjacent array:
+PLC programs can consume an adjacent sensor or a named sensor reachable by network cable or wireless:
 
 ```text
 SCAN 2
@@ -291,6 +291,19 @@ AIN TANK SENSOR tank_level
 AOUT PUMP REDSTONE EAST
 RUNG PUMP = TANK
 ```
+
+When exactly one sensor is reachable, ordinary terminal commands such as `sensor status`,
+`sensor configure ...`, and `sensor calibrate ...` discover it automatically. Likewise,
+`AIN TANK SENSOR tank_level` in a PLC uses an adjacent sensor first and otherwise discovers the
+single reachable network sensor. DNS selectors remain an optional advanced feature for networks
+with several sensors. A wired link is made by
+connecting Network Cable to both endpoints. A terminal or PLC uses an adjacent wireless modem for
+wireless access; the Pocket Terminal uses its built-in modem.
+
+For a network with several sensors, run `sensor discover`. While adjacent to a sensor or after
+shift-right-clicking it with a Pocket Terminal, assign a short name with `sensor name tank`.
+Then use `sensor tank status`, `sensor tank calibrate value 0 100`, or the PLC binding
+`AIN LEVEL SENSOR tank value`. Duplicate names are reported and are never selected by guessing.
 
 The array also registers as a normal `device` endpoint with `sensor.list`, `sensor.read`,
 `sensor.snapshot`, configuration, calibration, enable, remove, and interval methods. A modem touching
@@ -1478,12 +1491,14 @@ RUNG RUNNING = MOTOR OR SPEED
 
 Use `REDSTONE side` for vanilla power and `BUNDLED side channel` for a 0–15 cable channel. Boolean
 expressions use `AND`, `OR`, `NOT`, parentheses, `ON`, and `OFF`. Analog bindings use `AIN` and
-`AOUT` and carry bounded 0–15 values. `MOVE` copies an analog value and `SCALE` linearly maps an
+`AOUT`; redstone analog inputs are 0–15, while sensor inputs preserve the sensor's native numeric
+value (for example, a fluid `fill_percent` reading is 0–100). `MOVE` copies an analog value and `SCALE` linearly maps an
 input range to an output range. `PID` defines a bounded discrete controller, for example:
 `PID LOOP SETPOINT 12 PROCESS SENSOR OUTPUT HEATER KP 2 KI 0.1 KD 0.2`. Timer and counter flags are named
 `NAME.ACTIVE` and `NAME.DONE`; counters increment on rising edges. Latches are reset-dominant.
-`AIN name SENSOR channel` reads the calibrated signal from an adjacent Sensor Array or individual
-sensor (`value`). Sensor bindings
+`AIN name SENSOR channel` reads the numeric value from an adjacent Sensor Array or individual
+sensor (`value`). `AIN name SENSOR hostname channel` reads a named sensor reachable through
+Network Cable or an adjacent wireless modem. Sensor bindings
 are input-only, and a non-`ok` sample stops the PLC and clears its outputs.
 
 #### PLC scan model
@@ -1491,7 +1506,7 @@ are input-only, and a non-`ok` sample stops the PLC and clears its outputs.
 The PLC is a deterministic scan controller, not a general-purpose shell. On each scan it performs
 the following order:
 
-1. Read and clamp every declared input to signal strength `0..15`.
+1. Read declared inputs. Redstone inputs are `0..15`; sensor analog inputs retain their native numeric value.
 2. Convert digital inputs to false (`0`) or true (`1..15`).
 3. Update timers, rising-edge counters, and reset-dominant latches.
 4. Evaluate Boolean rungs in source order.
@@ -1519,21 +1534,25 @@ Clutches and Funnels where necessary.
 IN <name> REDSTONE <side>
 IN <name> BUNDLED <side> <channel 0-15>
 IN <name> SENSOR <sensor-channel>
+IN <name> SENSOR <sensor-hostname> <sensor-channel>
 OUT <name> REDSTONE <side>
 OUT <name> BUNDLED <side> <channel 0-15>
 
 AIN <name> REDSTONE <side>
 AIN <name> BUNDLED <side> <channel 0-15>
 AIN <name> SENSOR <sensor-channel>
+AIN <name> SENSOR <sensor-hostname> <sensor-channel>
 AOUT <name> REDSTONE <side>
 AOUT <name> BUNDLED <side> <channel 0-15>
 ```
 
-Use `IN`/`OUT` when only off/on matters. Use `AIN`/`AOUT` when the full redstone strength matters.
+Use `IN`/`OUT` when only off/on matters. Use `AIN`/`AOUT` when the numeric value or full redstone
+strength matters.
 Sides are relative to the PLC block (`NORTH`, `SOUTH`, `EAST`, `WEST`, `UP`, `DOWN`). A bundled
 binding selects one of the 16 channels on that face. Sensor bindings are input-only and name the
 configured channel exposed by an adjacent Sensor Array or individual sensor; `value` is the standard
-calibrated channel on an individual sensor.
+numeric channel on an individual sensor. The two-argument sensor form selects a named sensor over
+a physically reachable wired or wireless network.
 
 #### Boolean expressions and rungs
 
@@ -1541,14 +1560,17 @@ calibrated channel on an individual sensor.
 RUNG <output-or-signal> = <expression>
 ```
 
-Expressions support named signals, `ON`/`TRUE`, `OFF`/`FALSE`, parentheses, `NOT`/`!`,
-`AND`/`&&`, and `OR`/`||`. Precedence is `NOT`, then `AND`, then `OR`. Parenthesize safety logic
+Expressions support named signals, numeric literals, comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`),
+`ON`/`TRUE`, `OFF`/`FALSE`, parentheses, `NOT`/`!`, `AND`/`&&`, and `OR`/`||`. Precedence is
+comparisons, `NOT`, then `AND`, then `OR`. Parenthesize safety logic
 when the intended order is not immediately obvious.
 
 ```text
 RUNG MOTOR = RUN AND GUARD AND NOT ESTOP
 RUNG ALARM = ESTOP OR OVERLOAD
 RUNG PERMISSIVE = (PRESSURE_OK OR BYPASS) AND GUARD
+RUNG EMPTY = LEVEL == 0
+RUNG FULL = LEVEL == 100
 ```
 
 A rung with the same name as a digital `OUT` controls that output. A rung may also create an

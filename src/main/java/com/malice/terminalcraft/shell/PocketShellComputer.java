@@ -22,11 +22,17 @@ import java.util.UUID;
 public class PocketShellComputer implements ShellComputer {
     private final Player player;
     private final InteractionHand hand;
+    private final BlockPos boundPeripheralPosition;
     private final BashShell shell;
 
     public PocketShellComputer(Player player, InteractionHand hand) {
+        this(player, hand, null);
+    }
+
+    public PocketShellComputer(Player player, InteractionHand hand, BlockPos boundPeripheralPosition) {
         this.player = player;
         this.hand = hand;
+        this.boundPeripheralPosition = boundPeripheralPosition == null ? null : boundPeripheralPosition.immutable();
         this.shell = PocketTerminalItem.loadShell(player.getItemInHand(hand));
         this.shell.setHost(this);
     }
@@ -59,6 +65,7 @@ public class PocketShellComputer implements ShellComputer {
 
     @Override public Level getLevel() { return player.level(); }
     @Override public BlockPos getBlockPos() { return player.blockPosition(); }
+    @Override public BlockPos boundPeripheralPosition() { return boundPeripheralPosition; }
     @Override public BlockState getBlockState() { return getLevel().getBlockState(getBlockPos()); }
     @Override public int getRedstoneInput(String side) { return -1; }
     @Override public int getRedstoneOutput(String side) { return 0; }
@@ -70,6 +77,7 @@ public class PocketShellComputer implements ShellComputer {
         List<String> found = new ArrayList<>();
         found.add("self:pocket");
         found.add("self:wireless_modem");
+        if (boundPeripheralPosition != null) found.add("bound:sensor");
         return found;
     }
 

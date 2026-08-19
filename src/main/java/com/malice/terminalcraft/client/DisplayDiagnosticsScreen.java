@@ -3,6 +3,7 @@ package com.malice.terminalcraft.client;
 import com.malice.terminalcraft.block.VideoCableBlock;
 import com.malice.terminalcraft.blockentity.VideoCableBlockEntity;
 import com.malice.terminalcraft.blockentity.WirelessDisplayLinkBlockEntity;
+import com.malice.terminalcraft.blockentity.MonitorBlockEntity;
 import com.malice.terminalcraft.menu.DisplayDiagnosticsMenu;
 import com.malice.terminalcraft.network.ModNetwork;
 import net.minecraft.client.gui.GuiGraphics;
@@ -17,7 +18,9 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
     private static final int PANEL_WIDTH = 360;
     private static final int PANEL_HEIGHT = 220;
     private EditBox channel;
+    private EditBox fontColor;
     private Button roleButton;
+    private double pendingScale = 1.0;
     private String notice = "";
 
     public DisplayDiagnosticsScreen(DisplayDiagnosticsMenu menu, Inventory inventory, Component title) {
@@ -48,6 +51,33 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
                     .bounds(leftPos + 128, topPos + 86, 70, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Apply Channel"), button -> applyChannel())
                     .bounds(leftPos + 204, topPos + 86, 138, 20).build());
+        } else if (menu.isMonitor()) {
+            pendingScale = currentScale();
+            addRenderableWidget(Button.builder(Component.literal("−  Smaller"), button -> adjustScale(-0.5))
+                    .bounds(leftPos + 18, topPos + 54, 96, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Reset 1.0×"), button -> setScale(1.0))
+                    .bounds(leftPos + 122, topPos + 54, 96, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Larger  +"), button -> adjustScale(0.5))
+                    .bounds(leftPos + 226, topPos + 54, 116, 20).build());
+
+            fontColor = new EditBox(font, leftPos + 18, topPos + 103, 150, 18,
+                    Component.literal("Font color"));
+            fontColor.setMaxLength(7);
+            fontColor.setValue(formatColor(currentForeground()));
+            fontColor.setResponder(value -> notice = "Unsaved color edit");
+            addRenderableWidget(fontColor);
+            addRenderableWidget(Button.builder(Component.literal("Apply Color"), button -> applyAppearance())
+                    .bounds(leftPos + 176, topPos + 101, 104, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Green"), button -> applyPreset(0x66FF99))
+                    .bounds(leftPos + 18, topPos + 132, 60, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("White"), button -> applyPreset(0xF0F0F0))
+                    .bounds(leftPos + 84, topPos + 132, 60, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Amber"), button -> applyPreset(0xFFB347))
+                    .bounds(leftPos + 150, topPos + 132, 60, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Cyan"), button -> applyPreset(0x55FFFF))
+                    .bounds(leftPos + 216, topPos + 132, 60, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Red"), button -> applyPreset(0xFF5555))
+                    .bounds(leftPos + 282, topPos + 132, 60, 20).build());
         }
     }
 
@@ -55,6 +85,49 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
         if (channel == null) return;
         ModNetwork.sendDisplayConfig(menu.containerId, menu.targetPosition(), channel.getValue(), currentSource());
         notice = "Configuration sent";
+    }
+
+    private void adjustScale(double change) {
+        setScale(Math.max(0.5, Math.min(5.0, pendingScale + change)));
+    }
+
+    private void setScale(double scale) {
+        pendingScale = scale;
+        applyAppearance();
+    }
+
+    private void applyPreset(int color) {
+        if (fontColor != null) fontColor.setValue(formatColor(color));
+        sendAppearance(color);
+    }
+
+    private void applyAppearance() {
+        Integer color = parseColor(fontColor == null ? "" : fontColor.getValue());
+        if (color == null) {
+            notice = "Enter a six-digit RGB color, for example #66FF99";
+            return;
+        }
+        sendAppearance(color);
+    }
+
+    private void sendAppearance(int color) {
+        ModNetwork.sendMonitorConfig(menu.containerId, menu.targetPosition(), pendingScale, color);
+        notice = "Wall appearance sent";
+    }
+
+    private static Integer parseColor(String value) {
+        String safe = value == null ? "" : value.trim();
+        if (safe.startsWith("#")) safe = safe.substring(1);
+        if (safe.length() != 6) return null;
+        try {
+            return Integer.parseInt(safe, 16);
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static String formatColor(int color) {
+        return String.format("#%06X", color & 0xFFFFFF);
     }
 
     private String currentChannel() {
@@ -71,6 +144,22 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
                 && link.isSource();
     }
 
+    private double currentScale() {
+        if (minecraft == null || minecraft.level == null) return 1.0;
+        if (minecraft.level.getBlockEntity(menu.targetPosition()) instanceof MonitorBlockEntity monitor) {
+            return monitor.wallTextScale();
+        }
+        return 1.0;
+    }
+
+    private int currentForeground() {
+        if (minecraft == null || minecraft.level == null) return 0x66FF99;
+        if (minecraft.level.getBlockEntity(menu.targetPosition()) instanceof MonitorBlockEntity monitor) {
+            return monitor.wallForegroundColor();
+        }
+        return 0x66FF99;
+    }
+
     private String roleLabel() { return currentSource() ? "Role: SOURCE" : "Role: RECEIVER"; }
 
     @Override
@@ -78,6 +167,10 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
         super.containerTick();
         if (roleButton != null) roleButton.setMessage(Component.literal(roleLabel()));
         if (channel != null && !channel.isFocused()) channel.setValue(currentChannel());
+        if (menu.isMonitor()) {
+            pendingScale = currentScale();
+            if (fontColor != null && !fontColor.isFocused()) fontColor.setValue(formatColor(currentForeground()));
+        }
     }
 
     @Override
@@ -86,9 +179,12 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
         graphics.fill(left - 3, top - 3, right + 3, bottom + 3, 0xFF080A0D);
         graphics.fill(left, top, right, bottom, 0xFF111820);
         graphics.fill(left, top, right, top + 28, 0xFF1E3A4F);
-        graphics.drawString(font, menu.isLink() ? "DISPLAY LINK // CONFIGURATION" : "VIDEO CABLE // DIAGNOSTICS",
+        String heading = menu.isLink() ? "DISPLAY LINK // CONFIGURATION"
+                : menu.isMonitor() ? "MONITOR WALL // APPEARANCE" : "VIDEO CABLE // DIAGNOSTICS";
+        graphics.drawString(font, heading,
                 left + 12, top + 9, 0xFFE7F4FF, false);
         if (menu.isLink()) renderLink(graphics, left, top);
+        else if (menu.isMonitor()) renderMonitor(graphics, left, top);
         else renderCable(graphics, left, top);
         graphics.drawString(font, notice, left + 18, bottom - 25, 0xFF8EA8B8, false);
     }
@@ -117,6 +213,22 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
         graphics.drawString(font, "Component limit: 2,048 cable nodes", left + 18, top + 117, 0xFFC8D7DF, false);
         graphics.drawString(font, "Display cells only; no redstone or RedNet traffic", left + 18, top + 145, 0xFF718A99, false);
         graphics.drawString(font, "Add a terminal/PLC and monitor at cable endpoints", left + 18, top + 164, 0xFF718A99, false);
+    }
+
+    private void renderMonitor(GuiGraphics graphics, int left, int top) {
+        if (minecraft == null || minecraft.level == null
+                || !(minecraft.level.getBlockEntity(menu.targetPosition()) instanceof MonitorBlockEntity monitor)) return;
+        graphics.drawString(font, "FONT SIZE  " + String.format("%.1f×", pendingScale),
+                left + 18, top + 41, 0xFF8EA8B8, false);
+        graphics.drawString(font, "DEFAULT FONT COLOR (RGB HEX)", left + 18, top + 90, 0xFF8EA8B8, false);
+        int color = currentForeground();
+        graphics.fill(left + 290, top + 101, left + 342, top + 121, 0xFF000000 | color);
+        graphics.drawString(font, "Wall: " + (monitor.wallColumns() / MonitorBlockEntity.MAX_LINE_LEN)
+                        + "×" + (monitor.wallRows() / MonitorBlockEntity.MAX_LINES)
+                        + " monitors • setting applies to every connected tile",
+                left + 18, top + 166, 0xFFC8D7DF, false);
+        graphics.drawString(font, "Program-authored per-cell colors remain available.",
+                left + 18, top + 181, 0xFF718A99, false);
     }
 
     @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {}

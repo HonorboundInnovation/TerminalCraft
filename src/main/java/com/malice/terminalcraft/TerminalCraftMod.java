@@ -143,6 +143,7 @@ public final class TerminalCraftMod {
         com.malice.terminalcraft.blockentity.MonitorScreensaver.clear(event.getServer());
         com.malice.terminalcraft.blockentity.DisplayTransportRuntime.clear(event.getServer());
         com.malice.terminalcraft.device.ServerDeviceManager.clear(event.getServer());
+        com.malice.terminalcraft.operations.OperationsProjectRuntime.clear(event.getServer());
         com.malice.terminalcraft.network.RednetNetwork.clear(event.getServer());
         com.malice.terminalcraft.network.WiredNetworkTopology.clear(event.getServer());
         com.malice.terminalcraft.world.TerminalChunkLoader.clear(event.getServer());
@@ -198,6 +199,16 @@ public final class TerminalCraftMod {
             event.register((stack, tintIndex) -> tintIndex == 0
                             ? com.malice.terminalcraft.item.RedAlloyWireItem.color(stack).getTextColor() : 0xFFFFFFFF,
                     com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_WIRE_ITEM.get());
+        }
+
+        @net.minecraftforge.eventbus.api.SubscribeEvent
+        public static void onBlockColors(final net.minecraftforge.client.event.RegisterColorHandlersEvent.Block event) {
+            event.register((state, level, pos, tintIndex) -> tintIndex == 0
+                            ? com.malice.terminalcraft.client.CableColorHandlers.redAlloy(state) : 0xFFFFFF,
+                    com.malice.terminalcraft.registry.ModRegistries.RED_ALLOY_WIRE_BLOCK.get());
+            event.register((state, level, pos, tintIndex) -> tintIndex == 0
+                            ? com.malice.terminalcraft.client.CableColorHandlers.network(state) : 0xFFFFFF,
+                    com.malice.terminalcraft.registry.ModRegistries.NETWORK_CABLE_BLOCK.get());
         }
     }
 }

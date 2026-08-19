@@ -131,11 +131,14 @@ public final class MonitorWallGameTests {
                     List.of(DeviceValue.of("ABCD"), DeviceValue.of("0123"), DeviceValue.of("4567"))).isSuccess(),
                     "wall blit must succeed across the tile boundary");
 
-            helper.assertTrue(anchor.terminalSurface().characterAt(38, 0) == 'A'
-                            && anchor.terminalSurface().characterAt(39, 0) == 'B'
-                            && second.terminalSurface().characterAt(0, 0) == 'C'
-                            && second.terminalSurface().characterAt(1, 0) == 'D',
-                    "wall blit must write global cells into the two persisted tile surfaces");
+            char anchor38 = anchor.terminalSurface().characterAt(38, 0);
+            char anchor39 = anchor.terminalSurface().characterAt(39, 0);
+            char second0 = second.terminalSurface().characterAt(0, 0);
+            char second1 = second.terminalSurface().characterAt(1, 0);
+            helper.assertTrue(anchor38 == 'A' && anchor39 == 'B' && second0 == 'C' && second1 == 'D',
+                    "wall blit must write global cells into the two persisted tile surfaces; actual="
+                            + printable(anchor38) + printable(anchor39) + "/"
+                            + printable(second0) + printable(second1));
             DeviceValue.MapValue delta = (DeviceValue.MapValue) access.call(anchor.getDeviceId(), "term.delta",
                     List.of(DeviceValue.of(before), DeviceValue.of(128))).value().orElseThrow();
             helper.assertTrue(!((DeviceValue.BooleanValue) delta.values().get("complete")).value()
@@ -173,6 +176,42 @@ public final class MonitorWallGameTests {
         });
     }
 
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void wallFontScaleAndColorPersistAcrossEveryTile(GameTestHelper helper) {
+        helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+        helper.runAfterDelay(5, () -> {
+            MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
+            DeviceAccess access = ServerDeviceManager.access(helper.getLevel().getServer(), new DeviceCallContext(
+                    UUID.randomUUID(), "monitor-appearance-test",
+                    Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE)));
+
+            DeviceResult scaled = access.call(anchor.getDeviceId(), "monitor.set_text_scale",
+                    List.of(DeviceValue.of(2.5)));
+            helper.assertTrue(scaled.isSuccess(), "device API text-scale edit must succeed: " + scaled.error());
+            anchor.configureWallAppearance(2.5, 0xFFB347);
+            helper.assertTrue(left.wallTextScale() == 2.5 && right.wallTextScale() == 2.5,
+                    "font scale must propagate to every connected monitor tile");
+            helper.assertTrue(left.foregroundColor() == 0xFFB347 && right.foregroundColor() == 0xFFB347,
+                    "default font color must propagate to every connected monitor tile");
+            helper.assertTrue(left.terminalSurface().paletteColor(left.terminalSurface().textColor()) == 0xFFB347
+                            && right.terminalSurface().paletteColor(right.terminalSurface().textColor()) == 0xFFB347,
+                    "default text palette entries must follow the configured font color");
+
+            CompoundTag leftImage = left.getUpdateTag();
+            CompoundTag rightImage = right.getUpdateTag();
+            anchor.configureWallAppearance(1.0, 0x66FF99);
+            left.load(leftImage);
+            right.load(rightImage);
+            helper.assertTrue(left.wallTextScale() == 2.5 && right.wallTextScale() == 2.5
+                            && left.wallForegroundColor() == 0xFFB347,
+                    "wall appearance must survive tile save and reload");
+            helper.succeed();
+        });
+    }
+
     @GameTest(template = "empty", timeoutTicks = 120)
     public static void removingAndReformingWallRebuildsCurrentEndpoint(GameTestHelper helper) {
         helper.setBlock(LEFT, ModRegistries.MONITOR_BLOCK.get());
@@ -181,17 +220,20 @@ public final class MonitorWallGameTests {
             ServerLevel level = helper.getLevel();
             DeviceAccess access = ServerDeviceManager.access(level.getServer(), DeviceCallContext.readOnly("wall-lifecycle"));
             MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
-            UUID leftId = left.getDeviceId();
-            helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().containsKey("surface_revision"),
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
+            BlockPos removable = anchor == left ? RIGHT : LEFT;
+            UUID anchorId = anchor.getDeviceId();
+            helper.assertTrue(access.descriptor(anchorId).orElseThrow().properties().containsKey("surface_revision"),
                     "initial wall endpoint must expose its surface metadata");
-            helper.setBlock(RIGHT, Blocks.AIR);
+            helper.setBlock(removable, Blocks.AIR);
             helper.runAfterDelay(6, () -> {
-                helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().get("columns")
+                helper.assertTrue(access.descriptor(anchorId).orElseThrow().properties().get("columns")
                                 .equals(DeviceValue.of(40)),
                         "removing a tile must rebuild the surviving endpoint to one tile");
-                helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
+                helper.setBlock(removable, ModRegistries.MONITOR_BLOCK.get());
                 helper.runAfterDelay(6, () -> {
-                    helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().get("columns")
+                    helper.assertTrue(access.descriptor(anchorId).orElseThrow().properties().get("columns")
                                     .equals(DeviceValue.of(80)),
                             "reforming a tile must rebuild the endpoint to the current wall width");
                     helper.succeed();
@@ -214,9 +256,11 @@ public final class MonitorWallGameTests {
             MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
             MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
             MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
-            right.publishTouch(new Vec3(helper.absolutePos(RIGHT).getX() + 0.5,
-                    helper.absolutePos(RIGHT).getY() + 0.5,
-                    helper.absolutePos(RIGHT).getZ() + 0.5), helper.makeMockPlayer());
+            MonitorBlockEntity second = anchor == left ? right : left;
+            BlockPos secondPos = second == left ? LEFT : RIGHT;
+            second.publishTouch(new Vec3(helper.absolutePos(secondPos).getX() + 0.5,
+                    helper.absolutePos(secondPos).getY() + 0.5,
+                    helper.absolutePos(secondPos).getZ() + 0.5), helper.makeMockPlayer());
             DeviceEvent touch = registry.pollSubscription(reader, subscriptionId, 1).events().stream()
                     .findFirst().orElseThrow();
             helper.assertTrue(touch.sourceDeviceId().equals(anchor.getDeviceId()),
@@ -246,6 +290,43 @@ public final class MonitorWallGameTests {
                     helper.absolutePos(LEFT).getY() + 0.875,
                     helper.absolutePos(LEFT).getZ() + 0.50), helper.makeMockPlayer());
             helper.assertTrue(plc.isRunning(), "touching the monitor RUN button must start the PLC");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void directlyAttachedPlcDashboardSpansCompleteMonitorWall(GameTestHelper helper) {
+        BlockPos bottomLeft = new BlockPos(2, 2, 2);
+        BlockPos bottomRight = new BlockPos(3, 2, 2);
+        BlockPos topLeft = new BlockPos(2, 3, 2);
+        BlockPos topRight = new BlockPos(3, 3, 2);
+        BlockPos plcPos = bottomLeft.south();
+        helper.setBlock(bottomLeft, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(bottomRight, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(topLeft, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(topRight, ModRegistries.MONITOR_BLOCK.get());
+        helper.setBlock(plcPos, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get());
+
+        helper.runAfterDelay(7, () -> {
+            MonitorBlockEntity topLeftMonitor = (MonitorBlockEntity) helper.getBlockEntity(topLeft);
+            MonitorBlockEntity topRightMonitor = (MonitorBlockEntity) helper.getBlockEntity(topRight);
+            MonitorBlockEntity bottomLeftMonitor = (MonitorBlockEntity) helper.getBlockEntity(bottomLeft);
+            MonitorBlockEntity bottomRightMonitor = (MonitorBlockEntity) helper.getBlockEntity(bottomRight);
+            MonitorBlockEntity wallAnchor = topLeftMonitor.wallAnchor();
+            helper.assertTrue(topLeftMonitor.wallColumns() == 80 && topLeftMonitor.wallRows() == 40,
+                    "four connected monitors must expose one 80x40 PLC canvas");
+            helper.assertTrue(topLeftMonitor.terminalSurface().characterAt(0, 3) == '─'
+                            && topRightMonitor.terminalSurface().characterAt(0, 3) == '─',
+                    "PLC dashboard upper framing must span both horizontal wall tiles");
+            int titleForeground = wallAnchor.terminalSurface().foregroundAt(0, 0);
+            int titleBackground = wallAnchor.terminalSurface().backgroundAt(0, 0);
+            int ruleBackground = wallAnchor.terminalSurface().backgroundAt(0, 3);
+            helper.assertTrue(titleForeground == 1 && titleBackground == 8 && ruleBackground == 15,
+                    "PLC dashboard must preserve hexadecimal foreground/background palette indexes; actual="
+                            + titleForeground + "/" + titleBackground + "/" + ruleBackground);
+            helper.assertTrue(bottomLeftMonitor.terminalSurface().characterAt(0, 19) == '─'
+                            && bottomRightMonitor.terminalSurface().characterAt(0, 19) == '─',
+                    "PLC dashboard lower framing must span every tile in a vertical wall");
             helper.succeed();
         });
     }
@@ -282,5 +363,9 @@ public final class MonitorWallGameTests {
 
     private static int mapNumber(DeviceValue.MapValue value, String key) {
         return (int) ((DeviceValue.NumberValue) value.values().get(key)).value();
+    }
+
+    private static String printable(char value) {
+        return value == ' ' ? "<space>" : Character.toString(value);
     }
 }

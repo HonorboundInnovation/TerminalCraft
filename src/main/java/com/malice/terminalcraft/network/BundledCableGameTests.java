@@ -4,6 +4,7 @@ import com.malice.terminalcraft.block.BundledCableBlock;
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.blockentity.BundledCableBlockEntity;
 import com.malice.terminalcraft.blockentity.ProgrammableLogicControllerBlockEntity;
+import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
 import com.malice.terminalcraft.blockentity.ServerRackBlockEntity;
 import com.malice.terminalcraft.blockentity.TurtleBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
@@ -99,6 +100,10 @@ public final class BundledCableGameTests {
         helper.assertTrue(BundledCableBlock.addFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
                 "a supported perpendicular bundled face must enter the occupied block space");
         BundledCableBlockEntity cable = (BundledCableBlockEntity) helper.getBlockEntity(space);
+        helper.assertTrue(cable.getUpdatePacket() != null
+                        && cable.getUpdateTag().getInt("FaceMask")
+                        == ((1 << Direction.UP.ordinal()) | (1 << Direction.EAST.ordinal())),
+                "multipart occupancy must be included in the client synchronization packet");
         cable.setLocalOutput(11, 8);
         helper.assertTrue(cable.faceCount() == 2 && cable.getSignal(11) == 8,
                 "multipart faces must share the same sixteen-channel cable node");
@@ -137,6 +142,79 @@ public final class BundledCableGameTests {
         helper.assertTrue(cable.getSignal(0) == 0 && east == 0 && up == 0 && down == 0,
                 "uncolored vanilla redstone must not enter or leave an arbitrary bundled channel");
         helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void shieldedBreakoutTracksRepeatedComputerOutputChanges(GameTestHelper helper) {
+        int channel = net.minecraft.world.item.DyeColor.ORANGE.getId();
+        BlockPos bundlePos = new BlockPos(2, 2, 2);
+        BlockPos wirePos = bundlePos.east();
+        for (BlockPos supported : java.util.List.of(bundlePos, wirePos)) {
+            helper.setBlock(supported.below(), Blocks.STONE);
+        }
+        helper.setBlock(bundlePos, cable(Direction.UP));
+        helper.setBlock(wirePos, wire(Direction.UP, channel));
+
+        BundledCableBlockEntity bundle = (BundledCableBlockEntity) helper.getBlockEntity(bundlePos);
+        bundle.setLocalOutput(channel, 15);
+        assertBreakoutPower(helper, wirePos, 15, "initial channel output");
+
+        helper.runAfterDelay(3, () -> {
+            bundle.setLocalOutput(channel, 6);
+            helper.runAfterDelay(3, () -> {
+                assertBreakoutPower(helper, wirePos, 6, "lowered channel output");
+                bundle.setLocalOutput(channel, 0);
+                helper.runAfterDelay(3, () -> {
+                    assertBreakoutPower(helper, wirePos, 0, "cleared channel output");
+                    bundle.setLocalOutput(channel, 11);
+                    helper.runAfterDelay(3, () -> {
+                        assertBreakoutPower(helper, wirePos, 11, "restored channel output");
+                        helper.succeed();
+                    });
+                });
+            });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void shieldedBreakoutNotifiesDeviceThroughPoweredSupport(GameTestHelper helper) {
+        int channel = net.minecraft.world.item.DyeColor.ORANGE.getId();
+        BlockPos bundlePos = new BlockPos(1, 2, 2);
+        BlockPos wirePos = bundlePos.east();
+        BlockPos poweredSupport = wirePos.east();
+        BlockPos lampPos = poweredSupport.east();
+        helper.setBlock(bundlePos.below(), Blocks.STONE);
+        helper.setBlock(wirePos.below(), Blocks.STONE);
+        helper.setBlock(bundlePos, cable(Direction.UP));
+        helper.setBlock(wirePos, wire(Direction.UP, channel));
+        helper.setBlock(poweredSupport, Blocks.STONE);
+        helper.setBlock(lampPos, Blocks.REDSTONE_LAMP);
+
+        BundledCableBlockEntity bundle = (BundledCableBlockEntity) helper.getBlockEntity(bundlePos);
+        bundle.setLocalOutput(channel, 15);
+        helper.runAfterDelay(2, () -> {
+            assertBreakoutPower(helper, wirePos, 15, "powered endpoint transition");
+            helper.assertTrue(helper.getBlockState(lampPos)
+                            .getValue(net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                    "shielded wire must wake a receiver reached through its strongly powered support block");
+
+            bundle.setLocalOutput(channel, 0);
+            helper.runAfterDelay(5, () -> {
+                assertBreakoutPower(helper, wirePos, 0, "depowered endpoint transition");
+                helper.assertTrue(!helper.getBlockState(lampPos)
+                                .getValue(net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                        "clearing a bundled channel must wake and release the support-mounted receiver");
+
+                bundle.setLocalOutput(channel, 9);
+                helper.runAfterDelay(2, () -> {
+                    assertBreakoutPower(helper, wirePos, 9, "restored endpoint transition");
+                    helper.assertTrue(helper.getBlockState(lampPos)
+                                    .getValue(net.minecraft.world.level.block.RedstoneLampBlock.LIT),
+                            "restoring a bundled channel must wake the receiver without replacing the wire");
+                    helper.succeed();
+                });
+            });
+        });
     }
 
     @GameTest(template = "empty", timeoutTicks = 80)
@@ -292,7 +370,6 @@ public final class BundledCableGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 60)
     private static net.minecraft.world.level.block.state.BlockState cable(Direction face) {
         return ModRegistries.BUNDLED_CABLE_BLOCK.get().defaultBlockState()
                 .setValue(BundledCableBlock.FACE, face);
@@ -302,6 +379,18 @@ public final class BundledCableGameTests {
         return ModRegistries.RED_ALLOY_WIRE_BLOCK.get().defaultBlockState()
                 .setValue(RedAlloyWireBlock.FACE, face)
                 .setValue(RedAlloyWireBlock.COLOR, color);
+    }
+
+    private static void assertBreakoutPower(GameTestHelper helper, BlockPos wirePos,
+                                            int expected, String transition) {
+        BlockPos worldPos = helper.absolutePos(wirePos);
+        BlockState state = helper.getLevel().getBlockState(worldPos);
+        RedAlloyWireBlockEntity wire = (RedAlloyWireBlockEntity) helper.getBlockEntity(wirePos);
+        int emitted = state.getBlock().getSignal(state, helper.getLevel(), worldPos, Direction.WEST);
+        helper.assertTrue(wire.power(Direction.UP, 0) == expected
+                        && state.getValue(RedAlloyWireBlock.POWER) == expected
+                        && emitted == expected,
+                transition + " must update shielded wire storage, block state, and endpoint signal to " + expected);
     }
 
 }

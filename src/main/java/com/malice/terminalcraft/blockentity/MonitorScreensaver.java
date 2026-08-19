@@ -151,8 +151,8 @@ public final class MonitorScreensaver {
             for (int x = 0; x < width; x++) {
                 canvas[y][x] = ' ';
                 double backgroundWave = Math.sin((x * 0.17) + (y * 0.31) + phase * 0.9);
-                background[y][x] = (char) ('0' + Math.max(0, Math.min(3,
-                        (int) Math.floor((backgroundWave + 1.0) * 1.5))));
+                background[y][x] = Character.forDigit(Math.max(0, Math.min(3,
+                        (int) Math.floor((backgroundWave + 1.0) * 1.5))), 16);
                 double px = (x - centerX) / scaleX;
                 double py = (y - centerY) / scaleY;
                 double rx = px * cos - py * sin;
@@ -174,8 +174,8 @@ public final class MonitorScreensaver {
                     int hue = Math.floorMod((int) Math.floor(
                             ((angle + Math.PI) / (Math.PI * 2.0)) * 12.0 + phase * 1.7 + radius * 5.0), 12) + 3;
                     canvas[y][x] = glyphs.charAt(intensity);
-                    foreground[y][x] = (char) ('0' + hue);
-                    background[y][x] = (char) ('0' + (hue % 4));
+                    foreground[y][x] = Character.forDigit(hue, 16);
+                    background[y][x] = Character.forDigit(hue % 4, 16);
                 }
             }
         }
@@ -202,8 +202,8 @@ public final class MonitorScreensaver {
         int y = (int) Math.round(centerY + Math.sin(phase) * radiusY);
         if (y >= 0 && y < canvas.length && x >= 0 && x < canvas[0].length) {
             canvas[y][x] = glyph;
-            foreground[y][x] = (char) ('0' + foregroundColor);
-            background[y][x] = (char) ('0' + backgroundColor);
+            foreground[y][x] = Character.forDigit(foregroundColor, 16);
+            background[y][x] = Character.forDigit(backgroundColor, 16);
         }
     }
 

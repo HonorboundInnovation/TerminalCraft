@@ -99,7 +99,9 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     @Override @SuppressWarnings("deprecation") public int getSignal(
             BlockState state, BlockGetter level, BlockPos pos, Direction side) {
         if (level.getBlockEntity(pos) instanceof ProgrammableLogicControllerBlockEntity plc) {
-            return plc.getRedstoneOutput(side.getName());
+            // Minecraft supplies the direction from the receiver toward this source. The PLC API
+            // names the physical source face, which points the opposite way.
+            return plc.getRedstoneOutput(side.getOpposite().getName());
         }
         return 0;
     }

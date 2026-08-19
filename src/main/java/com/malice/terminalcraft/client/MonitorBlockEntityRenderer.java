@@ -38,12 +38,14 @@ public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<Mon
         pose.mulPose(Axis.YP.rotationDegrees(180.0f - facing.toYRot()));
         pose.translate(0.0, 0.0, SCREEN_Z);
 
-        drawScreen(pose, buffers, wall.surface());
-        drawText(pose, buffers, wall.surface());
+        float textScale = (float) Math.max(0.5, Math.min(5.0, wall.surface().textScale()));
+        drawScreen(pose, buffers, wall.surface(), textScale);
+        drawText(pose, buffers, wall.surface(), textScale);
         pose.popPose();
     }
 
-    private static void drawScreen(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface) {
+    private static void drawScreen(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface,
+                                   float textScale) {
         float wallWidth = (float) surface.width() / MonitorBlockEntity.MAX_LINE_LEN;
         float wallHeight = (float) surface.height() / MonitorBlockEntity.MAX_LINES;
         float left = 0.5f - SCREEN_MARGIN;
@@ -52,24 +54,30 @@ public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<Mon
         float bottom = -wallHeight + 0.5f + SCREEN_MARGIN;
         VertexConsumer consumer = buffers.getBuffer(RenderType.textBackground());
         Matrix4f matrix = pose.last().pose();
-        float cellWidth = (wallWidth - (2.0f * SCREEN_MARGIN)) / surface.width();
-        float cellHeight = (wallHeight - (2.0f * SCREEN_MARGIN)) / surface.height();
+        float cellWidth = (wallWidth - (2.0f * SCREEN_MARGIN)) / surface.width() * textScale;
+        float cellHeight = (wallHeight - (2.0f * SCREEN_MARGIN)) / surface.height() * textScale;
         for (int row = 0; row < surface.height(); row++) {
+            float cellTop = top - row * cellHeight;
+            if (cellTop <= bottom) break;
             for (int column = 0; column < surface.width(); column++) {
-                int rgb = surface.paletteColor(surface.backgroundAt(column, row));
-                int red = rgb >> 16 & 0xFF;
-                int green = rgb >> 8 & 0xFF;
-                int blue = rgb & 0xFF;
                 float cellLeft = left - column * cellWidth;
-                float cellRight = cellLeft - cellWidth;
-                float cellTop = top - row * cellHeight;
-                float cellBottom = cellTop - cellHeight;
-                vertex(consumer, matrix, cellLeft, cellTop, red, green, blue);
-                vertex(consumer, matrix, cellLeft, cellBottom, red, green, blue);
-                vertex(consumer, matrix, cellRight, cellBottom, red, green, blue);
-                vertex(consumer, matrix, cellRight, cellTop, red, green, blue);
+                if (cellLeft <= right) break;
+                int rgb = surface.paletteColor(surface.backgroundAt(column, row));
+                quad(consumer, matrix, cellLeft, Math.max(right, cellLeft - cellWidth),
+                        cellTop, Math.max(bottom, cellTop - cellHeight), rgb);
             }
         }
+    }
+
+    private static void quad(VertexConsumer consumer, Matrix4f matrix, float left, float right,
+                             float top, float bottom, int rgb) {
+        int red = rgb >> 16 & 0xFF;
+        int green = rgb >> 8 & 0xFF;
+        int blue = rgb & 0xFF;
+        vertex(consumer, matrix, left, top, red, green, blue);
+        vertex(consumer, matrix, left, bottom, red, green, blue);
+        vertex(consumer, matrix, right, bottom, red, green, blue);
+        vertex(consumer, matrix, right, top, red, green, blue);
     }
 
     private static void vertex(VertexConsumer consumer, Matrix4f matrix, float x, float y,
@@ -80,20 +88,24 @@ public final class MonitorBlockEntityRenderer implements BlockEntityRenderer<Mon
                 .endVertex();
     }
 
-    private static void drawText(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface) {
+    private static void drawText(PoseStack pose, MultiBufferSource buffers, TerminalBuffer surface,
+                                 float textScale) {
         pose.pushPose();
-        pose.scale(-FONT_SCALE, -FONT_SCALE, FONT_SCALE);
+        float scaledFont = FONT_SCALE * textScale;
+        pose.scale(-scaledFont, -scaledFont, scaledFont);
 
         Font font = Minecraft.getInstance().font;
         float wallWidth = (float) surface.width() / MonitorBlockEntity.MAX_LINE_LEN;
         float wallHeight = (float) surface.height() / MonitorBlockEntity.MAX_LINES;
-        float left = -(0.5f - SCREEN_MARGIN) / FONT_SCALE;
-        float top = -(0.5f - SCREEN_MARGIN) / FONT_SCALE;
+        float left = -(0.5f - SCREEN_MARGIN) / scaledFont;
+        float top = -(0.5f - SCREEN_MARGIN) / scaledFont;
         float cellPitchX = (wallWidth - (2.0f * SCREEN_MARGIN)) / FONT_SCALE / surface.width();
         float cellPitchY = (wallHeight - (2.0f * SCREEN_MARGIN)) / FONT_SCALE / surface.height();
+        int visibleColumns = Math.min(surface.width(), (int) Math.ceil(surface.width() / textScale));
+        int visibleRows = Math.min(surface.height(), (int) Math.ceil(surface.height() / textScale));
 
-        for (int row = 0; row < surface.height(); row++) {
-            for (int column = 0; column < surface.width(); column++) {
+        for (int row = 0; row < visibleRows; row++) {
+            for (int column = 0; column < visibleColumns; column++) {
                 char character = surface.characterAt(column, row);
                 if (character == ' ') continue;
                 int foreground = 0xFF000000 | surface.paletteColor(surface.foregroundAt(column, row));

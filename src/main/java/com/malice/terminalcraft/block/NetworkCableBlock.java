@@ -29,6 +29,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.BlockHitResult;
@@ -44,7 +45,6 @@ import java.util.Set;
 /** One centered, automatically routed colored data/control cable per block face. */
 public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNode {
     public static final DirectionProperty FACE = DirectionProperty.create("face");
-    public static final IntegerProperty LANE = IntegerProperty.create("lane", 0, 3);
     public static final IntegerProperty COLOR = IntegerProperty.create("color", 0, 15);
 
     public record Target(Direction face, int lane) {}
@@ -56,13 +56,12 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         super(BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_CYAN).strength(0.2f)
                 .noCollission().noOcclusion());
         registerDefaultState(CableShapeSupport.disconnected(stateDefinition.any()
-                .setValue(FACE, Direction.UP).setValue(LANE, 0)
-                .setValue(COLOR, DyeColor.CYAN.getId())));
+                .setValue(FACE, Direction.UP).setValue(COLOR, DyeColor.CYAN.getId())));
     }
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(FACE, LANE, COLOR, CableShapeSupport.DOWN, CableShapeSupport.UP,
+        builder.add(FACE, COLOR, CableShapeSupport.DOWN, CableShapeSupport.UP,
                 CableShapeSupport.NORTH, CableShapeSupport.SOUTH,
                 CableShapeSupport.WEST, CableShapeSupport.EAST);
     }
@@ -79,8 +78,7 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         BlockPos pos = context.getClickedPos();
         int color = NetworkCableItem.color(context.getItemInHand()).getId();
         return canFaceSurvive(context.getLevel(), pos, face)
-                ? defaultBlockState().setValue(FACE, face).setValue(LANE, 0)
-                        .setValue(COLOR, color) : null;
+                ? defaultBlockState().setValue(FACE, face).setValue(COLOR, color) : null;
     }
 
     @Override
@@ -95,7 +93,11 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     }
 
     @Override
-    public RenderShape getRenderShape(BlockState state) { return RenderShape.INVISIBLE; }
+    public RenderShape getRenderShape(BlockState state) {
+        // The primary face uses the baked multipart model. The block-entity renderer adds only
+        // secondary mounted faces, matching bundled cable rendering without overlapping geometry.
+        return RenderShape.MODEL;
+    }
 
     @Override
     @SuppressWarnings("deprecation")
@@ -250,20 +252,21 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     }
 
     public static boolean hasFace(BlockGetter level, BlockPos pos, Direction face) {
-        if (level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable) return cable.hasFace(face);
-        BlockState state = level.getBlockState(pos);
+        if (availableBlockEntity(level, pos) instanceof NetworkCableBlockEntity cable) return cable.hasFace(face);
+        BlockState state = availableState(level, pos);
+        if (state == null) return false;
         return state.getBlock() instanceof NetworkCableBlock && state.getValue(FACE) == face;
     }
 
     public static boolean hasRun(BlockGetter level, BlockPos pos, Direction face, int lane, int color) {
-        return level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable
+        return availableBlockEntity(level, pos) instanceof NetworkCableBlockEntity cable
                 && cable.hasRun(face, lane, color);
     }
 
     /** Block positions physically joined by at least one matching lane/color or a bundled trunk. */
     public static Set<BlockPos> networkNeighbors(LevelAccessor level, BlockPos pos) {
         Set<BlockPos> result = new HashSet<>();
-        if (!(level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable)) return Set.of();
+        if (!(availableBlockEntity(level, pos) instanceof NetworkCableBlockEntity cable)) return Set.of();
         for (NetworkCableBlockEntity.Run run : cable.runs()) {
             Node node = new Node(pos, run.face(), run.lane(), run.color());
             for (Node connected : connectedNodes(level, node)) {
@@ -304,23 +307,12 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         Block currentBlock = level.getBlockState(pos).getBlock();
         BlockState state = (currentBlock instanceof NetworkCableBlock
                 ? currentBlock : ModRegistries.NETWORK_CABLE_BLOCK.get()).defaultBlockState()
-                .setValue(FACE, face).setValue(LANE, 0).setValue(COLOR, color);
-        if (!(level instanceof LevelAccessor accessor)) return state;
-        int route = currentBlock instanceof BundledNetworkCableBlock
-                ? SurfaceCableRouting.planeMask(face) : visibleRoute(level, pos, face, lane, color);
-        Node node = new Node(pos, face, lane, color);
-        Set<Node> cableNeighbors = currentBlock instanceof BundledNetworkCableBlock
-                ? connectedNodes(accessor, node) : Set.of();
-        Set<BlockPos> networkNeighbors = currentBlock instanceof BundledNetworkCableBlock
-                ? networkNeighborsForRun(accessor, node) : Set.of();
+                .setValue(FACE, face).setValue(COLOR, color);
+        int route = visibleRoute(level, pos, face, lane, color);
         for (Direction direction : Direction.values()) {
             if (direction.getAxis() == face.getAxis()) continue;
-            boolean connected = currentBlock instanceof
-                    BundledNetworkCableBlock
-                    ? cableNeighbors.stream().anyMatch(next -> armDirection(node, next) == direction)
-                            || networkNeighbors.contains(pos.relative(direction))
-                    : SurfaceCableRouting.hasPort(route, direction);
-            state = state.setValue(CableShapeSupport.property(direction), connected);
+            state = state.setValue(CableShapeSupport.property(direction),
+                    SurfaceCableRouting.hasPort(route, direction));
         }
         return state;
     }
@@ -383,7 +375,8 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         Target nearest = null;
         double distance = Double.POSITIVE_INFINITY;
         for (NetworkCableBlockEntity.Run run : cable.runs()) {
-            BlockHitResult hit = SurfaceCableSupport.faceHalfShape(run.face()).clip(start, end, pos);
+            BlockHitResult hit = runShape(level, pos, run.face(), run.lane(), run.color())
+                    .clip(start, end, pos);
             if (hit != null && start.distanceToSqr(hit.getLocation()) < distance) {
                 nearest = new Target(run.face(), run.lane());
                 distance = start.distanceToSqr(hit.getLocation());
@@ -415,6 +408,10 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
                 || !cable.hasRun(face, lane, color)) return 0;
         if (!(level instanceof LevelAccessor accessor)) return 0;
         Node node = new Node(pos, face, lane, color);
+        BlockState currentState = availableState(level, pos);
+        if (currentState != null && currentState.getBlock() instanceof BundledNetworkCableBlock) {
+            return bundledVisibleRoute(accessor, node, cable);
+        }
         int visible = 0;
         for (Node connected : connectedNodes(accessor, node)) {
             Direction arm = armDirection(node, connected);
@@ -422,12 +419,53 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         }
         for (BlockPos neighbor : networkNeighborsForRun(accessor, node)) {
             for (Direction direction : SurfaceCableSupport.planeDirections(face)) {
-                if (pos.relative(direction).equals(neighbor)) {
+                BlockPos direct = pos.relative(direction);
+                BlockPos around = direct.relative(face.getOpposite());
+                if (direct.equals(neighbor) || around.equals(neighbor)) {
                     visible |= SurfaceCableRouting.port(direction);
                 }
             }
         }
         return SurfaceCableRouting.sanitize(face, visible);
+    }
+
+    /**
+     * Match bundled Red Alloy's visual routing: internal perpendicular faces, coplanar neighbors,
+     * direct breakouts/devices, and unobstructed external corners. Breakouts do not bend around an
+     * external corner; the bundled trunk must occupy both sides of that bend.
+     */
+    private static int bundledVisibleRoute(LevelAccessor level, Node node,
+                                           NetworkCableBlockEntity cable) {
+        int visible = 0;
+        for (Direction other : cable.faces()) {
+            if (other != node.face() && other != node.face().getOpposite()) {
+                visible |= SurfaceCableRouting.port(other.getOpposite());
+            }
+        }
+        for (Direction direction : SurfaceCableSupport.planeDirections(node.face())) {
+            BlockPos direct = node.pos().relative(direction);
+            BlockState directState = availableState(level, direct);
+            if (directState == null) continue;
+            boolean connected = directState.getBlock() instanceof BundledNetworkCableBlock
+                    && hasFace(level, direct, node.face());
+            if (!connected && directState.getBlock() instanceof NetworkCableBlock
+                    && !(directState.getBlock() instanceof BundledNetworkCableBlock)
+                    && availableBlockEntity(level, direct) instanceof NetworkCableBlockEntity breakout) {
+                connected = breakout.runs().stream().anyMatch(run -> run.face() == node.face());
+            }
+            if (!connected && !(directState.getBlock() instanceof NetworkCableBlock)) {
+                connected = isDirectNetworkDevice(directState);
+            }
+            if (!connected && (directState.isAir() || directState.getFluidState().is(FluidTags.WATER))) {
+                BlockPos around = direct.relative(node.face().getOpposite());
+                BlockState aroundState = availableState(level, around);
+                connected = aroundState != null
+                        && aroundState.getBlock() instanceof BundledNetworkCableBlock
+                        && hasFace(level, around, direction);
+            }
+            if (connected) visible |= SurfaceCableRouting.port(direction);
+        }
+        return SurfaceCableRouting.sanitize(node.face(), visible);
     }
 
     public static String diagnostic(BlockGetter level, BlockPos pos, @Nullable Target target) {
@@ -488,7 +526,7 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     private static Set<Node> connectedNodes(LevelAccessor level, Node node) {
         Set<Node> result = new HashSet<>();
         if (!hasRun(level, node.pos(), node.face(), node.lane(), node.color())) return result;
-        if (level.getBlockEntity(node.pos()) instanceof NetworkCableBlockEntity cable) {
+        if (availableBlockEntity(level, node.pos()) instanceof NetworkCableBlockEntity cable) {
             for (NetworkCableBlockEntity.Run candidate : cable.runs()) {
                 if (candidate.color() == node.color() && candidate.face() != node.face()
                         && candidate.face() != node.face().getOpposite()) {
@@ -498,19 +536,24 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
         }
         for (Direction direction : SurfaceCableSupport.planeDirections(node.face())) {
             BlockPos direct = node.pos().relative(direction);
-            if (level.getBlockEntity(direct) instanceof NetworkCableBlockEntity neighbor
-                    && !(level.getBlockState(direct).getBlock() instanceof BundledNetworkCableBlock)) {
+            BlockState directState = availableState(level, direct);
+            if (availableBlockEntity(level, direct) instanceof NetworkCableBlockEntity neighbor
+                    && directState != null
+                    && !(directState.getBlock() instanceof BundledNetworkCableBlock)) {
                 for (NetworkCableBlockEntity.Run candidate : neighbor.runs()) {
                     if (candidate.face() == node.face() && candidate.color() == node.color()) {
                         result.add(new Node(direct, candidate.face(), candidate.lane(), candidate.color()));
                     }
                 }
             }
-            BlockState bend = level.getBlockState(direct);
+            BlockState bend = directState;
+            if (bend == null) continue;
             if (!bend.isAir() && !bend.getFluidState().is(FluidTags.WATER)) continue;
             BlockPos around = direct.relative(node.face().getOpposite());
-            if (level.getBlockEntity(around) instanceof NetworkCableBlockEntity corner
-                    && !(level.getBlockState(around).getBlock() instanceof BundledNetworkCableBlock)) {
+            BlockState aroundState = availableState(level, around);
+            if (availableBlockEntity(level, around) instanceof NetworkCableBlockEntity corner
+                    && aroundState != null
+                    && !(aroundState.getBlock() instanceof BundledNetworkCableBlock)) {
                 for (NetworkCableBlockEntity.Run candidate : corner.runs()) {
                     if (candidate.face() == direction && candidate.color() == node.color()) {
                         result.add(new Node(around, candidate.face(), candidate.lane(), candidate.color()));
@@ -523,21 +566,63 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
 
     private static Set<BlockPos> networkNeighborsForRun(LevelAccessor level, Node node) {
         Set<BlockPos> result = new HashSet<>();
-        boolean currentBundle = level.getBlockState(node.pos()).getBlock() instanceof BundledNetworkCableBlock;
+        BlockState currentState = availableState(level, node.pos());
+        if (currentState == null) return result;
+        boolean currentBundle = currentState.getBlock() instanceof BundledNetworkCableBlock;
         for (Direction direction : SurfaceCableSupport.planeDirections(node.face())) {
             BlockPos adjacent = node.pos().relative(direction);
-            BlockState state = level.getBlockState(adjacent);
+            BlockState state = availableState(level, adjacent);
+            if (state == null) continue;
             boolean bundle = state.getBlock() instanceof BundledNetworkCableBlock
                     && hasFace(level, adjacent, node.face());
             boolean breakout = currentBundle && state.getBlock() instanceof NetworkCableBlock
                     && !(state.getBlock() instanceof BundledNetworkCableBlock)
-                    && level.getBlockEntity(adjacent) instanceof NetworkCableBlockEntity neighbor
+                    && availableBlockEntity(level, adjacent) instanceof NetworkCableBlockEntity neighbor
                     && neighbor.runs().stream().anyMatch(candidate -> candidate.face() == node.face());
-            boolean device = !(state.getBlock() instanceof NetworkCableBlock)
-                    && (state.getBlock() instanceof WiredNetworkNode || state.getBlock() instanceof ModemBlock);
+            boolean device = isDirectNetworkDevice(state);
             if (bundle || breakout || device) result.add(adjacent.immutable());
+
+            if (!state.isAir() && !state.getFluidState().is(FluidTags.WATER)) continue;
+            BlockPos around = adjacent.relative(node.face().getOpposite());
+            BlockState cornerState = availableState(level, around);
+            if (cornerState == null) continue;
+            boolean cornerBundle = currentBundle
+                    && cornerState.getBlock() instanceof BundledNetworkCableBlock
+                    && hasFace(level, around, direction);
+            if (cornerBundle) result.add(around.immutable());
         }
         return result;
+    }
+
+    /** Keep rendering and physical topology aligned with TerminalCraft's complete wired endpoint set. */
+    private static boolean isDirectNetworkDevice(BlockState state) {
+        if (state.getBlock() instanceof NetworkCableBlock) return false;
+        return state.getBlock() instanceof WiredNetworkNode
+                || state.getBlock() instanceof ModemBlock
+                || state.getBlock() instanceof TerminalBlock
+                || state.getBlock() instanceof ProgrammableLogicControllerBlock
+                || state.getBlock() instanceof StandaloneSensorBlock
+                || state.getBlock() instanceof SensorArrayBlock;
+    }
+
+    /** Avoid recursively requesting a chunk while the wired-topology load callback is indexing it. */
+    @Nullable
+    private static BlockState availableState(BlockGetter level, BlockPos pos) {
+        if (level instanceof ServerLevel serverLevel) {
+            LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+            return chunk == null ? null : chunk.getBlockState(pos);
+        }
+        return level.getBlockState(pos);
+    }
+
+    /** Avoid recursively requesting a chunk while the wired-topology load callback is indexing it. */
+    @Nullable
+    private static BlockEntity availableBlockEntity(BlockGetter level, BlockPos pos) {
+        if (level instanceof ServerLevel serverLevel) {
+            LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+            return chunk == null ? null : chunk.getBlockEntity(pos);
+        }
+        return level.getBlockEntity(pos);
     }
 
     private static Direction armDirection(Node from, Node to) {
@@ -586,11 +671,9 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
     public static VoxelShape renderedRunShape(BlockGetter level, BlockPos pos, Direction face,
                                               int lane, int color) {
         boolean bundled = level.getBlockState(pos).getBlock() instanceof BundledNetworkCableBlock;
-        int route = bundled ? SurfaceCableRouting.planeMask(face)
-                : level.getBlockEntity(pos) instanceof NetworkCableBlockEntity cable
-                        ? cable.route(face, lane) : SurfaceCableRouting.planeMask(face);
+        int route = visibleRoute(level, pos, face, lane, color);
         if (bundled) return SurfaceCableSupport.continuousRunShape(face, lane, route);
-        return SurfaceCableSupport.centeredRunShape(face, visibleRoute(level, pos, face, lane, color));
+        return SurfaceCableSupport.centeredRunShape(face, route);
     }
 
     private static VoxelShape runShape(BlockGetter level, BlockPos pos, Direction face, int lane, int color) {

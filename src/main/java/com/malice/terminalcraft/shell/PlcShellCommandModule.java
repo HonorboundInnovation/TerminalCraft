@@ -11,6 +11,7 @@ import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.Level;
 import net.minecraftforge.network.NetworkHooks;
 
 import java.util.List;
@@ -22,7 +23,8 @@ final class PlcShellCommandModule implements ShellCommandModule {
 
     private void plc(Context context, List<String> arguments) {
         String requested = arguments.isEmpty() ? "status" : arguments.get(0).toLowerCase(Locale.ROOT);
-        if (!(context.worldHost() instanceof ProgrammableLogicControllerBlockEntity controller)) {
+        ProgrammableLogicControllerBlockEntity controller = resolveController(context.worldHost());
+        if (controller == null) {
             if ("template".equals(requested) || "templates".equals(requested)) {
                 handleTemplate(context, null, arguments);
                 return;
@@ -152,6 +154,31 @@ final class PlcShellCommandModule implements ShellCommandModule {
             }
             default -> fail(context, "plc: unknown operation (try plc help)");
         }
+    }
+
+    /** Resolves the PLC hosted by this shell, explicitly bound to the session, or touching the host. */
+    private static ProgrammableLogicControllerBlockEntity resolveController(TerminalHost host) {
+        if (host instanceof ProgrammableLogicControllerBlockEntity controller) return controller;
+        if (host == null) return null;
+        Level level = host.getLevel();
+        if (level == null) return null;
+
+        BlockPos bound = host.boundPeripheralPosition();
+        if (bound != null && level.hasChunkAt(bound)
+                && level.getBlockEntity(bound) instanceof ProgrammableLogicControllerBlockEntity controller) {
+            return controller;
+        }
+
+        BlockPos origin = host.getBlockPos();
+        if (origin == null) return null;
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
+            BlockPos adjacent = origin.relative(direction);
+            if (level.hasChunkAt(adjacent)
+                    && level.getBlockEntity(adjacent) instanceof ProgrammableLogicControllerBlockEntity controller) {
+                return controller;
+            }
+        }
+        return null;
     }
 
     private static void handleRemote(Context context, List<String> arguments) {

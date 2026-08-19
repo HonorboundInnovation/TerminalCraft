@@ -1,37 +1,31 @@
 package com.malice.terminalcraft.client;
 
 import com.malice.terminalcraft.block.NetworkCableBlock;
-import com.malice.terminalcraft.block.BundledNetworkCableBlock;
-import com.malice.terminalcraft.block.SurfaceCableSupport;
 import com.malice.terminalcraft.blockentity.NetworkCableBlockEntity;
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.Direction;
 
 /** Renders sixteen independently occupied/colorable data points on each block face. */
 public final class NetworkCableBlockEntityRenderer implements BlockEntityRenderer<NetworkCableBlockEntity> {
-    private static final ResourceLocation NETWORK_TEXTURE =
-            new ResourceLocation("terminalcraft", "block/network_cable_custom");
-
     public NetworkCableBlockEntityRenderer(BlockEntityRendererProvider.Context context) {}
 
     @Override
     public void render(NetworkCableBlockEntity cable, float partialTick, PoseStack pose,
         MultiBufferSource buffers, int packedLight, int packedOverlay) {
         if (cable.getLevel() == null) return;
-        boolean bundled = cable.getBlockState().getBlock() instanceof BundledNetworkCableBlock;
+        // Both ordinary and bundled network cables render exactly like their Red Alloy
+        // counterparts: the block model draws the primary face and this draws secondary faces.
+        Direction primary = cable.getBlockState().getValue(NetworkCableBlock.FACE);
         for (NetworkCableBlockEntity.Run run : cable.runs()) {
-            int route = NetworkCableBlock.visibleRoute(cable.getLevel(), cable.getBlockPos(),
-                    run.face(), run.lane(), run.color());
-            int signalStrength = route == 0 ? 0 : 5;
-            net.minecraft.world.phys.shapes.VoxelShape shape = bundled
-                    ? NetworkCableBlock.renderedRunShape(cable.getLevel(), cable.getBlockPos(),
-                            run.face(), run.lane(), run.color())
-                    : SurfaceCableSupport.centeredRunShape(run.face(), route);
-            RedAlloyWireBlockEntityRenderer.renderColoredRun(shape, NETWORK_TEXTURE, run.color(),
-                    signalStrength, pose, buffers, packedLight, packedOverlay);
+            if (run.face() == primary) continue;
+            Minecraft.getInstance().getBlockRenderer().renderSingleBlock(
+                    NetworkCableBlock.renderState(cable.getLevel(), cable.getBlockPos(),
+                            run.face(), run.lane(), run.color()),
+                    pose, buffers, packedLight, packedOverlay);
         }
     }
 }

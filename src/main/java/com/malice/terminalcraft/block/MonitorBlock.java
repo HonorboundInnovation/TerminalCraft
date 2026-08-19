@@ -21,6 +21,8 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkHooks;
 import org.jetbrains.annotations.Nullable;
 import com.malice.terminalcraft.registry.ModRegistries;
 
@@ -78,6 +80,16 @@ public class MonitorBlock extends BaseEntityBlock {
         }
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof MonitorBlockEntity monitor) {
+            boolean configure = WireInteractionSupport.isWrench(player.getItemInHand(hand))
+                    || player.isShiftKeyDown() && player.getItemInHand(hand).isEmpty();
+            if (configure
+                    && player instanceof ServerPlayer serverPlayer) {
+                NetworkHooks.openScreen(serverPlayer, monitor, buffer -> {
+                    buffer.writeByte(com.malice.terminalcraft.menu.DisplayDiagnosticsMenu.TYPE_MONITOR);
+                    buffer.writeBlockPos(pos);
+                });
+                return InteractionResult.CONSUME;
+            }
             if (player.isShiftKeyDown()) {
                 player.displayClientMessage(monitor.asChatComponent(), false);
             } else {

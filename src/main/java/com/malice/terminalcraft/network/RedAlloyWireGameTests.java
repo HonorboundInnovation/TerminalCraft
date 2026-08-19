@@ -1,5 +1,6 @@
 package com.malice.terminalcraft.network;
 
+import com.malice.terminalcraft.block.BundledCableBlock;
 import com.malice.terminalcraft.block.RedAlloyWireBlock;
 import com.malice.terminalcraft.block.TerminalBlock;
 import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
@@ -111,6 +112,50 @@ public final class RedAlloyWireGameTests {
         });
     }
 
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void shieldedRoutingTargetsOnlyBundlesAndRedstoneDevices(GameTestHelper helper) {
+        int red = net.minecraft.world.item.DyeColor.RED.getId();
+        BlockPos wirePos = new BlockPos(3, 2, 3);
+        BlockPos bundlePos = wirePos.north();
+        BlockPos externalBundlePos = wirePos.south().below();
+        BlockPos redstoneDevice = wirePos.west();
+        BlockPos ordinarySolid = wirePos.east();
+        helper.setBlock(wirePos.below(), Blocks.STONE);
+        helper.setBlock(bundlePos.below(), Blocks.STONE);
+        helper.setBlock(wirePos, ModRegistries.RED_ALLOY_WIRE_BLOCK.get().defaultBlockState()
+                .setValue(RedAlloyWireBlock.FACE, Direction.UP)
+                .setValue(RedAlloyWireBlock.COLOR, red));
+        helper.setBlock(bundlePos, ModRegistries.BUNDLED_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(BundledCableBlock.FACE, Direction.UP));
+        helper.setBlock(externalBundlePos, ModRegistries.BUNDLED_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(BundledCableBlock.FACE, Direction.SOUTH));
+        helper.setBlock(redstoneDevice, Blocks.REDSTONE_BLOCK);
+        helper.setBlock(ordinarySolid, Blocks.STONE);
+
+        BlockState shielded = RedAlloyWireBlock.renderState(helper.getLevel(),
+                helper.absolutePos(wirePos), Direction.UP);
+        BlockState bundle = BundledCableBlock.renderState(helper.getLevel(),
+                helper.absolutePos(bundlePos), Direction.UP);
+        helper.assertTrue(RedAlloyWireBlock.isConnected(shielded, Direction.NORTH)
+                        && RedAlloyWireBlock.isConnected(shielded, Direction.WEST)
+                        && !RedAlloyWireBlock.isConnected(shielded, Direction.EAST)
+                        && !RedAlloyWireBlock.isConnected(shielded, Direction.SOUTH)
+                        && BundledCableBlock.isConnected(bundle, Direction.SOUTH),
+                "shielded wire and bundle must render reciprocal arms only for the bundle and redstone device");
+
+        RedAlloyWireBlockEntity wire = (RedAlloyWireBlockEntity) helper.getBlockEntity(wirePos);
+        wire.setShielded(Direction.UP, 0, false);
+        BlockState unshielded = RedAlloyWireBlock.renderState(helper.getLevel(),
+                helper.absolutePos(wirePos), Direction.UP);
+        BlockState isolatedBundle = BundledCableBlock.renderState(helper.getLevel(),
+                helper.absolutePos(bundlePos), Direction.UP);
+        helper.assertTrue(!RedAlloyWireBlock.isConnected(unshielded, Direction.NORTH)
+                        && RedAlloyWireBlock.isConnected(unshielded, Direction.WEST)
+                        && !BundledCableBlock.isConnected(isolatedBundle, Direction.SOUTH),
+                "unshielded wire must retain redstone routing without impersonating a bundled channel");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 60)
     public static void wireOutputNotifiesAdjacentVanillaDevice(GameTestHelper helper) {
         BlockPos source = new BlockPos(1, 2, 2);
@@ -128,7 +173,8 @@ public final class RedAlloyWireGameTests {
                     "a powered wire must notify and energize an adjacent vanilla receiver");
             helper.destroyBlock(source);
             RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
-            helper.runAfterDelay(3, () -> {
+            // Vanilla redstone lamps intentionally delay their off transition by four ticks.
+            helper.runAfterDelay(5, () -> {
                 helper.assertTrue(!helper.getBlockState(lamp).getValue(
                                 net.minecraft.world.level.block.RedstoneLampBlock.LIT),
                         "a depowered wire must notify and release an adjacent vanilla receiver");

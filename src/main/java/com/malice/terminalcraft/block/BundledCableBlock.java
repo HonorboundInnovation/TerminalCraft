@@ -1,6 +1,7 @@
 package com.malice.terminalcraft.block;
 
 import com.malice.terminalcraft.blockentity.BundledCableBlockEntity;
+import com.malice.terminalcraft.blockentity.RedAlloyWireBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -238,7 +239,7 @@ public class BundledCableBlock extends BaseEntityBlock {
         Node node = new Node(pos, face);
         Set<Node> cableNeighbors = connectedNodes(accessor, node);
         for (Direction direction : planeDirections(face)) {
-            boolean device = canAttachDevice(accessor.getBlockState(pos.relative(direction)));
+            boolean device = canAttachDevice(accessor, pos.relative(direction), face);
             boolean connected = device || cableNeighbors.stream().anyMatch(next -> armDirection(node, next) == direction);
             state = state.setValue(CableShapeSupport.property(direction), connected);
         }
@@ -296,7 +297,7 @@ public class BundledCableBlock extends BaseEntityBlock {
         Direction nearest = null;
         double nearestDistance = Double.POSITIVE_INFINITY;
         for (Direction face : occupiedFaces(level, pos)) {
-            BlockHitResult hit = SurfaceCableSupport.faceHalfShape(face).clip(start, end, pos);
+            BlockHitResult hit = faceShape(level, pos, face).clip(start, end, pos);
             if (hit == null) continue;
             double distance = start.distanceToSqr(hit.getLocation());
             if (distance < nearestDistance) {
@@ -372,10 +373,13 @@ public class BundledCableBlock extends BaseEntityBlock {
         return level.getBlockState(support).isFaceSturdy(level, support, face);
     }
 
-    /** Exposes channel zero only through the plane of an occupied mounted face. */
-    private static boolean canAttachDevice(BlockState state) {
-        return state.getBlock() instanceof TerminalBlock || state.getBlock() instanceof TurtleBlock
-                || state.getBlock() instanceof RedAlloyWireBlock;
+    /** Direct endpoints and color-selected shielded breakouts on this exact mounted face. */
+    private static boolean canAttachDevice(BlockGetter level, BlockPos pos, Direction face) {
+        BlockState state = level.getBlockState(pos);
+        if (state.getBlock() instanceof TerminalBlock || state.getBlock() instanceof TurtleBlock) return true;
+        if (!(state.getBlock() instanceof RedAlloyWireBlock)
+                || !(level.getBlockEntity(pos) instanceof RedAlloyWireBlockEntity wire)) return false;
+        return wire.runs().stream().anyMatch(run -> run.face() == face && run.shielded());
     }
 
     private static VoxelShape faceShape(BlockGetter level, BlockPos pos, Direction face) {

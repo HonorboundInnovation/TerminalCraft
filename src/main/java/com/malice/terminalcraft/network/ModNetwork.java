@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  * Networking for terminal command submission and shell state sync.
  */
 public final class ModNetwork {
-    private static final String PROTOCOL = "6";
+    private static final String PROTOCOL = "7";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(TerminalCraftMod.MODID, "main"),
             () -> PROTOCOL,
@@ -48,6 +48,7 @@ public final class ModNetwork {
     static final int PLC_ACTION_PACKET_ID = 5;
     static final int PLC_RESULT_PACKET_ID = 6;
     static final int CONTROL_CENTER_ACTION_PACKET_ID = 7;
+    static final int MONITOR_CONFIG_PACKET_ID = 8;
 
     private static final int MAX_COMMAND_PACKET_LENGTH = 4096;
     private static final CommandSubmissionGuard COMMAND_GUARD = new CommandSubmissionGuard();
@@ -121,6 +122,14 @@ public final class ModNetwork {
                 ControlCenterActionPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        CHANNEL.registerMessage(
+                MONITOR_CONFIG_PACKET_ID,
+                MonitorConfigPacket.class,
+                MonitorConfigPacket::encode,
+                MonitorConfigPacket::decode,
+                MonitorConfigPacket::handle,
+                Optional.of(NetworkDirection.PLAY_TO_SERVER)
+        );
         registered = true;
     }
 
@@ -151,6 +160,11 @@ public final class ModNetwork {
     public static void sendDisplayConfig(int containerId, net.minecraft.core.BlockPos position,
                                          String channel, boolean source) {
         CHANNEL.sendToServer(new DisplayConfigPacket(containerId, position, channel, source));
+    }
+
+    public static void sendMonitorConfig(int containerId, net.minecraft.core.BlockPos position,
+                                         double textScale, int foreground) {
+        CHANNEL.sendToServer(new MonitorConfigPacket(containerId, position, textScale, foreground));
     }
 
     public static void sendPlcCompile(int containerId, String source) {
@@ -269,6 +283,47 @@ public final class ModNetwork {
                 if (player == null || !(player.containerMenu instanceof DisplayDiagnosticsMenu menu)
                         || menu.containerId != packet.containerId || !menu.targetPosition().equals(packet.position)) return;
                 menu.configureLink(player, packet.channel, packet.source);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    /** Server-authoritative wall appearance edit from a monitor's wrench screen. */
+    public static final class MonitorConfigPacket {
+        private final int containerId;
+        private final net.minecraft.core.BlockPos position;
+        private final double textScale;
+        private final int foreground;
+
+        private MonitorConfigPacket(int containerId, net.minecraft.core.BlockPos position,
+                                    double textScale, int foreground) {
+            this.containerId = containerId;
+            this.position = position;
+            this.textScale = textScale;
+            this.foreground = foreground;
+        }
+
+        public static void encode(MonitorConfigPacket packet, FriendlyByteBuf buffer) {
+            buffer.writeVarInt(packet.containerId);
+            buffer.writeBlockPos(packet.position);
+            buffer.writeDouble(packet.textScale);
+            buffer.writeInt(packet.foreground);
+        }
+
+        public static MonitorConfigPacket decode(FriendlyByteBuf buffer) {
+            return new MonitorConfigPacket(buffer.readVarInt(), buffer.readBlockPos(),
+                    buffer.readDouble(), buffer.readInt());
+        }
+
+        public static void handle(MonitorConfigPacket packet,
+                                  Supplier<NetworkEvent.Context> contextSupplier) {
+            NetworkEvent.Context context = contextSupplier.get();
+            context.enqueueWork(() -> {
+                ServerPlayer player = context.getSender();
+                if (player == null || !(player.containerMenu instanceof DisplayDiagnosticsMenu menu)
+                        || menu.containerId != packet.containerId
+                        || !menu.targetPosition().equals(packet.position)) return;
+                menu.configureMonitor(player, packet.textScale, packet.foreground);
             });
             context.setPacketHandled(true);
         }

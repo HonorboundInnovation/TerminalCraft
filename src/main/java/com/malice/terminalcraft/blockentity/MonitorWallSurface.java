@@ -147,7 +147,7 @@ final class MonitorWallSurface extends TerminalBuffer {
             throw new IllegalArgumentException("text scale must be from 0.5 to 5.0 in increments of 0.5");
         }
         textScale = scale;
-        anchor.terminalSurface().setTextScale(scale);
+        anchor.configureWallAppearance(scale, anchor.wallForegroundColor());
     }
 
     @Override

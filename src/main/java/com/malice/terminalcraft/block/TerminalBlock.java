@@ -105,9 +105,9 @@ public class TerminalBlock extends BaseEntityBlock {
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction side) {
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof TerminalBlockEntity terminal) {
-            // Vanilla passes the source block face pointing toward the receiver. Terminal output
-            // directions use that same world-space convention, so this must not be inverted.
-            return terminal.getDirectSignal(side);
+            // Minecraft supplies the direction from the receiver toward this source. Terminal
+            // output names are physical source faces, so the query direction is inverted.
+            return terminal.getDirectSignal(side.getOpposite());
         }
         return 0;
     }

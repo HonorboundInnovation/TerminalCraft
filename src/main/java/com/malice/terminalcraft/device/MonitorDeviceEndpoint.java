@@ -175,9 +175,17 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
     }
 
     private DeviceResult mutate(Runnable action, boolean syncText) {
-        action.run();
-        if (syncText) syncTerminalLines();
-        return DeviceResult.success();
+        // Tile updates publish output events synchronously. Keep descriptor refreshes from
+        // re-importing a partially synchronized wall while this operation advances tile by tile.
+        boolean alreadyImporting = importingSurface;
+        importingSurface = true;
+        try {
+            action.run();
+            if (syncText) syncTerminalLines();
+            return DeviceResult.success();
+        } finally {
+            importingSurface = alreadyImporting;
+        }
     }
 
     private DeviceResult setTitle(String value) {

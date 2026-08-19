@@ -103,13 +103,13 @@ public final class SurfaceCableSupportTest {
                         && language.contains("Unshielded Red Alloy Wire"),
                 "placement preview readouts must be localized");
 
-        assertSolidTintBase(Path.of("src/main/resources/assets/terminalcraft/textures/block/"
+        assertDetailedNeutralTintTexture(Path.of("src/main/resources/assets/terminalcraft/textures/block/"
                 + "red_alloy_wire_custom.png"));
-        assertSolidTintBase(Path.of("src/main/resources/assets/terminalcraft/textures/block/"
+        assertDetailedNeutralTintTexture(Path.of("src/main/resources/assets/terminalcraft/textures/block/"
                 + "network_cable_custom.png"));
-        assertSolidTintMask(Path.of("src/main/resources/assets/terminalcraft/textures/item/"
+        assertDetailedNeutralTintTexture(Path.of("src/main/resources/assets/terminalcraft/textures/item/"
                 + "red_alloy_wire_custom.png"));
-        assertSolidTintMask(Path.of("src/main/resources/assets/terminalcraft/textures/item/"
+        assertDetailedNeutralTintTexture(Path.of("src/main/resources/assets/terminalcraft/textures/item/"
                 + "network_cable_custom.png"));
 
         Path bundlePlate = Path.of("src/main/resources/assets/terminalcraft/textures/gui/guide/bundled_cable_families.png");
@@ -143,10 +143,15 @@ public final class SurfaceCableSupportTest {
         require(creativeSource.contains("event.accept(com.malice.terminalcraft.registry.ModRegistries."
                         + "RED_ALLOY_WIRE_ITEM.get());"),
                 "the unshielded Red Alloy stack must remain visible alongside all colored variants");
-        String geometryRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
-                + "SurfaceCableGeometryRenderer.java"));
-        require(geometryRenderer.contains("VoxelShape") && geometryRenderer.contains("TextureAtlasSprite"),
-                "placed cables must render the same route geometry used for selection and previews");
+        String redRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
+                + "RedAlloyWireBlockEntityRenderer.java"));
+        String networkRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
+                + "NetworkCableBlockEntityRenderer.java"));
+        require(redRenderer.contains("renderSingleBlock(")
+                        && networkRenderer.contains("renderSingleBlock(")
+                        && !redRenderer.contains("SurfaceCableGeometryRenderer")
+                        && !networkRenderer.contains("SurfaceCableGeometryRenderer"),
+                "placed cables must use baked route models instead of overlapping textured boxes");
         String redBlockSource = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/block/"
                 + "RedAlloyWireBlock.java"));
         String networkBlockSource = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/block/"
@@ -155,6 +160,8 @@ public final class SurfaceCableSupportTest {
                 + "BundledCableBlock.java"));
         require(!redBlockSource.contains("IntegerProperty.create(\"point\", 0, 15)")
                         && !networkBlockSource.contains("IntegerProperty.create(\"point\", 0, 15)")
+                        && !redBlockSource.contains("IntegerProperty.create(\"lane\"")
+                        && !networkBlockSource.contains("IntegerProperty.create(\"lane\"")
                         && !redBlockSource.contains("pointForHit")
                         && !networkBlockSource.contains("pointForHit")
                         && redBlockSource.contains("centeredRunShape")
@@ -188,31 +195,25 @@ public final class SurfaceCableSupportTest {
                 face.getName() + " cable hitbox must occupy exactly its mounted half block");
     }
 
-    private static void assertSolidTintBase(Path path) throws Exception {
+    private static void assertDetailedNeutralTintTexture(Path path) throws Exception {
         BufferedImage image = ImageIO.read(path.toFile());
         require(image.getWidth() == 16 && image.getHeight() == 16,
                 path + " must remain a native 16x16 Minecraft texture");
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                require(image.getRGB(x, y) == 0xFFFFFFFF,
-                        path + " must be an opaque neutral tint base with no patterned artifacts");
-            }
-        }
-    }
-
-    private static void assertSolidTintMask(Path path) throws Exception {
-        BufferedImage image = ImageIO.read(path.toFile());
-        boolean visible = false;
+        java.util.Set<Integer> shades = new java.util.HashSet<>();
         for (int y = 0; y < image.getHeight(); y++) {
             for (int x = 0; x < image.getWidth(); x++) {
                 int pixel = image.getRGB(x, y);
-                int alpha = pixel >>> 24;
-                if (alpha == 0) continue;
-                visible = true;
-                require(pixel == 0xFFFFFFFF,
-                        path + " may contain only transparent pixels and a solid white tint mask");
+                int red = (pixel >> 16) & 0xFF;
+                int green = (pixel >> 8) & 0xFF;
+                int blue = pixel & 0xFF;
+                int channelSpread = Math.max(red, Math.max(green, blue))
+                        - Math.min(red, Math.min(green, blue));
+                require((pixel >>> 24) == 0xFF && channelSpread <= 16,
+                        path + " must be an opaque near-neutral base for dye tinting");
+                shades.add(pixel);
             }
         }
-        require(visible, path + " must retain a visible cable silhouette");
+        require(shades.size() >= 32,
+                path + " must retain enough pixel variation to avoid flat slab rendering");
     }
 }

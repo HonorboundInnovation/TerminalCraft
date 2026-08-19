@@ -31,11 +31,32 @@ public final class PlcRedstoneGameTests {
             BlockPos absolutePlc = helper.absolutePos(PLC);
             helper.assertTrue(plc.getRedstoneOutput("west") == 15,
                     "PLC runtime must retain the requested west output");
-            helper.assertTrue(helper.getLevel().getSignal(absolutePlc, Direction.WEST) == 15,
+            helper.assertTrue(helper.getLevel().getSignal(absolutePlc, Direction.EAST) == 15,
                     "PLC block must expose the requested west signal to Minecraft");
             helper.assertTrue(helper.getBlockState(LAMP).getValue(RedstoneLampBlock.LIT),
                     "an adjacent vanilla redstone lamp must receive PLC power");
             helper.succeed();
         });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void terminalShellFindsAdjacentPlcOnEverySide(GameTestHelper helper) {
+        BlockPos terminalPos = new BlockPos(3, 3, 3);
+        helper.setBlock(terminalPos, ModRegistries.TERMINAL_BLOCK.get());
+        TerminalBlockEntity terminal = (TerminalBlockEntity) helper.getBlockEntity(terminalPos);
+
+        for (Direction direction : Direction.values()) {
+            BlockPos plcPos = terminalPos.relative(direction);
+            helper.setBlock(plcPos, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get());
+            com.malice.terminalcraft.shell.ShellCommandResult result =
+                    terminal.getShell().executeForResult("plc status");
+            helper.assertTrue(result.exitCode() == 0
+                            && result.outputLines().size() == 1
+                            && result.outputLines().get(0).startsWith("state=STOP"),
+                    "terminal must resolve a directly adjacent PLC on its "
+                            + direction.getName() + " side: " + result.outputLines());
+            helper.destroyBlock(plcPos);
+        }
+        helper.succeed();
     }
 }

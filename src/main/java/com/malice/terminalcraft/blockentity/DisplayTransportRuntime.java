@@ -219,7 +219,7 @@ public final class DisplayTransportRuntime {
         new MonitorGroupDevice(target).renderColorFrame(new MonitorScreensaver.ColorFrame(lines, fg, bg), palette);
     }
 
-    private static char digit(int value) { return (char) ('0' + Math.max(0, Math.min(15, value))); }
+    private static char digit(int value) { return Character.forDigit(Math.max(0, Math.min(15, value)), 16); }
 
     private static Scope scope(ServerLevel level) {
         if (level == null || level.getServer() == null) return new Scope();

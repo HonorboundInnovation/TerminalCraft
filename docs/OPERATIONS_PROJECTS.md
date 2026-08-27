@@ -19,18 +19,23 @@ APIs and future user interfaces.
   rejects stale or replayed plans, and compensates attempted writes in reverse order after failure.
 - `OperationsProjectRuntime` retains ready plans on the server. A client applies only an opaque plan
   UUID; it cannot replace the validated plan, caller identity, or project revision.
+- `OperationsProjectPackets` exposes bounded edit, save, preview, and apply requests. The edit
+  request loads an authoritative project revision for an editor, save uses optimistic revision
+  matching, preview returns validation plus only an opaque retained-plan UUID, and apply accepts
+  only that UUID. Every request derives its typed player principal from the authenticated network
+  sender and receives a bounded authoritative response.
+- `OperationsProjectCodec` is the shared strict project-document codec and enforces a 512 KiB
+  application-level packet budget in addition to the model's collection and value limits.
 
 ## GUI development sequence
 
-1. Add bounded edit/save/preview/apply packets over `OperationsProjectRuntime`; never accept a plan
-   supplied by a client during apply.
-2. Build the Easy-mode wizard from discovery filters and validator issue codes. It should generate
+1. Build the Easy-mode wizard from discovery filters and validator issue codes. It should generate
    an ordinary `OperationsProject`, not a second configuration format.
-3. Build the Advanced-mode project editor over the same document, exposing bindings, typed method
+2. Build the Advanced-mode project editor over the same document, exposing bindings, typed method
    arguments, rollback actions, and raw validation details.
-4. Add live deployment progress and result views from `StepOutcome`, then device health views from
+3. Add live deployment progress and result views from `StepOutcome`, then device health views from
    refreshed discovery snapshots.
-5. Add project import/export only through the bounded project codec and require a new server preview
+4. Add project import/export only through the bounded project codec and require a new server preview
    before imported content can be applied.
 
 The project layer does not make optional integrations mandatory. Integration requirements are data

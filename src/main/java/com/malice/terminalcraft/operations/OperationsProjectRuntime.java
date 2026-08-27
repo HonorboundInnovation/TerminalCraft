@@ -25,7 +25,16 @@ public final class OperationsProjectRuntime {
 
     private OperationsProjectRuntime() {}
 
+    public enum EditStatus { FOUND, NOT_FOUND }
     public enum PreviewStatus { READY, INVALID, NOT_FOUND }
+
+    public record EditResult(EditStatus status, String message, Optional<OperationsProject> project) {
+        public EditResult {
+            status = Objects.requireNonNull(status, "status");
+            message = Objects.requireNonNull(message, "message");
+            project = Objects.requireNonNull(project, "project");
+        }
+    }
 
     public record PreviewResult(PreviewStatus status, String message,
                                 Optional<OperationsDeploymentService.Plan> plan) {
@@ -34,6 +43,34 @@ public final class OperationsProjectRuntime {
             message = Objects.requireNonNull(message, "message");
             plan = Objects.requireNonNull(plan, "plan");
         }
+    }
+
+    /** Returns only the authoritative revision visible to the authenticated principal. */
+    public static EditResult edit(MinecraftServer server, DeviceCallContext context, UUID projectId) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(projectId, "projectId");
+        Optional<OperationsProject> project = OperationsProjectSavedData.get(server)
+                .project(context, projectId);
+        return project.isPresent()
+                ? new EditResult(EditStatus.FOUND, "project loaded", project)
+                : new EditResult(EditStatus.NOT_FOUND, "project not found", Optional.empty());
+    }
+
+    /** Persists a bounded document through the authoritative owner and revision store. */
+    public static OperationsProjectSavedData.Result save(MinecraftServer server,
+                                                         DeviceCallContext context,
+                                                         OperationsProject project,
+                                                         long expectedRevision) {
+        Objects.requireNonNull(server, "server");
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(project, "project");
+        if (expectedRevision < 0) {
+            return new OperationsProjectSavedData.Result(
+                    OperationsProjectSavedData.Status.CONFLICT,
+                    "expected project revision must not be negative", Optional.empty());
+        }
+        return OperationsProjectSavedData.get(server).store(context, project, expectedRevision);
     }
 
     public static PreviewResult preview(MinecraftServer server, DeviceCallContext context,

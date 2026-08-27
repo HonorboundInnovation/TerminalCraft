@@ -32,7 +32,7 @@ import java.util.function.Supplier;
  * Networking for terminal command submission and shell state sync.
  */
 public final class ModNetwork {
-    private static final String PROTOCOL = "7";
+    private static final String PROTOCOL = "8";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(TerminalCraftMod.MODID, "main"),
             () -> PROTOCOL,
@@ -130,6 +130,7 @@ public final class ModNetwork {
                 MonitorConfigPacket::handle,
                 Optional.of(NetworkDirection.PLAY_TO_SERVER)
         );
+        OperationsProjectPackets.register(CHANNEL);
         registered = true;
     }
 

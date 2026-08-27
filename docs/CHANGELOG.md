@@ -3,6 +3,18 @@
 All notable player-facing changes are recorded here. TerminalCraft build numbers increase with the
 final component of the version: `1.0.17` is build 17, `1.0.18` is build 18, and so on.
 
+## Unreleased
+
+### Operations Project GUI network boundary
+
+- Added bounded edit, optimistic-save, preview, and opaque-plan apply packets over the
+  server-authoritative Operations Project runtime.
+- Derived every request principal from the authenticated server player and kept project ownership,
+  revision checks, validation, retained deployment plans, and device mutations authoritative.
+- Added strict 512 KiB project-document encoding plus bounded validation, deployment outcome, and
+  error response payloads.
+- Advanced the network protocol to version 8 and added headless packet round-trip and boundary tests.
+
 ## 1.0.63 — 2026-08-10
 
 ### Solid cable colors and restored unshielded Red Alloy

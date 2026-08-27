@@ -213,6 +213,7 @@ def headlessTests = [
         operationsProjectTest: ['Run versioned Operations Project persistence tests', 'com.malice.terminalcraft.operations.OperationsProjectTest'],
         operationsDiscoveryValidationTest: ['Run bounded Operations Project discovery and validation tests', 'com.malice.terminalcraft.operations.OperationsDiscoveryValidationTest'],
         operationsDeploymentServiceTest: ['Run preview, apply, replay, and rollback deployment tests', 'com.malice.terminalcraft.operations.OperationsDeploymentServiceTest'],
+        operationsProjectPacketTest: ['Run bounded Operations Project packet codec tests', 'com.malice.terminalcraft.network.OperationsProjectPacketTest'],
         nasModelTest: ['Run tiered NAS media capacity and progression tests', 'com.malice.terminalcraft.item.NasModelTest'],
         plcLadderModelTest: ['Run source-preserving PLC ladder projection tests', 'com.malice.terminalcraft.client.PlcLadderModelTest'],
         wireInteractionSupportTest: ['Run wire wrench-interaction compatibility tests', 'com.malice.terminalcraft.block.WireInteractionSupportTest'],

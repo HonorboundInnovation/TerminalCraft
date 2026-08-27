@@ -49,6 +49,9 @@ public final class OperationsProjectSavedData extends SavedData {
                                      long expectedRevision) {
         Objects.requireNonNull(project, "project");
         if (!authorized(context, project.owner())) return result(Status.PERMISSION_DENIED, "project owner required");
+        if (expectedRevision == Long.MAX_VALUE) {
+            return result(Status.CONFLICT, "project revision limit reached");
+        }
         OperationsProject existing = projects.get(project.projectId());
         if (existing == null) {
             if (expectedRevision != 0 || project.revision() != 0) {

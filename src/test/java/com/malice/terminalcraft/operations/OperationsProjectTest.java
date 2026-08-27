@@ -43,6 +43,9 @@ public final class OperationsProjectTest {
         OperationsProjectSavedData.Result updated = data.store(owner, stored, 1);
         require(updated.project().orElseThrow().revision() == 2,
                 "matching optimistic revision advances once");
+        require(data.store(owner, project(Long.MAX_VALUE), Long.MAX_VALUE).status()
+                        == OperationsProjectSavedData.Status.CONFLICT,
+                "revision arithmetic cannot wrap into a negative server revision");
         CompoundTag saved = data.save(new CompoundTag());
         OperationsProjectSavedData restored = OperationsProjectSavedData.load(saved);
         OperationsProject roundTrip = restored.project(owner, draft.projectId()).orElseThrow();

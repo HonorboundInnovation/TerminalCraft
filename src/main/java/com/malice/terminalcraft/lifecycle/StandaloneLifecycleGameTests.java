@@ -60,6 +60,10 @@ public final class StandaloneLifecycleGameTests {
     public static void turtleMovementPreservesIdentityAndComputerStateAndRejectsObstruction(GameTestHelper helper) {
         helper.setBlock(PRIMARY, ModRegistries.TURTLE_BLOCK.get());
         TurtleBlockEntity turtle = (TurtleBlockEntity) helper.getBlockEntity(PRIMARY);
+        turtle.getCapability(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER)
+                .orElseThrow(IllegalStateException::new)
+                .insertItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.COAL), false);
+        helper.assertTrue(turtle.turtleRefuel(1), "new turtle must accept fuel before its movement lifecycle");
         turtle.setLabel("miner-one");
         turtle.setRedstoneOutput("north", 9);
         turtle.getShell().runScriptText("cd /tmp; echo moving > movement.txt");

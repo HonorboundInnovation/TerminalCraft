@@ -28,11 +28,23 @@ import java.util.stream.Collectors;
 
 /** Routing node with persistent per-face logical-network assignments and topology diagnostics. */
 public class NetworkRouterBlock extends BaseEntityBlock implements WiredNetworkNode {
+    private static final net.minecraft.world.phys.shapes.VoxelShape MODEL_SHAPE = net.minecraft.world.phys.shapes.Shapes.or(
+            net.minecraft.world.level.block.Block.box(0, 0, 0, 16, 1, 16),
+            net.minecraft.world.level.block.Block.box(1, 1, 1, 15, 15, 15),
+            net.minecraft.world.level.block.Block.box(2, 2, 0.25, 14, 14, 1),
+            net.minecraft.world.level.block.Block.box(7, 15, 7, 9, 16, 9));
+
+    @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return MODEL_SHAPE;
+    }
+
     public NetworkRouterBlock() {
         super(BlockBehaviour.Properties.of()
                 .mapColor(MapColor.COLOR_LIGHT_BLUE)
                 .strength(2.0f, 4.0f)
-                .requiresCorrectToolForDrops());
+                .requiresCorrectToolForDrops().noOcclusion());
     }
 
     @Override

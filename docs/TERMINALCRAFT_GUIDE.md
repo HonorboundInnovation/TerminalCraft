@@ -123,7 +123,27 @@ A placed, persistent Bash-style computer. Use it as the normal workstation for s
 
 ### Pocket Terminal
 
-A stack-size-one handheld computer opened by using the item. Its shell state, label, stable modem identity, and open channels are stored on the item. It includes a built-in wireless modem with a default 64-block range and up to 128 open channels, and rebinding follows the carrying player. Shift-right-click any Sensor Array or individual sensor with the Pocket Terminal to open a session in which that clicked sensor is treated as adjacent; `sensor configure`, `sensor calibrate`, and the other local sensor commands then target it directly.
+A stack-size-one handheld computer opened by using the item. Starting with development build 1.0.87, files and shell state are stored in world data; the item retains its identity, label, modem identity and open channels. First opening a legacy pocket writes and verifies a full original-tag backup before removing its embedded shell. Missing or unreadable world records refuse to open rather than replacing files with an empty computer. Keep the entire world's `data` directory in backups: copying the item alone to another world does not carry its files. Do not downgrade migrated pockets to an older build. Client and server must both support network protocol 8.
+
+Copied pocket identities refer to the same world files, not independent computers. When one session saves, previously opened sessions for that identity become stale and must be reopened. Development build 1.0.88 also migrates eligible legacy pockets during player/ender inventory loading, before supported vanilla container opening, and when loose items join the server world. These paths include pockets packed inside vanilla shulker-box items. A failed container migration keeps the container closed and retains original data; a failed loose-item migration retains the drop rather than deleting it. Mod-specific storage, off-thread producers, pending loot tables, creative-mode behavior and universal packet safety are not yet qualified.
+
+For an operator-mediated portable copy (permission level 2):
+
+1. Save any open editor buffer, close the pocket screen, hold the source pocket in your main hand and run `/tcpocket export`.
+2. The command reports an archive UUID. Copy that `<UUID>.dat` file from the source world's `terminalcraft-pocket-archives` directory to the same directory in the destination world. Treat it as private: it contains the shell snapshot and files. Use trusted backups/archives only.
+3. In the destination world, hold a blank pocket that has never been opened and run `/tcpocket import <UUID>`. The archive is retained, and the pocket receives a new, independent world identity. Import refuses to overwrite a pocket with existing files or an identity.
+
+Export/import carries the label and shell snapshot, not modem identity/channels. The archive stays independent of subsequent edits to the source. Imports reject unsupported formats, files that would be changed by filesystem salvage, symlinks, compressed files over 16 MiB and NBT decoding over its 32 MiB accounting budget. Newer mod versions may require a separate upgrade/recovery procedure for older archives. Actual transfer between two separate server installations remains a release qualification gate.
+
+Development build 1.0.89 provides `/tcpocket recover-original <computer-UUID>`. Hold a blank unopened pocket to receive an independent copy of that computer's **migration-time** files and label. The current source files and backup are not reverted or consumed. Find the computer UUID in its advanced item tooltip (F3+H), or the `data/terminalcraft_pocket_<UUID>.dat` filename. This operator command is not a recent-save undo: it cannot restore edits made after migration, unsent editor text, missing world-data files, or backups that fail format/filesystem validation. Newly created pockets with no legacy Shell backup have no original migration snapshot to restore.
+
+Development build 1.0.89 additionally provides `/tcpocket recover-files <computer-UUID>`. An operator holding a blank unopened pocket can copy individually readable files from a damaged current record into a new identity. The original record and migration backup remain untouched. Only files that decode exactly are copied; malformed entries, ambiguous paths, unsupported encodings and files that exceed capacity are skipped, never silently truncated. The command reports counts and a report-file path inside the new pocket. Recovery resets shell/editor/session state and does not recover unsent edits. Selection and report size are bounded; the report states when entries or diagnostics were omitted. Unsupported future formats and unreadable/missing world records require an appropriate version or external backup, not this command.
+
+Pocket opening refuses a writable session when the saved filesystem would be reduced by the bounded loader. This retains damaged files for recovery instead of saving a partial view over them. Retained player and ender inventories also receive legacy migration during player restoration, before subsequent vanilla respawn synchronization. Automated death/restoration checks cover both keepInventory settings; full live multiplayer respawn remains a qualification task.
+
+Development build 1.0.90 also preserves damaged filesystem snapshots in placed terminals, turtles and server racks, refusing shell execution and editor saves while showing a recovery warning. With a blank unopened pocket in your main hand, an operator can run `/tcpocket recover-block <x> <y> <z>` to copy individually readable files from a loaded computer in the same dimension. The source block, inventory, fuel, jobs and original saved shell are not repaired or replaced. The new pocket contains a recovery report and uses the same conservative limits as recover-files. This is file rescue into a separate pocket, not restoration of the original machine's operating state. Present wrong-type Shell payloads and compound saved shells missing Vfs are retained in preservation state. An entirely absent Shell field keeps legacy/new-block behavior. Client display updates use a separate load route.
+
+It includes a built-in wireless modem with a default 64-block range and up to 128 open channels, and rebinding follows the carrying player. Shift-right-click any Sensor Array or individual sensor with the Pocket Terminal to open a session in which that clicked sensor is treated as adjacent; `sensor configure`, `sensor calibrate`, and the other local sensor commands then target it directly.
 
 ### TerminalCraft Guide
 
@@ -349,6 +369,8 @@ array, without requiring a modem to be placed beside the block.
 
 ### Network Access Storage and Materializer
 
+Breaking a NAS drops its installed SSDs separately from the controller; their labels, items and fluids travel with the drives. Starting with 1.0.85, bulk item quantities use integer storage and item/fluid extraction returns exactly the amount removed. Older builds cannot read the new SSD item counts correctly: do not downgrade those drives or their worlds. Back up the whole world before upgrades; quantities already corrupted by older saves cannot be reconstructed automatically.
+
 A **Network Access Storage** block accepts up to eight portable Solid-State Drives. Basic, Advanced,
 and Quantum drives provide progressively larger item/fluid capacities. Drive contents are stored on
 the SSD item, so removing a drive is safe and the drive can be moved to another NAS.
@@ -448,6 +470,10 @@ read it.
 
 ### Server Rack, Server Blade, and Router Blade
 
+From development build 1.0.90, a broken rack carries a small world-local recovery ticket for its identity, files and scheduler state. Rack items are nonstackable. Place the item in its original world to restore the machine; keep the world's data directory in backups, and do not downgrade saved rack items to older builds. Blades drop separately and are not included in the ticket. The replacement starts with empty bays; queued jobs require a reinstalled compute blade to run. Copied tickets cannot restore a second rack. This is not a crash-atomic guarantee or exactly-once execution guarantee for external job effects.
+
+From development build 1.0.91, routine rack display updates omit the full scheduler snapshot, including private command and caller context. Saved world data and recovery tickets still retain jobs. Inspect jobs through the authorized server-side shell commands; display synchronization is not a second copy of the private queue. Network protocol remains 8.
+
 Server racks host bounded scheduled work. Up to three equally facing rack blocks form a six-bay cabinet (two bays per block). Right-click a bay with a blade to install it; shift-right-click an occupied bay empty-handed to remove its module. A Server Blade supplies shell/job service and a Router Blade supplies internal routing. Shell access uses `server` (alias `jobs`) from a computer with an available local rack service.
 
 ### Refined Storage Bridge
@@ -464,7 +490,7 @@ If the cached source contains more than the adapter's 4,096-key scan bound, the 
 empty page instead of presenting an incomplete result as complete.
 
 The bridge never inserts, extracts, crafts, cancels, or impersonates an AE2 security principal.
-Until caller-aware native security mapping is available, all mutations are denied before AE2 is
+Item transfer and crafting are not implemented in this bridge; mutations are denied before AE2 is
 invoked. Power, boot, channel, node, and bounded cached-inventory telemetry remain visible through
 the generic device descriptor.
 When AE2 crafting CPUs are present, the descriptor also reports bounded CPU count, busy CPU count,
@@ -1032,9 +1058,13 @@ The current shell enforces safeguards including:
 - maximum captured command-substitution output: 4096 characters;
 - command length controlled by server config (default 512 characters);
 - command packet admission controlled by server config (default 20 per second per player);
-- editor: 512 lines, 512 characters per line, and 64 KiB maximum save size.
+- editor: 512 lines, 512 characters per line, and 65,536 characters total. Files outside these limits are rejected on opening without changing their contents. GUI saves preserve whether the buffer ends with a newline (including empty files); CRLF and CR endings normalize to LF. A final newline does not count as an extra editor line. Rejected GUI saves leave the editor open and its previous buffer/file intact.
 
 ## 8. Writing and running scripts
+
+The filesystem accepts at most 4,096 files/directories combined, 65,536 characters per file and 4,194,304 file-content characters total, including mounted media. Writes and mounts that exceed these limits fail without changing existing files or leaving partial directories. Delete unwanted files or shorten content before retrying. Overwriting a file accounts for its old size, so shrinking a file can free space even at capacity.
+
+Starting with 1.0.82, files too large for one Minecraft NBT string are stored in safe chunks, preserving Unicode and maximum-size content through saves. Legacy files remain readable. Do not downgrade worlds or media containing these chunked files to an older mod version; keep a whole-world backup before upgrading.
 
 ### Fast creation
 
@@ -1215,6 +1245,18 @@ cat /home/player/diagnostics.txt
 
 ## 10. Turtles
 
+### Picking up a saved computer
+
+Terminal and turtle drops now preserve their computer identity, files, label and saved settings through a small recovery reference. Turtle fuel is preserved, while its inventory contents drop separately and are not duplicated inside the recovered computer. Use the appropriate tool and normal block drops; destructive commands that suppress drops are not a pickup workflow.
+
+Saved computer items are non-stackable and **world-bound**: place them in their original world (any dimension in that world). Their complete data is stored in that world's saved data rather than sent inside an oversized item packet. Back up the whole world, including its `data` directory. Copying the item into a different world does not copy its files. Missing, malformed or already-used recovery references reject placement without consuming the item; obtain a valid original item or restore the world backup. A copied reference can only be used once.
+
+The server retains the last recovery snapshot per computer for operator recovery, but there is not yet an automatic crash-reconciliation or recovery-management interface. These records follow normal world saves; abrupt termination between save operations still requires a world backup/recovery procedure.
+
+### Operating a turtle
+
+Terminal screens synchronize display state and active editor text, not the complete filesystem or private environment. Large files can remain on the server without blocking ordinary output. Screens show a bounded recent output window (up to 64,000 characters); this does not delete server-side files. Tab completion queries the computer behind the current menu. Replies are bounded to 128 candidates, so type more of a filename to narrow a large match set. Client and server mod versions must match the current network protocol.
+
 Command reference:
 
 ```text
@@ -1229,9 +1271,25 @@ turtle dig [side]
 turtle place [side]
 turtle inspect [side]
 turtle facing
+turtle inventory
+turtle select <1-16>
+turtle fuel
+turtle refuel [1-64]
 ```
 
 Default interaction side is `front`. Recognized side vocabulary across host operations includes relative (`front`, `back`, `left`, `right`, `top`, `bottom`) and absolute (`north`, `south`, `east`, `west`, `up`, `down`) forms where the host supports them.
+
+With finite fuel enabled, each successful move, dig or placement consumes one fuel; successful placement also consumes one selected item. Rejected actions consume neither. Digging and placement require a loaded target inside the world bounds and border. Movement keeps the running shell, so a command chain can continue from the new position.
+
+New turtles start with sixteen empty slots and zero fuel. Crouch and right-click with an empty hand to open the inventory screen; ordinary right-click opens the command screen. The inventory screen supports normal item clicks and shift-click transfers with your inventory. Its arrows choose the selected slot, highlighted in gold, and **Refuel 1** consumes one selected fuel item. It closes if the turtle moves or is removed, so an old inventory session cannot transfer from a replacement computer. The command screen can follow movement separately. You can also supply items through the standard item-handler interface (for example, hoppers or item pipes).
+
+`turtle inventory` lists contents and marks the selected slot with `*`; `turtle select 1` through `turtle select 16` choose the slot used for placement and refueling. `turtle fuel` reports remaining actions. `turtle refuel` consumes one selected furnace-fuel item by default; an explicit count is bounded to 1–64 and consumes no more than available items or remaining fuel capacity. Each twenty furnace burn ticks provides one action: one coal gives 80 actions. Container fuel must occupy its slot alone; a lava bucket gives 1,000 actions and leaves the empty bucket in that slot. Invalid fuel and invalid arguments consume nothing.
+
+Existing saved turtles migrate their old selected stack into slot 1 and retain their saved fuel mode and balance. Legacy unlimited mode does not consume fuel or placement items, and refueling it is rejected without consuming items. Movement transfers all inventory slots without dropping them; normal removal releases the inventory contents into the world.
+
+Digging collects newly spawned item drops near the broken block into available inventory space. Existing loose items are left alone, and overflow stays in the world. This also handles a broken container's newly dropped contents; XP and other non-item entities are not collected. Collection does not invent drops when the block's loot rules produce none.
+
+Placement uses the selected block item's placement routine with an automated directional context, including support checks, orientation, multi-block behavior, slab combining, and saved container data. Horizontal facing follows the turtle; its look direction follows the requested placement side. Non-block items are not used by `turtle place`. This is not a simulated player interaction: custom items requiring a real player, claim/protection hooks and the full integration catalog still need qualification. Full survival progression and saved-computer retention on normal breaking remain under development.
 
 Safe automation pattern:
 
@@ -1810,6 +1868,38 @@ controls it, and `trend.get` returns the last 64 samples. Program writes and con
 the PLC owner, and `plc remote open <x> <y> <z>` opens the same programmer screen from an
 authorized terminal in the same dimension.
 
+For multiline programs, save the source in the terminal's editor and use
+`plc remote load <name|uuid> <file>`. This passes the entire file through the authenticated device API
+without interpreting its PLC instructions as shell commands. The existing device string limit is
+4,096 characters; use the PLC programmer for larger programs. Loading does not automatically start
+the controller. Then use `device call <name|uuid> control.run`, `io.get`, and `control.stop`.
+`device list programmable_logic_controller` narrows discovery to controllers. See
+`docs/examples/REMOTE_PLC_COMMISSIONING.md` in the project for a complete input-to-lamp example.
+
+### Wired sensor commissioning (1.0.92)
+
+Network Cable attaches directly to terminals, PLCs, Sensor Arrays and individual sensors, as well
+as wired modems and routers. For a simple test, extend two same-color floor cable segments east
+from a PLC to a Redstone Sensor facing north, with solid support under the cables. Put a terminal
+south of the first cable and a redstone lamp west of the PLC. Do not add a wireless modem when
+testing cable disconnection.
+
+Run `sensor discover`, then, with only that sensor reachable, `sensor name line-signal`.
+`sensor @line-signal read value` reads its channel. Save this program in the terminal editor:
+
+```text
+IN ENABLE SENSOR line-signal/value
+OUT MOTOR REDSTONE WEST
+RUNG MOTOR = ENABLE
+```
+
+Use `plc remote load <PLC-uuid> <file>` and `device call <PLC-uuid> control.run`. A redstone block
+north of the sensor should light the PLC's west lamp. Breaking the cable makes the sensor
+unreachable and clears the PLC's automatic output. After restoring the cable, explicitly call
+`control.reset` and then `control.run`. Reset clears timers, counters and other controller runtime
+state; it is not automatic. Run commands report failure while a latched fault prevents starting,
+rather than claiming the PLC is running. This demonstration is not a certified safety interlock.
+
 Red-alloy and bundled wiring is intentionally visible in 1.0.26. This release does not provide a
 concealment/facade representation; use the wrench interaction to inspect a mounted face or remove
 that face without disturbing the other faces in the same compact wire block.
@@ -1847,7 +1937,9 @@ disk sync
 umount
 ```
 
-If the current directory is inside `/disk`, unmounting returns the shell to its home directory. Always unmount or sync before ejecting media when preserving recent writes matters.
+If the current directory is inside `/disk`, successful unmounting returns the shell to its home directory. If the floppy is missing or its write fails, `umount` reports failure and retains `/disk` and the current directory so files can be recovered. Restore the original media before retrying; do not substitute another floppy. Always unmount or sync before ejecting media when preserving recent writes matters.
+
+Mounts remember the drive, floppy identity and content revision. `disk sync`, editor auto-sync and normal `umount` refuse to overwrite replacement media or changes committed by another computer. Return the original unchanged floppy to its original drive to retry. If another writer changed it, copy your pending files from `/disk` into `/home/player` first, run `umount --discard` to explicitly discard only the mounted copy, then `mount` again and reconcile your recovered files with the current disk. `--discard` never writes to physical media. Older saved mounts without identity information follow the same recovery/remount procedure; their files remain readable.
 
 ## 14. RedNet networking
 
@@ -2056,7 +2148,7 @@ device list
 device info <device-name-or-uuid>
 ```
 
-`device list` prints UUID, type, status, address, and display name for discoverable devices. Only server-authorized adjacent/current endpoints are exposed. After creating a DNS alias with `device dns add`, the alias can be used by the unified `device info`, `device call`, transfer, and escrow commands.
+`device list [filter]` prints UUID, type, status, address, and display name for discoverable devices. The optional case-insensitive filter matches type, name, UUID, address or capability before the 64-result display limit. Discovery scans up to 256 authorized candidates and reports when either limit is reached; `device info <known-uuid>` performs direct lookup. Only server-authorized adjacent/current endpoints are exposed. After creating a DNS alias with `device dns add`, the alias can be used by the unified `device info`, `device call`, transfer, and escrow commands.
 
 ### 15.2 Calling methods
 
@@ -2166,7 +2258,9 @@ cancelEventWait(wait_id)
 server list
 server queued
 server scheduler
+server policy
 server submit <command...>
+server after <ticks> <command...>
 server status <job-uuid>
 server cancel <job-uuid>
 ```
@@ -2180,6 +2274,70 @@ server scheduler
 ```
 
 Jobs are caller-owned and foreign jobs are concealed. Scheduler work is bounded, owner-fair, and cooperatively sliced. Whether a specific command can run depends on rack availability, persisted continuation support, current authority, and host services.
+
+Use `server after 200 'echo ready > /home/player/ready.txt'` to schedule a command after 200 game ticks (about 10 seconds at normal speed). Delays range from 0 to 12,096,000 game ticks and are saved with the job. This is game time, not a wall-clock timer while the server is stopped. Use the returned job UUID with `server status` or `server cancel`.
+
+#### Remote rack commands
+
+Remote execution is disabled until a player runs `server remote on` at a rack with a server blade. That player owns remote-shell access. At the local rack, the owner can use:
+
+```sh
+server remote status
+server remote allow <player-uuid>
+server remote deny <player-uuid>
+server remote audit
+server remote off
+```
+
+From another terminal, use `device list remote_shell` to find the rack UUID, then:
+
+```sh
+rsh <rack-uuid> 'echo hello > /home/player/remote.txt'
+rsh <rack-uuid> 'cat /home/player/remote.txt'
+```
+
+Commands use the rack's shared files and working directory, not the originating terminal's files. Quote the complete remote command so redirection happens on the rack. The original authenticated player remains the caller for device permissions and job ownership. Invited players receive full shared-shell access, including files; grant access only to trusted teammates. Remote access does not protect the physical rack from local users.
+
+This uses the server device registry, not SSH or physical RedNet transport. The rack must be loaded and have a server blade. Responses include the remote exit code and up to 4,096 output characters; truncation is reported. The last 64 access/configuration records retain caller, game tick and result, but not command text or output. Access settings and audit records are saved server-side with the rack.
+
+For a connected command session, use:
+
+```sh
+rsh connect <rack-uuid>
+pwd
+cd /home/player
+echo hello > session.txt
+cat session.txt
+service list
+exit
+```
+
+The prompt changes to `rsh[<rack-id>]$`. Subsequent interactive input is interpreted on the rack: variables, pipes, redirection and working-directory changes are remote. Use `exit` or `rsh disconnect` to return to the local terminal. The rack's environment and working directory remain shared with its local console and other authorized users, not isolated per session. Local background scripts/jobs are not redirected by connecting an interactive session.
+
+Each command rechecks access. Losing access or switching players disconnects without retrying the input locally. Sessions are transient and must be reconnected after the originating computer reloads. Remote tab completion is not yet provided; local file completion is suppressed while connected. Full-screen editor, Control Center and HMI interfaces still require the local rack screen and report that limitation rather than opening an invisible remote UI. Connected command sessions do not forward those interfaces.
+
+#### Named recurring services
+
+Use named services for regular automation without a busy-loop script. At a rack with a server blade:
+
+```sh
+service define heartbeat 200 'echo beat >> /home/player/beats.txt'
+service start heartbeat
+service list
+service status heartbeat
+service stop heartbeat
+service restart heartbeat
+service stop heartbeat
+service remove heartbeat
+```
+
+`define` creates a stopped service. The interval is the number of game ticks to wait after a successful run has been observed; at normal speed, 200 ticks is about 10 seconds. Quote the complete command to keep its redirection on the service. Commands may invoke saved scripts, read sensors, update monitors or perform other supported shell operations. Each command is limited to 1,024 characters; intervals range from 1 to 12,096,000 ticks.
+
+Only the creating caller can see or manage a service. Commands retain that caller's permissions and share the rack shell's files and working directory. There are up to eight services per owner and 32 per rack. Each service has at most one outstanding job and shares normal job quotas and blade compute capacity. A full queue reports `blocked` and retries admission after 20 ticks. Removing a server blade pauses compute; reinserting one resumes it. Services do not force-load chunks or run while the server is stopped.
+
+Configuration, enabled state, active job ID, run count and last result are saved with the rack. An enabled service resumes when the rack loads; missed intervals are not replayed in a burst. Nonzero command exits or job failures stop the service as `failed`; inspect its status, correct the command/script, and use `service restart <name>`. Use stop/remove/define to replace a definition. Stop cancels outstanding work but does not undo completed effects. As with ordinary rack jobs, recovery of interrupted work can retry a command: use idempotent automation when duplicate effects would matter.
+
+Authorized remote users can invoke these same commands through `rsh`, retaining their own service ownership. This manager supervises recurring shell commands, not external operating-system daemons or all built-in network services.
 
 ### 16.3 Authorization diagnostics
 
@@ -2328,18 +2486,47 @@ Use the analogous `drawers` command family.
 
 The dedicated bridge exposes bounded item/fluid/network/energy/capacity telemetry. Native crafting submit/status/cancel requires a currently authenticated online player and Refined Storage `AUTOCRAFTING` permission. Generic mutation is denied when authenticated native principal mapping is unavailable.
 
+With a powered network, crafter, encoded recipe and ingredients, find the endpoint advertising `crafting.submit` in `device list` / `device info`, then:
+
+```sh
+device call <crafting-device> crafting.submit <operation-uuid> minecraft:oak_planks 8
+device call <crafting-device> crafting.status <returned-job-uuid>
+device call <crafting-device> crafting.cancel <returned-job-uuid>
+```
+
+Use a new operation UUID for a new order; reuse the same operation UUID and arguments only to retry that order. Each accepted order requests its full quantity, independently of other active orders. Recipe calculation and execution remain native RS work. Explicit native completion/cancellation is recorded server-side, so observed results remain available after RS removes active tasks. The server retains the latest 4,096 native receipts; once a result is queried, it is also stored in that bridge's existing job ledger.
+
+Unknown native disappearance is not success. In-flight tasks restored by RS after a restart do not yet regain the completion observer, so their later disappearance can still report unknown; older unobserved jobs or evicted receipts can also remain unknown. Do not resubmit with a new operation UUID merely because status is unknown. Full restart/crafting qualification remains open.
+
 ### Applied Energistics 2
 
 The dedicated bridge exposes bounded cached item queries plus grid power, boot, channel, node,
 inventory-key, and read-only crafting-CPU telemetry. It requires a directly adjacent exposed AE2 node. The first slice is
-intentionally read-only: all insert/extract/crafting operations fail closed because TerminalCraft
-does not yet have a caller-aware AE2 security principal bridge. Cached inventory is refreshed by
+intentionally read-only: item insertion, extraction and crafting are not implemented. A writable
+bridge requires an explicit access policy as well as player-attributed AE2 calls. Cached inventory is refreshed by
 AE2 at most once per tick, and item/NBT variants are aggregated by item ID for the generic query
 contract.
 
-Craft operations use durable operation/job/native-task correlation to prevent duplicate submission across retries and restart ambiguity. Missing or ambiguous native state is not invented as success.
+This AE2 bridge does not submit native crafting jobs; crafting-CPU telemetry is not crafting support.
 
 ## 18. Server administration and configuration
+
+### Rack resource policy
+
+Administrators can set these values in the server installation's common Forge configuration (`config/terminalcraft-common.toml`). Restart after editing to apply a known configuration. Client-side settings do not grant authority over a dedicated server. At a rack, `server policy` displays the active values; `server scheduler` shows actual execution statistics.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `rackMaxJobs` | 128 | Active-job admission per rack; 0 refuses new jobs |
+| `rackMaxJobsPerOwner` | 32 | Active-job admission per owner on each rack |
+| `rackMaxJobsPerTick` | 64 | Upper execution cap; actual capacity still comes from installed blades; 0 pauses execution |
+| `rackMaxServices` | 32 | New service-definition limit per rack |
+| `rackMaxServicesPerOwner` | 8 | New service-definition limit per owner on each rack |
+| `rackMinimumServiceInterval` | 1 | Minimum game ticks between successful recurring runs, including existing definitions |
+| `rackRemoteShellEnabled` | true | Global remote-shell permission; each rack still needs explicit owner enablement |
+| `rackRemoteOutputCharacters` | 4096 | Remote response text limit, with visible truncation |
+
+Limits can be reduced from their defaults; output can be reduced to 32 characters and the minimum service interval increased to 12,096,000 ticks. Lower job/service admission limits retain existing saved work and definitions rather than deleting them. Set `rackMaxJobsPerTick=0` to pause scheduled execution; this does not prevent local interactive commands. Set `rackRemoteShellEnabled=false` to refuse remote commands, including existing connected sessions on their next input. These controls do not constitute a measured server-wide CPU or memory budget.
 
 TerminalCraft's common Forge config includes:
 
@@ -2607,6 +2794,10 @@ The dashboard uses the full connected monitor wall exposed by the monitor device
 health, active-alarm count, matching tag values, units, and quality. `!` marks a tag with a non-normal
 alarm. The refresh period is bounded from 10 to 1,200 ticks, dashboard writes are server-side, and
 only a bounded number of dashboards refresh per tick.
+
+The automatic dashboard puts QUALITY first, then VALUE and TAG, so a standard 40-column monitor
+does not clip the quality status off-screen. An offline source can retain its last numeric value;
+always read the quality beside it rather than treating that retained number as a fresh sample.
 
 Remove a binding without deleting the monitor or tags:
 

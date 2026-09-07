@@ -213,8 +213,7 @@ public final class ScadaRuntime {
             visited++;
             if (data.hmiDashboard(dashboard.monitorId()).isPresent()) continue;
             if (gameTime % dashboard.refreshTicks() != 0) continue;
-            renderDashboard(data, devices, dashboard, gameTime);
-            rendered++;
+            if (renderDashboard(data, devices, dashboard, gameTime)) rendered++;
         }
         runtime.dashboardCursor = (start + Math.max(1, visited)) % dashboards.size();
     }
@@ -230,18 +229,17 @@ public final class ScadaRuntime {
             ScadaHmiDashboard dashboard = dashboards.get((start + visited) % dashboards.size());
             visited++;
             if (gameTime % dashboard.refreshTicks() != 0) continue;
-            renderHmiDashboard(data, devices, dashboard, gameTime);
-            rendered++;
+            if (renderHmiDashboard(data, devices, dashboard, gameTime)) rendered++;
         }
         runtime.hmiDashboardCursor = (start + Math.max(1, visited)) % dashboards.size();
         return rendered;
     }
 
-    private static void renderHmiDashboard(ScadaSavedData data, DeviceAccess devices,
+    private static boolean renderHmiDashboard(ScadaSavedData data, DeviceAccess devices,
                                            ScadaHmiDashboard dashboard, long gameTime) {
         DeviceDescriptor monitor = devices.descriptor(dashboard.monitorId()).orElse(null);
         if (monitor == null || !monitor.capabilities().contains("monitor_output")
-                || !monitor.online() || !monitor.loaded()) return;
+                || !monitor.online() || !monitor.loaded()) return false;
         int rows = numberProperty(monitor, "rows", 16, 6, ScadaHmiFrame.MAX_HEIGHT);
         int columns = numberProperty(monitor, "columns", 40, 20, ScadaHmiFrame.MAX_WIDTH);
         ScadaHmiFrame frame = ScadaHmiRenderer.render(data, dashboard, gameTime, columns, rows);
@@ -257,6 +255,7 @@ public final class ScadaRuntime {
                 devices.call(dashboard.monitorId(), "line.set", List.of(DeviceValue.of(row), DeviceValue.of(frame.lines().get(row))));
             }
         }
+        return true;
     }
 
     /** Handles a physical monitor-wall touch using the touching player's SCADA role and device identity. */
@@ -304,10 +303,10 @@ public final class ScadaRuntime {
         return DeviceValue.list(values.stream().map(DeviceValue::of).toList());
     }
 
-    private static void renderDashboard(ScadaSavedData data, DeviceAccess devices,
+    private static boolean renderDashboard(ScadaSavedData data, DeviceAccess devices,
                                         ScadaDashboard dashboard, long gameTime) {
         DeviceDescriptor monitor = devices.descriptor(dashboard.monitorId()).orElse(null);
-        if (monitor == null || !monitor.capabilities().contains("monitor_output") || !monitor.online() || !monitor.loaded()) return;
+        if (monitor == null || !monitor.capabilities().contains("monitor_output") || !monitor.online() || !monitor.loaded()) return false;
         int rows = numberProperty(monitor, "rows", 16, 1, 32);
         int columns = numberProperty(monitor, "columns", 40, 8, 320);
         List<String> lines = dashboardLines(data, dashboard, gameTime, rows, columns);
@@ -317,6 +316,7 @@ public final class ScadaRuntime {
         for (int row = 0; row < lines.size() && row < rows; row++) {
             devices.call(dashboard.monitorId(), "line.set", List.of(DeviceValue.of(row), DeviceValue.of(lines.get(row))));
         }
+        return true;
     }
 
     static List<String> dashboardLines(ScadaSavedData data, ScadaDashboard dashboard,
@@ -326,15 +326,18 @@ public final class ScadaRuntime {
                 .filter(alarm -> alarm.state() != ScadaSavedData.AlarmState.NORMAL).toList();
         lines.add(fit("SCADA // " + (data.initialized() ? "ONLINE" : "UNINITIALIZED")
                 + "  ALARMS " + active.size(), columns));
-        lines.add(fit("TAG                          VALUE       QUALITY", columns));
+        lines.add(fit("  QUALITY       VALUE     TAG", columns));
         int capacity = Math.max(0, rows - 3);
         for (ScadaTag tag : data.tags(dashboard.tagPrefix(), capacity)) {
             ScadaSnapshot snapshot = data.snapshot(tag.name(), gameTime).orElse(null);
             String value = snapshot == null ? "(pending)" : snapshot.value() == null ? "(none)" : snapshot.value().display();
             String quality = snapshot == null ? "pending" : snapshot.quality().id();
             String marker = active.stream().anyMatch(alarm -> alarm.rule().tagName().equals(tag.name())) ? "!" : " ";
-            lines.add(fit(marker + " " + fit(tag.name(), 25) + " " + fit(value + (tag.unit().isBlank() ? "" : " " + tag.unit()), 11)
-                    + " " + quality, columns));
+            // A single monitor is 40 columns. Put quality before the retained
+            // value so offline/stale state cannot be clipped off the right edge.
+            lines.add(fit(marker + " " + fit(quality, 13) + " "
+                    + fit(value + (tag.unit().isBlank() ? "" : " " + tag.unit()), 9)
+                    + " " + tag.name(), columns));
         }
         if (lines.size() == 2) lines.add(fit("(no matching tags)", columns));
         if (lines.size() < rows) lines.add(fit("Updated tick " + gameTime + "  ! = alarm", columns));

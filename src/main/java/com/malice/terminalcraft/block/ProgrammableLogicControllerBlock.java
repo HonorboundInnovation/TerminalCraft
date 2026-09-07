@@ -25,12 +25,22 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraftforge.network.NetworkHooks;
 import org.jetbrains.annotations.Nullable;
 
 /** Placeable PLC cabinet. Right-click opens the same terminal/editor interface as a computer. */
 public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
+    private static final VoxelShape CABINET = Shapes.or(
+            Block.box(0, 0, 0, 16, 1, 16), Block.box(1, 1, 1, 15, 15, 15),
+            Block.box(7, 15, 7, 9, 16, 9));
+    private static final VoxelShape NORTH_SHAPE = Shapes.or(CABINET, Block.box(2, 2, 0.25, 14, 14, 1));
+    private static final VoxelShape EAST_SHAPE = Shapes.or(CABINET, Block.box(15, 2, 2, 15.75, 14, 14));
+    private static final VoxelShape SOUTH_SHAPE = Shapes.or(CABINET, Block.box(2, 2, 15, 14, 14, 15.75));
+    private static final VoxelShape WEST_SHAPE = Shapes.or(CABINET, Block.box(0.25, 2, 2, 1, 14, 14));
 
     public ProgrammableLogicControllerBlock() {
         super(BlockBehaviour.Properties.of()
@@ -53,6 +63,16 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     }
 
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
+
+    @Override public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos,
+                                         CollisionContext context) {
+        return switch (state.getValue(FACING)) {
+            case EAST -> EAST_SHAPE;
+            case SOUTH -> SOUTH_SHAPE;
+            case WEST -> WEST_SHAPE;
+            default -> NORTH_SHAPE;
+        };
+    }
 
     @Nullable @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
         return new ProgrammableLogicControllerBlockEntity(pos, state);
@@ -99,7 +119,8 @@ public class ProgrammableLogicControllerBlock extends BaseEntityBlock {
     @Override @SuppressWarnings("deprecation") public int getSignal(
             BlockState state, BlockGetter level, BlockPos pos, Direction side) {
         if (level.getBlockEntity(pos) instanceof ProgrammableLogicControllerBlockEntity plc) {
-            return plc.getRedstoneOutput(side.getName());
+            // Vanilla queries from receiver to source; PLC sides name the outward output face.
+            return plc.getRedstoneOutput(side.getOpposite().getName());
         }
         return 0;
     }

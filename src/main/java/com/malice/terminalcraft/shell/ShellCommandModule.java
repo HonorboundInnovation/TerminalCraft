@@ -26,6 +26,8 @@ public interface ShellCommandModule {
         default TerminalHost worldHost() { return null; }
         /** Reads a shell/VFS path relative to the active shell's working directory. */
         default String readFile(String path) { return null; }
+        /** Opens a transient interactive rack command session after server-side authorization. */
+        default boolean connectRemoteShell(java.util.UUID rack) { return false; }
         com.malice.terminalcraft.device.DeviceCallContext callerContext();
         void printLine(String line);
         void setExitCode(int exitCode);

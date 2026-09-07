@@ -35,7 +35,6 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     private static final int FOOTER_HEIGHT = 26;
     private static final int SIDE_RAIL_WIDTH = 106;
     private static final int LINE_HEIGHT = 11;
-    private static final int MAX_VISIBLE_LINES = 18;
 
     private EditBox input;
     private int scrollOffset = 0;
@@ -73,6 +72,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
 
     @Override
     protected void init() {
+        this.imageWidth = TerminalViewportLayout.panelWidth(this.width);
+        this.imageHeight = TerminalViewportLayout.panelHeight(this.height);
         super.init();
         this.leftPos = (this.width - this.imageWidth) / 2;
         this.topPos = (this.height - this.imageHeight) / 2;
@@ -169,10 +170,10 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         int outputWidth = outputRight() - outputLeft() - 4;
         List<VisualLine> lines = wrapOutputLines(shell.getOutputLines(), outputWidth);
         int total = lines.size();
-        int maxScroll = Math.max(0, total - MAX_VISIBLE_LINES);
+        int maxScroll = Math.max(0, total - visibleOutputLines());
         scrollOffset = Math.min(scrollOffset, maxScroll);
-        int start = Math.max(0, total - MAX_VISIBLE_LINES - scrollOffset);
-        int end = Math.min(total, start + MAX_VISIBLE_LINES);
+        int start = Math.max(0, total - visibleOutputLines() - scrollOffset);
+        int end = Math.min(total, start + visibleOutputLines());
         renderedOutputLines = lines;
         renderedOutputStart = start;
 
@@ -279,11 +280,11 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             }
         }
         if (keyCode == GLFW.GLFW_KEY_PAGE_UP) {
-            scrollOffset++;
+            scrollOffset += TerminalViewportLayout.pageStep(visibleOutputLines());
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_PAGE_DOWN) {
-            scrollOffset = Math.max(0, scrollOffset - 1);
+            scrollOffset = Math.max(0, scrollOffset - TerminalViewportLayout.pageStep(visibleOutputLines()));
             return true;
         }
         // Tab completes commands and VFS paths instead of cycling focus away from the terminal.
@@ -322,7 +323,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     public boolean charTyped(char codePoint, int modifiers) {
         if (editor != null) {
             if (!Character.isISOControl(codePoint)) {
-                editor.insert(String.valueOf(codePoint));
+                insertEditorText(String.valueOf(codePoint));
                 ensureEditorCursorVisible();
             }
             return true;
@@ -629,7 +630,15 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             setInputValueAndCursor(next, completionCycle.lastCursor);
             return;
         }
-        BashShell.CompletionResult result = menu.getShell().complete(line, cursor);
+        com.malice.terminalcraft.network.RemoteCompletionPackets.request(menu.containerId, line, cursor);
+    }
+
+    public void applyCompletion(com.malice.terminalcraft.network.RemoteCompletionPackets.Response response) {
+        if (input == null || !input.getValue().equals(response.line()) || input.getCursorPosition() != response.cursor()
+                || response.start() < 0 || response.end() < response.start() || response.end() > response.line().length()) return;
+        String line = response.line();
+        BashShell.CompletionResult result = new BashShell.CompletionResult(line, response.cursor(),
+                response.start(), response.end(), response.candidates());
         if (!result.hasMatches()) {
             clearCompletion();
             return;
@@ -717,7 +726,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     private OutputPosition outputPositionAt(double mouseX, double mouseY) {
         if (renderedOutputLines.isEmpty()) return null;
         int visualRow = renderedOutputStart + Math.max(0,
-                Math.min(MAX_VISIBLE_LINES - 1, (int) ((mouseY - (contentTop() + 4)) / LINE_HEIGHT)));
+                Math.min(visibleOutputLines() - 1, (int) ((mouseY - (contentTop() + 4)) / LINE_HEIGHT)));
         visualRow = Math.max(0, Math.min(renderedOutputLines.size() - 1, visualRow));
         VisualLine line = renderedOutputLines.get(visualRow);
         int relativeX = Math.max(0, (int) mouseX - (outputLeft() + 2));
@@ -791,8 +800,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             saveButton.visible = active;
             saveCloseButton.visible = active;
             discardButton.visible = active;
-            saveButton.active = active && !editorRequestPending;
-            saveCloseButton.active = active && !editorRequestPending;
+            saveButton.active = active && !editorRequestPending && !menu.getShell().isEditorRecoveryRequired();
+            saveCloseButton.active = active && !editorRequestPending && !menu.getShell().isEditorRecoveryRequired();
             discardButton.active = active && !editorRequestPending;
         }
     }
@@ -809,8 +818,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         controlWasActive = active;
     }
 
-    private int editorWidth() { return Math.min(620, Math.max(360, width - 24)); }
-    private int editorHeight() { return Math.min(390, Math.max(240, height - 24)); }
+    private int editorWidth() { return TerminalViewportLayout.editorWidth(width); }
+    private int editorHeight() { return TerminalViewportLayout.editorHeight(height); }
     private int editorLeft() { return (width - editorWidth()) / 2; }
     private int editorTop() { return (height - editorHeight()) / 2; }
     private int editorRight() { return editorLeft() + editorWidth(); }
@@ -869,7 +878,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         graphics.disableScissor();
 
         TextEditorBuffer.Position pos = editor.position(editor.cursor());
-        String status = editorNoticeTicks > 0 ? editorNotice
+        String status = menu.getShell().isEditorRecoveryRequired()
+                ? "Recovery view: copy text, then discard/reopen. Save disabled."
+                : editorNoticeTicks > 0 ? editorNotice
                 : "Ln " + (pos.line() + 1) + ", Col " + (pos.column() + 1)
                 + "   Ctrl+S Save   Ctrl+Shift+S Save & Close   Ctrl+Z/Y Undo/Redo";
         graphics.drawString(font, status, left + 10, bottom - 31, 0xFF9FB3C2, false);
@@ -933,14 +944,17 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
                 0xFF3B8A58);
         graphics.fill(outputLeft(), contentTop(), outputRight(), footerTop(), 0xFF050A07);
         graphics.fill(outputLeft(), footerTop(), outputRight(), y + imageHeight - 8, 0xFF0B1A11);
-        graphics.fill(railLeft(), contentTop(), x + imageWidth - 10, footerTop(), 0xFF101A16);
-        graphics.fill(railLeft(), contentTop(), railLeft() + 1, footerTop(), 0xFF2C6042);
+        if (showStatusRail()) {
+            graphics.fill(railLeft(), contentTop(), x + imageWidth - 10, footerTop(), 0xFF101A16);
+            graphics.fill(railLeft(), contentTop(), railLeft() + 1, footerTop(), 0xFF2C6042);
+        }
         graphics.drawString(font, title, x + 12, y + 6, 0xFFB8F5C8, false);
         graphics.drawString(font, "// " + mode, x + imageWidth - 92, y + 6, 0xFF6FAD82, false);
         graphics.fill(x + imageWidth - 24, y + 7, x + imageWidth - 18, y + 13, 0xFF55E684);
     }
 
     private void renderStatusRail(GuiGraphics graphics, BashShell shell, boolean surface) {
+        if (!showStatusRail()) return;
         int left = railLeft() + 8;
         int top = contentTop() + 10;
         int text = 0xFFB8D6C0;
@@ -971,7 +985,9 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
     }
 
     private int outputLeft() { return leftPos + 10; }
-    private int outputRight() { return leftPos + imageWidth - SIDE_RAIL_WIDTH; }
+    private boolean showStatusRail() { return TerminalViewportLayout.showStatusRail(imageWidth, imageHeight); }
+    private int visibleOutputLines() { return TerminalViewportLayout.outputRows(imageHeight); }
+    private int outputRight() { return leftPos + imageWidth - (showStatusRail() ? SIDE_RAIL_WIDTH : 10); }
     private int railLeft() { return outputRight() + 8; }
     private int contentTop() { return topPos + HEADER_HEIGHT + 5; }
     private int footerTop() { return topPos + imageHeight - FOOTER_HEIGHT; }
@@ -1056,7 +1072,7 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
             if (keyCode == GLFW.GLFW_KEY_A) { editor.selectAll(); return true; }
             if (keyCode == GLFW.GLFW_KEY_C) { if (editor.hasSelection()) minecraft.keyboardHandler.setClipboard(editor.selectedText()); return true; }
             if (keyCode == GLFW.GLFW_KEY_X) { if (editor.hasSelection()) { minecraft.keyboardHandler.setClipboard(editor.selectedText()); editor.insert(""); } return true; }
-            if (keyCode == GLFW.GLFW_KEY_V) { editor.insert(minecraft.keyboardHandler.getClipboard()); ensureEditorCursorVisible(); return true; }
+            if (keyCode == GLFW.GLFW_KEY_V) { insertEditorText(minecraft.keyboardHandler.getClipboard()); ensureEditorCursorVisible(); return true; }
             if (keyCode == GLFW.GLFW_KEY_Z) { editor.undo(); ensureEditorCursorVisible(); return true; }
             if (keyCode == GLFW.GLFW_KEY_Y) { editor.redo(); ensureEditorCursorVisible(); return true; }
         }
@@ -1065,8 +1081,8 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
                 if (editor.dirty()) showEditorNotice("Unsaved changes — use Save or Discard");
                 else discardEditor();
             }
-            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> editor.insert("\n");
-            case GLFW.GLFW_KEY_TAB -> editor.insert("    ");
+            case GLFW.GLFW_KEY_ENTER, GLFW.GLFW_KEY_KP_ENTER -> insertEditorText("\n");
+            case GLFW.GLFW_KEY_TAB -> insertEditorText("    ");
             case GLFW.GLFW_KEY_BACKSPACE -> editor.backspace();
             case GLFW.GLFW_KEY_DELETE -> editor.delete();
             case GLFW.GLFW_KEY_LEFT -> editor.moveHorizontal(-1, shift, control);
@@ -1081,6 +1097,13 @@ public class TerminalScreen extends AbstractContainerScreen<TerminalMenu> {
         }
         ensureEditorCursorVisible();
         return true;
+    }
+
+    private void insertEditorText(String text) {
+        if (!editor.insert(text)) {
+            editorNotice = "Edit rejected: 65,536 character limit. Text unchanged.";
+            editorNoticeTicks = 100;
+        }
     }
 
     private void ensureEditorCursorVisible() {

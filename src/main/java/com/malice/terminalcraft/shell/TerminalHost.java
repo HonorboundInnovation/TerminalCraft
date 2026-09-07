@@ -47,6 +47,10 @@ public interface TerminalHost {
     default boolean turtlePlace(String side) { return false; }
     default String turtleInspect(String side) { return "not a turtle"; }
     default String turtleFacing() { return "unknown"; }
+    default boolean turtleSelect(int slot) { return false; }
+    default boolean turtleRefuel(int count) { return false; }
+    default String turtleFuel() { return "not a turtle"; }
+    default List<String> turtleInventory() { return List.of(); }
 
     default boolean monitorWrite(String side, String text) { return false; }
     default boolean monitorClear(String side) { return false; }
@@ -123,6 +127,15 @@ public interface TerminalHost {
 
     /** Submits a command to a local server rack and returns its persistent job UUID. */
     default String serverSubmit(DeviceCallContext context, String command) { return ""; }
+    default String serverResourcePolicy() { return ""; }
+    default ShellCommandResult serverServiceCommand(DeviceCallContext context, List<String> arguments) {
+        return new ShellCommandResult(1, List.of("service: no local rack available"));
+    }
+    default ShellCommandResult serverRemoteConfigure(DeviceCallContext context, List<String> arguments) {
+        return new ShellCommandResult(1, List.of("server remote: no local rack available"));
+    }
+    /** Schedules a local rack command after a bounded number of logical game ticks. */
+    default String serverSchedule(DeviceCallContext context, String command, long delayTicks) { return ""; }
     /** Returns bounded, human-readable job summaries from a local server rack. */
     default List<String> serverJobs() { return List.of(); }
     /** Returns only jobs owned by the exact typed caller. */
@@ -140,5 +153,12 @@ public interface TerminalHost {
     default String getDiskLabel() { return ""; }
     default boolean setDiskLabel(String label) { return false; }
     default CompoundTag readDiskMedia() { return null; }
+    /** Stable drive/media identity plus content revision; empty means safe writes are unsupported. */
+    default String diskMediaToken() { return ""; }
+    /** Called on the authoritative host thread; reject swaps and stale mounted snapshots. */
+    default boolean writeDiskMediaIfUnchanged(String expected, CompoundTag data) {
+        return expected != null && !expected.isEmpty() && expected.equals(diskMediaToken())
+                && writeDiskMedia(data);
+    }
     default boolean writeDiskMedia(CompoundTag vfsTag) { return false; }
 }

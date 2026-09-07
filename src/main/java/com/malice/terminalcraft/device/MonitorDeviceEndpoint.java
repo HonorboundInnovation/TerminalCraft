@@ -72,6 +72,7 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
     private List<String> lastLines;
     /** Prevent synchronous output events from recursively re-importing a shared monitor surface. */
     private boolean importingSurface;
+    private boolean syncingSurfaceLines;
 
     public MonitorDeviceEndpoint(UUID deviceId, String address, MonitorDevice monitor,
                                  BooleanSupplier online, BooleanSupplier loaded) {
@@ -273,10 +274,17 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
     }
 
     private void syncTerminalLines() {
-        for (int row = 0; row < maxLines; row++) {
-            monitor.setLineFromSurface(row, stripRight(terminal.line(row + 1)));
+        // Tile output events can synchronously request our descriptor while only part of
+        // the wall's legacy line mirror has been updated. Never import that partial mirror.
+        syncingSurfaceLines = true;
+        try {
+            for (int row = 0; row < maxLines; row++) {
+                monitor.setLineFromSurface(row, stripRight(terminal.line(row + 1)));
+            }
+            lastLines = safeLines(monitor.lines());
+        } finally {
+            syncingSurfaceLines = false;
         }
-        lastLines = safeLines(monitor.lines());
     }
 
     private void importMonitorLines() {
@@ -294,7 +302,7 @@ public final class MonitorDeviceEndpoint implements DeviceEndpoint {
     }
 
     private void refreshSnapshot() {
-        if (importingSurface) return;
+        if (importingSurface || syncingSurfaceLines) return;
         if (!loaded.getAsBoolean() || !online.getAsBoolean()) return;
         String currentTitle = safeTitle(monitor.title());
         List<String> currentLines = safeLines(monitor.lines());

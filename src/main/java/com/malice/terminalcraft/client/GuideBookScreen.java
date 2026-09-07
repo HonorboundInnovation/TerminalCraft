@@ -53,6 +53,7 @@ public final class GuideBookScreen extends Screen {
 
     @Override
     protected void init() {
+        String previousQuery = search == null ? "" : search.getValue();
         document = loadDocument();
         selectedChapter = Math.max(0, Math.min(selectedChapter, document.chapters().size() - 1));
         int left = panelLeft();
@@ -62,16 +63,18 @@ public final class GuideBookScreen extends Screen {
                 Component.translatable("screen.terminalcraft.guide_book.search"));
         search.setMaxLength(64);
         search.setSuggestion("Search chapters...");
+        search.setValue(previousQuery);
         search.setResponder(this::searchChanged);
         addRenderableWidget(search);
 
         int bottom = top + panelHeight();
+        int navigationWidth = GuideViewportLayout.navigationWidth(panelWidth(), sidebar);
         previousButton = addRenderableWidget(Button.builder(Component.literal("< Previous"),
                         button -> changeChapter(-1))
-                .bounds(left + sidebar + 12, bottom - 27, 80, 20).build());
+                .bounds(left + sidebar + 12, bottom - 27, navigationWidth, 20).build());
         nextButton = addRenderableWidget(Button.builder(Component.literal("Next >"),
                         button -> changeChapter(1))
-                .bounds(left + panelWidth() - 91, bottom - 27, 80, 20).build());
+                .bounds(left + panelWidth() - 11 - navigationWidth, bottom - 27, navigationWidth, 20).build());
         addRenderableWidget(Button.builder(Component.literal("Done"), button -> onClose())
                 .bounds(left + panelWidth() - 57, top + 5, 46, 18).build());
         updateButtons();
@@ -167,7 +170,7 @@ public final class GuideBookScreen extends Screen {
                 0xFF315E43);
         graphics.fill(left + sidebar + 1, bottom - FOOTER_HEIGHT, right, bottom - FOOTER_HEIGHT + 1,
                 0xFF315E43);
-        graphics.drawString(font, "TERMINALCRAFT FIELD MANUAL", left + 10, top + 9,
+        graphics.drawString(font, font.plainSubstrByWidth("TERMINALCRAFT FIELD MANUAL", panelWidth() - 77), left + 10, top + 9,
                 0xFF9CF6B6, false);
         Chapter current = currentChapter();
         String position = current == null ? "No chapter selected"
@@ -228,8 +231,13 @@ public final class GuideBookScreen extends Screen {
                     int imageX = left + Math.max(0, (right - left - 3 - row.imageWidth()) / 2);
                     graphics.fill(imageX - 1, y + 2, imageX + row.imageWidth() + 1,
                             y + 3 + row.imageHeight(), 0xFF315E43);
-                    graphics.blit(row.image(), imageX, y + 3, 0, 0,
-                            row.imageWidth(), row.imageHeight(), GUIDE_IMAGE_WIDTH, GUIDE_IMAGE_HEIGHT);
+                    graphics.pose().pushPose();
+                    graphics.pose().translate(imageX, y + 3, 0);
+                    graphics.pose().scale((float) row.imageWidth() / GUIDE_IMAGE_WIDTH,
+                            (float) row.imageHeight() / GUIDE_IMAGE_HEIGHT, 1);
+                    graphics.blit(row.image(), 0, 0, 0, 0,
+                            GUIDE_IMAGE_WIDTH, GUIDE_IMAGE_HEIGHT, GUIDE_IMAGE_WIDTH, GUIDE_IMAGE_HEIGHT);
+                    graphics.pose().popPose();
                 } else if (row.rule()) {
                     graphics.fill(left, y + 3, right - 3, y + 4, 0xFF315E43);
                 } else {
@@ -261,8 +269,10 @@ public final class GuideBookScreen extends Screen {
     private void renderFooter(GuiGraphics graphics) {
         int left = contentLeft();
         int bottom = panelTop() + panelHeight();
-        int hintLeft = left + 87;
-        int hintWidth = Math.max(20, panelLeft() + panelWidth() - 102 - hintLeft);
+        int navigationWidth = GuideViewportLayout.navigationWidth(panelWidth(), sidebarWidth());
+        int hintLeft = left + navigationWidth + 7;
+        int hintWidth = panelLeft() + panelWidth() - 18 - navigationWidth - hintLeft;
+        if (hintWidth < 60) return;
         String hint = hintWidth < 190 ? "Ctrl+F search  PgUp/PgDn scroll"
                 : "Ctrl+F search  PgUp/PgDn scroll  Left/Right chapters";
         graphics.drawString(font, font.plainSubstrByWidth(hint, hintWidth),

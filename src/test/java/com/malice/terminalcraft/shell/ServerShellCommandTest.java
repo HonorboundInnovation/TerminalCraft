@@ -39,6 +39,12 @@ public final class ServerShellCommandTest {
         require(host.lastContext.equals(caller), "submit forwards authenticated caller context");
         require(host.lastCommand.equals("echo hello world"), "submit forwards complete command");
         require(shell.getLastExitCode() == 0, "submit succeeds");
+        assertResult(shell.executeForResult("server after 200 echo delayed", caller), 0, List.of(host.id), "delayed submission");
+        require(host.lastContext.equals(caller) && host.lastCommand.equals("echo delayed") && host.lastDelay == 200,
+                "schedule forwards exact caller, command and game-tick delay");
+        require(shell.executeForResult("server after -1 echo rejected", caller).exitCode() == 1,
+                "negative delay is rejected");
+        require(host.lastDelay == 200 && host.lastCommand.equals("echo delayed"), "invalid delay never reaches host");
 
         assertResult(shell.executeForResult("server status " + host.id, caller), 0,
                 List.of(host.summary), "status");
@@ -84,6 +90,12 @@ public final class ServerShellCommandTest {
         private DeviceCallContext lastContext;
         private String lastCommand = "";
         private boolean cancelled;
+        private long lastDelay;
+
+        @Override public String serverSchedule(DeviceCallContext context, String command, long delayTicks) {
+            lastDelay = delayTicks;
+            return serverSubmit(context, command);
+        }
 
         @Override
         public String serverSubmit(DeviceCallContext context, String command) {

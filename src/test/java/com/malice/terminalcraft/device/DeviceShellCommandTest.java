@@ -15,6 +15,11 @@ public final class DeviceShellCommandTest {
         TestEndpoint endpoint = new TestEndpoint(id);
         registry.register(endpoint);
 
+        assertOutcome(DeviceShellCommand.execute(registry, List.of("list", "TEST_DEVICE")), 0,
+                List.of(id + "  test_device  online  test:10  Test Device"), "case-insensitive type filter");
+        assertOutcome(DeviceShellCommand.execute(registry, List.of("list", "missing-controller")), 0,
+                List.of("(no devices)"), "unmatched discovery filter");
+
         assertOutcome(DeviceShellCommand.execute(registry, List.of("list")), 0,
                 List.of(id + "  test_device  online  test:10  Test Device"), "list");
         registry.publishEvent(id, "touch", 42, (DeviceValue.MapValue) DeviceValue.map(Map.of(

@@ -21,6 +21,8 @@ import java.util.List;
 public class FloppyDiskItem extends Item {
     public static final String TAG_LABEL = "DiskLabel";
     public static final String TAG_VFS = "Vfs";
+    public static final String TAG_MEDIA_ID = "MediaId";
+    public static final String TAG_MEDIA_REVISION = "MediaRevision";
     public static final String DEFAULT_LABEL = "floppy";
 
     public FloppyDiskItem() {
@@ -65,6 +67,15 @@ public class FloppyDiskItem extends Item {
         if (!tag.contains(TAG_VFS, CompoundTag.TAG_COMPOUND)) {
             tag.put(TAG_VFS, createDefaultLibrary());
         }
+        if (!tag.hasUUID(TAG_MEDIA_ID)) tag.putUUID(TAG_MEDIA_ID, java.util.UUID.randomUUID());
+        if (!tag.hasUUID(TAG_MEDIA_REVISION)) tag.putUUID(TAG_MEDIA_REVISION, java.util.UUID.randomUUID());
+    }
+
+    public static String mediaToken(ItemStack stack) {
+        if (stack.isEmpty()) return "";
+        ensureInitialized(stack);
+        CompoundTag tag = stack.getOrCreateTag();
+        return tag.getUUID(TAG_MEDIA_ID) + ":" + tag.getUUID(TAG_MEDIA_REVISION);
     }
 
     public static CompoundTag getVfsTag(ItemStack stack) {
@@ -82,6 +93,8 @@ public class FloppyDiskItem extends Item {
             tag.putString(TAG_LABEL, DEFAULT_LABEL);
         }
         tag.put(TAG_VFS, canonicalizeVfs(vfs == null ? new CompoundTag() : vfs));
+        if (!tag.hasUUID(TAG_MEDIA_ID)) tag.putUUID(TAG_MEDIA_ID, java.util.UUID.randomUUID());
+        tag.putUUID(TAG_MEDIA_REVISION, java.util.UUID.randomUUID());
     }
 
     private static CompoundTag canonicalizeVfs(CompoundTag candidate) {

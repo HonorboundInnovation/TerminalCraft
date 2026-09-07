@@ -1,136 +1,111 @@
 {
   "parent": "minecraft:block/block",
-  "ambientocclusion": true,
+  "gui_light": "front",
   "textures": {
     "particle": "#drive",
-    "drive": "terminalcraft:item/solid_state_drive"
+    "drive": "terminalcraft:item/solid_state_drive",
+    "casing": "terminalcraft:block/terminal_side"
   },
   "elements": [
     {
       "from": [
-        1,
         2,
-        1
+        2,
+        6
       ],
       "to": [
-        15,
         14,
-        5
+        14,
+        9
       ],
       "faces": {
-        "down": {
-          "texture": "#drive"
-        },
-        "up": {
-          "texture": "#drive"
-        },
         "north": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#drive"
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
     {
       "from": [
-        2,
-        3,
-        0
+        2.5,
+        2.5,
+        5.75
       ],
       "to": [
-        14,
-        13,
-        1
+        13.5,
+        13.5,
+        6
       ],
       "faces": {
-        "down": {
-          "texture": "#drive"
-        },
-        "up": {
-          "texture": "#drive"
-        },
         "north": {
-          "texture": "#drive"
+          "texture": "#drive",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
         },
         "south": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#drive"
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
     {
       "from": [
-        2,
-        1,
-        1
+        5,
+        0.5,
+        6.5
       ],
       "to": [
-        14,
+        11,
         2,
-        5
+        8.5
       ],
       "faces": {
-        "down": {
-          "texture": "#drive"
-        },
-        "up": {
-          "texture": "#drive"
-        },
         "north": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#drive"
-        }
-      }
-    },
-    {
-      "from": [
-        4,
-        2,
-        5
-      ],
-      "to": [
-        12,
-        4,
-        7
-      ],
-      "faces": {
-        "down": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#drive"
+          "texture": "#casing"
         },
-        "north": {
-          "texture": "#drive"
-        },
-        "south": {
-          "texture": "#drive"
-        },
-        "west": {
-          "texture": "#drive"
-        },
-        "east": {
-          "texture": "#drive"
+        "down": {
+          "texture": "#casing"
         }
       }
     }
@@ -173,7 +148,7 @@
     "firstperson_righthand": {
       "rotation": [
         0,
-        -45,
+        135,
         0
       ],
       "translation": [
@@ -190,7 +165,7 @@
     "firstperson_lefthand": {
       "rotation": [
         0,
-        -45,
+        135,
         0
       ],
       "translation": [
@@ -206,8 +181,8 @@
     },
     "gui": {
       "rotation": [
-        30,
-        225,
+        15,
+        180,
         0
       ],
       "translation": [
@@ -216,9 +191,9 @@
         0
       ],
       "scale": [
-        0.7,
-        0.7,
-        0.7
+        0.85,
+        0.85,
+        0.85
       ]
     },
     "ground": {
@@ -231,6 +206,23 @@
         0.25,
         0.25,
         0.25
+      ]
+    },
+    "fixed": {
+      "rotation": [
+        0,
+        180,
+        0
+      ],
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        0.65,
+        0.65,
+        0.65
       ]
     }
   }

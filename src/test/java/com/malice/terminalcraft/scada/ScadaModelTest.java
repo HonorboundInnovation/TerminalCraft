@@ -138,6 +138,11 @@ public final class ScadaModelTest {
         require(lines.stream().anyMatch(line -> line.contains("factory.boiler")),
                 "dashboard includes matching process tag");
         require(lines.stream().noneMatch(line -> line.length() > 40), "dashboard respects monitor width");
+        require(lines.get(2).contains("good") && lines.get(2).contains("75"), "standard monitor shows value and quality together");
+        data.recordAcquisition("factory.boiler.temperature", null, ScadaQuality.OFFLINE, "source removed", 4);
+        lines = ScadaRuntime.dashboardLines(data,
+                new ScadaDashboard(MONITOR_ID, "factory.boiler", "BOILER", 20), 4, 8, 40);
+        require(lines.get(2).contains("offline") && lines.get(2).contains("75"), "retained value is visibly marked offline");
     }
 
     private static ScadaTag temperatureTag() {

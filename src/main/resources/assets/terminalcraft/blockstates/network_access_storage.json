@@ -1,1 +1,19 @@
-{"variants":{"":{"model":"terminalcraft:block/network_access_storage"}}}
+{
+  "variants": {
+    "facing=north": {
+      "model": "terminalcraft:block/network_access_storage"
+    },
+    "facing=east": {
+      "model": "terminalcraft:block/network_access_storage",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "terminalcraft:block/network_access_storage",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "terminalcraft:block/network_access_storage",
+      "y": 270
+    }
+  }
+}

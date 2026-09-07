@@ -1,1 +1,19 @@
-{"variants":{"":{"model":"terminalcraft:block/applied_energistics_bridge"}}}
+{
+  "variants": {
+    "facing=north": {
+      "model": "terminalcraft:block/applied_energistics_bridge"
+    },
+    "facing=east": {
+      "model": "terminalcraft:block/applied_energistics_bridge",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "terminalcraft:block/applied_energistics_bridge",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "terminalcraft:block/applied_energistics_bridge",
+      "y": 270
+    }
+  }
+}

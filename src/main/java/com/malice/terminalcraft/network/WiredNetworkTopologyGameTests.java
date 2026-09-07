@@ -26,12 +26,14 @@ public final class WiredNetworkTopologyGameTests {
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void connectedRouteAndPartition(GameTestHelper helper) {
         helper.setBlock(FIRST_MODEM, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(CABLE_A, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_A);
         helper.setBlock(ROUTER, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(CABLE_B, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_B);
         helper.setBlock(SECOND_MODEM, ModRegistries.MODEM_BLOCK.get());
         ((ModemBlockEntity) helper.getBlockEntity(FIRST_MODEM)).setWireless(false);
         ((ModemBlockEntity) helper.getBlockEntity(SECOND_MODEM)).setWireless(false);
+        // Cable connection blockstates synchronize on their scheduled one-tick update.
+        helper.runAfterDelay(2, () -> {
         helper.assertTrue(NetworkCableBlock.isConnected(helper.getBlockState(CABLE_A), Direction.EAST)
                         && NetworkCableBlock.isConnected(helper.getBlockState(CABLE_B), Direction.EAST),
                 "neighbor placement must extend network cable model arms toward routers and wired modems");
@@ -85,6 +87,7 @@ public final class WiredNetworkTopologyGameTests {
                         helper.absolutePos(FIRST_MODEM), helper.absolutePos(SECOND_MODEM)),
                 "breaking one cable must partition the route immediately");
         helper.succeed();
+        });
     }
 
     @GameTest(template = "empty", timeoutTicks = 80)
@@ -209,10 +212,10 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos eastCable = new BlockPos(5, 2, 2);
         BlockPos second = new BlockPos(6, 2, 2);
         helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(westCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, westCable);
         helper.setBlock(westRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
         helper.setBlock(eastRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(eastCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, eastCable);
         helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
         ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
         ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
@@ -243,10 +246,10 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos right = new BlockPos(4, 2, 3);
         helper.setBlock(left, ModRegistries.MODEM_BLOCK.get());
         helper.setBlock(right, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(a, ModRegistries.NETWORK_CABLE_BLOCK.get());
-        helper.setBlock(b, ModRegistries.NETWORK_CABLE_BLOCK.get());
-        helper.setBlock(c, ModRegistries.NETWORK_CABLE_BLOCK.get());
-        helper.setBlock(d, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, a);
+        placeFloorCable(helper, b);
+        placeFloorCable(helper, c);
+        placeFloorCable(helper, d);
         ((ModemBlockEntity) helper.getBlockEntity(left)).setWireless(false);
         ((ModemBlockEntity) helper.getBlockEntity(right)).setWireless(false);
         WiredNetworkTopology.Route route = WiredNetworkTopology.route(helper.getLevel(),
@@ -264,10 +267,10 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos remoteCable = new BlockPos(4, 2, 2);
         BlockPos remoteReceiverPos = new BlockPos(5, 2, 2);
         helper.setBlock(senderPos, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(sharedCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, sharedCable);
         helper.setBlock(localReceiverPos, ModRegistries.MODEM_BLOCK.get());
         helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(remoteCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, remoteCable);
         helper.setBlock(remoteReceiverPos, ModRegistries.MODEM_BLOCK.get());
         ModemBlockEntity sender = (ModemBlockEntity) helper.getBlockEntity(senderPos);
         ModemBlockEntity local = (ModemBlockEntity) helper.getBlockEntity(localReceiverPos);
@@ -293,9 +296,9 @@ public final class WiredNetworkTopologyGameTests {
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void namedHostsDeliverOnlyAcrossReachableWiredRoute(GameTestHelper helper) {
         helper.setBlock(FIRST_MODEM, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(CABLE_A, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_A);
         helper.setBlock(ROUTER, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(CABLE_B, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_B);
         helper.setBlock(SECOND_MODEM, ModRegistries.MODEM_BLOCK.get());
         ModemBlockEntity first = (ModemBlockEntity) helper.getBlockEntity(FIRST_MODEM);
         ModemBlockEntity second = (ModemBlockEntity) helper.getBlockEntity(SECOND_MODEM);
@@ -321,9 +324,9 @@ public final class WiredNetworkTopologyGameTests {
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void namedServicesResolveOnlyAcrossReachableOpenPort(GameTestHelper helper) {
         helper.setBlock(FIRST_MODEM, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(CABLE_A, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_A);
         helper.setBlock(ROUTER, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(CABLE_B, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_B);
         helper.setBlock(SECOND_MODEM, ModRegistries.MODEM_BLOCK.get());
         ModemBlockEntity client = (ModemBlockEntity) helper.getBlockEntity(FIRST_MODEM);
         ModemBlockEntity server = (ModemBlockEntity) helper.getBlockEntity(SECOND_MODEM);
@@ -391,8 +394,8 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos westCable = routerPos.west();
         BlockPos eastCable = routerPos.east();
         helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(westCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
-        helper.setBlock(eastCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, westCable);
+        placeFloorCable(helper, eastCable);
         NetworkRouterBlockEntity router = (NetworkRouterBlockEntity) helper.getBlockEntity(routerPos);
 
         helper.assertTrue(router.setInterfaceNetwork(Direction.WEST, " Factory-LAN ")
@@ -445,9 +448,9 @@ public final class WiredNetworkTopologyGameTests {
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void logicalNetworksEnforceAllWiredDeliveryPaths(GameTestHelper helper) {
         helper.setBlock(FIRST_MODEM, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(CABLE_A, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_A);
         helper.setBlock(ROUTER, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(CABLE_B, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, CABLE_B);
         helper.setBlock(SECOND_MODEM, ModRegistries.MODEM_BLOCK.get());
         ModemBlockEntity factory = (ModemBlockEntity) helper.getBlockEntity(FIRST_MODEM);
         ModemBlockEntity warehouse = (ModemBlockEntity) helper.getBlockEntity(SECOND_MODEM);
@@ -760,7 +763,13 @@ public final class WiredNetworkTopologyGameTests {
                         && receiver.pendingCount() == RednetQueueBudget.MAX_ENTRIES_PER_QUEUE,
                 "released queue capacity must be immediately reusable");
         receiver.closeAll();
+        helper.assertTrue(receiver.pendingCount() == 0,
+                "closeAll must discard queued entries");
+        helper.assertTrue(RednetNetwork.hostname(helper.getLevel(), receiver.getModemId()).isBlank(),
+                "closeAll must withdraw the live hostname as well as channel subscriptions");
         receiver.openChannel(90);
+        helper.assertTrue(receiver.setHostname("quota-receiver"),
+                "the closed hostname must be explicitly registered before named delivery resumes");
         helper.assertTrue(receiver.pendingCount() == 0
                         && RednetNetwork.transmitTo(helper.getLevel(), java.util.UUID.randomUUID(), senderPos,
                         "quota-receiver", 90, 91, "after-close", true, 16),
@@ -975,9 +984,9 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos eastCable = new BlockPos(4, 2, 2);
         BlockPos secondPos = new BlockPos(5, 2, 2);
         helper.setBlock(firstPos, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(westCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, westCable);
         helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(eastCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, eastCable);
         helper.setBlock(secondPos, ModRegistries.MODEM_BLOCK.get());
 
         ModemBlockEntity first = (ModemBlockEntity) helper.getBlockEntity(firstPos);
@@ -1027,10 +1036,10 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos eastCable = new BlockPos(5, 2, 2);
         BlockPos second = new BlockPos(6, 2, 2);
         helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(westCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, westCable);
         helper.setBlock(westRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
         helper.setBlock(eastRouter, ModRegistries.NETWORK_ROUTER_BLOCK.get());
-        helper.setBlock(eastCable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, eastCable);
         helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
         ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
         ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
@@ -1103,7 +1112,7 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos routerPos = new BlockPos(3, 2, 2);
         BlockPos second = new BlockPos(4, 2, 2);
         helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, cable);
         helper.setBlock(routerPos, ModRegistries.NETWORK_ROUTER_BLOCK.get());
         helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
         ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
@@ -1143,11 +1152,11 @@ public final class WiredNetworkTopologyGameTests {
         helper.destroyBlock(cable);
         helper.assertTrue(!WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
                 "block break must invalidate and recompute an unreachable route");
-        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, cable);
         helper.assertTrue(WiredNetworkTopology.connected(helper.getLevel(), absoluteFirst, absoluteSecond),
                 "block replacement must invalidate and restore the route");
 
-        helper.setBlock(routerPos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, routerPos);
         WiredNetworkTopology.Route cableRoute = WiredNetworkTopology.route(
                 helper.getLevel(), absoluteFirst, absoluteSecond);
         helper.assertTrue(cableRoute.reachable() && cableRoute.routerHops() == 0,
@@ -1177,7 +1186,7 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos cable = new BlockPos(2, 2, 2);
         BlockPos second = new BlockPos(3, 2, 2);
         helper.setBlock(first, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(cable, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, cable);
         helper.setBlock(second, ModRegistries.MODEM_BLOCK.get());
         ((ModemBlockEntity) helper.getBlockEntity(first)).setWireless(false);
         ((ModemBlockEntity) helper.getBlockEntity(second)).setWireless(false);
@@ -1219,7 +1228,7 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos bridgePos = new BlockPos(2, 2, 2);
         BlockPos secondPos = new BlockPos(3, 2, 2);
         helper.setBlock(firstPos, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(bridgePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, bridgePos);
         helper.setBlock(secondPos, ModRegistries.MODEM_BLOCK.get());
         ModemBlockEntity first = (ModemBlockEntity) helper.getBlockEntity(firstPos);
         ModemBlockEntity second = (ModemBlockEntity) helper.getBlockEntity(secondPos);
@@ -1241,7 +1250,7 @@ public final class WiredNetworkTopologyGameTests {
                             && !first.transmitTo("rapid-target", 144, 145, "blocked-" + cycle),
                     "partition cycle " + cycle + " must reject stale reachability immediately");
 
-            helper.setBlock(bridgePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+            placeFloorCable(helper, bridgePos);
             WiredNetworkTopology.CacheDiagnostics merged =
                     WiredNetworkTopology.cacheDiagnostics(helper.getLevel());
             helper.assertTrue(merged.revision() > partitioned.revision()
@@ -1272,7 +1281,7 @@ public final class WiredNetworkTopologyGameTests {
         BlockPos receiverPos = new BlockPos(4, 2, 2);
         helper.setBlock(terminalPos, ModRegistries.TERMINAL_BLOCK.get());
         helper.setBlock(senderPos, ModRegistries.MODEM_BLOCK.get());
-        helper.setBlock(cablePos, ModRegistries.NETWORK_CABLE_BLOCK.get());
+        placeFloorCable(helper, cablePos);
         helper.setBlock(receiverPos, ModRegistries.MODEM_BLOCK.get());
         TerminalBlockEntity terminal = (TerminalBlockEntity) helper.getBlockEntity(terminalPos);
         ModemBlockEntity sender = (ModemBlockEntity) helper.getBlockEntity(senderPos);
@@ -1320,6 +1329,15 @@ public final class WiredNetworkTopologyGameTests {
         helper.assertTrue(receiver.pendingCount() == 1,
                 "diagnostic reads must not consume or reveal the queued application payload");
         helper.succeed();
+    }
+
+    /** Topology fixtures must obey the same support requirement as player-placed cables. */
+    private static void placeFloorCable(GameTestHelper helper, BlockPos pos) {
+        helper.setBlock(pos.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(pos, ModRegistries.NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP));
+        helper.assertTrue(helper.getBlockState(pos).canSurvive(helper.getLevel(), helper.absolutePos(pos)),
+                "routing fixture cable must have valid floor support");
     }
 
     private static net.minecraft.world.level.block.state.BlockState coloredCable(int channel) {

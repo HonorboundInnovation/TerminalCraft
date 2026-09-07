@@ -23,6 +23,17 @@ import org.jetbrains.annotations.Nullable;
  * Wireless rednet modem. Adjacent terminals use `modem` / `rednet` shell commands.
  */
 public class ModemBlock extends BaseEntityBlock {
+    private static final net.minecraft.world.phys.shapes.VoxelShape MODEL_SHAPE = net.minecraft.world.phys.shapes.Shapes.or(
+            net.minecraft.world.level.block.Block.box(3, 0, 3, 13, 6, 13),
+            net.minecraft.world.level.block.Block.box(5, 6, 5, 11, 10, 11),
+            net.minecraft.world.level.block.Block.box(7, 10, 7, 9, 14, 9));
+
+    @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return MODEL_SHAPE;
+    }
+
     public ModemBlock() {
         super(BlockBehaviour.Properties.of()
                 .mapColor(MapColor.COLOR_LIGHT_BLUE)

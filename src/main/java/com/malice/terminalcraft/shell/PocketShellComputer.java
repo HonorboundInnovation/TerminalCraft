@@ -24,6 +24,11 @@ public class PocketShellComputer implements ShellComputer {
     private final InteractionHand hand;
     private final BlockPos boundPeripheralPosition;
     private final BashShell shell;
+    private final ItemStack openedStack;
+    private com.malice.terminalcraft.persistence.PocketComputerData record;
+    private UUID revision;
+    private UUID openedIdentity;
+    private String storageError;
 
     public PocketShellComputer(Player player, InteractionHand hand) {
         this(player, hand, null);
@@ -33,33 +38,55 @@ public class PocketShellComputer implements ShellComputer {
         this.player = player;
         this.hand = hand;
         this.boundPeripheralPosition = boundPeripheralPosition == null ? null : boundPeripheralPosition.immutable();
-        this.shell = PocketTerminalItem.loadShell(player.getItemInHand(hand));
+        this.openedStack = player.getItemInHand(hand);
+        this.shell = new BashShell();
+        if (player.level() instanceof ServerLevel level) {
+            try {
+                record = com.malice.terminalcraft.persistence.PocketStorage.open(level, openedStack);
+                var savedShell = record.readShell();
+                // Migration retains the raw backup; do not authorize a session on salvaged files.
+                com.malice.terminalcraft.persistence.PocketStorage.validateWritableShell(savedShell);
+                revision = record.revision();
+                openedIdentity = openedStack.getTag().getUUID(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY);
+                shell.load(savedShell);
+            } catch (java.io.IOException failure) {
+                storageError = failure.getMessage();
+            }
+        }
         this.shell.setHost(this);
     }
 
     public InteractionHand getHand() { return hand; }
     public Player getPlayer() { return player; }
+    public String storageError() { return storageError; }
 
     public boolean isStillHolding() {
-        return player.getItemInHand(hand).is(ModRegistries.POCKET_TERMINAL.get());
+        ItemStack held = player.getItemInHand(hand);
+        // Client inventory synchronization may replace stack objects. Only the server
+        // authorizes mutations, and its menu must remain bound to the exact opened item.
+        return held.is(ModRegistries.POCKET_TERMINAL.get())
+                && (player.level().isClientSide || (held == openedStack && record != null
+                    && revision != null && revision.equals(record.revision())
+                    && held.getTag() != null
+                    && held.getTag().hasUUID(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)
+                    && openedIdentity.equals(held.getTag().getUUID(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY))));
     }
 
-    public ItemStack getStack() { return player.getItemInHand(hand); }
+    public ItemStack getStack() { return isStillHolding() ? player.getItemInHand(hand) : ItemStack.EMPTY; }
 
     @Override public BashShell getShell() { return shell; }
 
     @Override
     public void markShellChanged() {
         ItemStack stack = getStack();
-        if (stack.is(ModRegistries.POCKET_TERMINAL.get())) {
-            PocketTerminalItem.saveShell(stack, shell);
-            PocketTerminalItem.setLabel(stack, getLabel());
+        if (!player.level().isClientSide && stack.is(ModRegistries.POCKET_TERMINAL.get())) {
+            revision = record.compareAndSave(revision, shell.save());
         }
     }
 
     @Override
     public DeviceAccess deviceAccess(DeviceCallContext context) {
-        if (!(player.level() instanceof ServerLevel level)) return null;
+        if (!isStillHolding() || !(player.level() instanceof ServerLevel level)) return null;
         return ServerDeviceManager.access(level.getServer(), context);
     }
 
@@ -85,6 +112,7 @@ public class PocketShellComputer implements ShellComputer {
 
     @Override
     public void setLabel(String label) {
+        if (!isStillHolding()) return;
         PocketTerminalItem.setLabel(getStack(), label);
         markShellChanged();
     }
@@ -134,6 +162,7 @@ public class PocketShellComputer implements ShellComputer {
 
     @Override
     public List<String> modemReceive(int max) {
+        if (!isStillHolding()) return List.of();
         return RednetNetwork.receive(getLevel(), modemId(), max).stream().map(RednetNetwork.PendingMessage::format).toList();
     }
 

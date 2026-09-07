@@ -21,6 +21,70 @@ import net.minecraftforge.gametest.GameTestHolder;
 public final class RedAlloyWireGameTests {
     private RedAlloyWireGameTests() {}
 
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void savedRunPowerSurvivesCompactBlockstateMigration(GameTestHelper helper) {
+        BlockState original = wire(Direction.UP).setValue(RedAlloyWireBlock.COLOR, 11);
+        net.minecraft.nbt.CompoundTag oldState = net.minecraft.nbt.NbtUtils.writeBlockState(original);
+        oldState.getCompound("Properties").putString("power", "13");
+        BlockState migrated = net.minecraft.nbt.NbtUtils.readBlockState(
+                net.minecraft.core.registries.BuiltInRegistries.BLOCK.asLookup(), oldState);
+        helper.assertTrue(migrated.equals(original),
+                "old power property must be ignored without losing the wire identity or color");
+        helper.assertTrue(migrated.getBlock().getStateDefinition().getPossibleStates().size() == 24576,
+                "wire signal strength must not multiply the precomputed blockstate table");
+
+        RedAlloyWireBlockEntity source = new RedAlloyWireBlockEntity(BlockPos.ZERO, migrated);
+        source.setShielded(Direction.UP, 0, false);
+        source.setPower(Direction.UP, 0, 13);
+        source.addRun(Direction.EAST, 0, 5);
+        source.setPower(Direction.EAST, 0, 7);
+        RedAlloyWireBlockEntity restored = new RedAlloyWireBlockEntity(BlockPos.ZERO, migrated);
+        restored.load(source.saveWithoutMetadata());
+        helper.assertTrue(restored.runs().equals(source.runs()),
+                "saved multipart faces, colors, insulation, routes and per-run power must round-trip");
+
+        net.minecraft.nbt.CompoundTag legacy = new net.minecraft.nbt.CompoundTag();
+        legacy.putInt("FaceMask", 1 << Direction.UP.ordinal());
+        int[] legacyPower = new int[Direction.values().length];
+        legacyPower[Direction.UP.ordinal()] = 9;
+        legacy.putIntArray("FacePower", legacyPower);
+        restored.load(legacy);
+        helper.assertTrue(restored.power(Direction.UP, 0) == 9 && !restored.shielded(Direction.UP, 0),
+                "original unshielded FacePower saves must still migrate");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void observerDetectsBlockEntitySignalChanges(GameTestHelper helper) {
+        BlockPos wire = new BlockPos(3, 2, 3);
+        BlockPos source = wire.west();
+        BlockPos observer = wire.east();
+        helper.setBlock(wire.below(), Blocks.STONE);
+        helper.setBlock(wire, wire(Direction.UP));
+        helper.setBlock(observer, Blocks.OBSERVER.defaultBlockState()
+                .setValue(net.minecraft.world.level.block.ObserverBlock.FACING, Direction.WEST));
+        helper.runAfterDelay(6, () -> {
+            helper.setBlock(source, Blocks.REDSTONE_BLOCK);
+            RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+            helper.runAfterDelay(3, () -> {
+                helper.assertTrue(helper.getBlockState(observer).getValue(
+                                net.minecraft.world.level.block.ObserverBlock.POWERED),
+                        "observer must detect a wire power increase without a POWER blockstate field");
+                helper.runAfterDelay(4, () -> {
+                    helper.destroyBlock(source);
+                    RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+                    helper.runAfterDelay(3, () -> {
+                        helper.assertTrue(power(helper, wire) == 0, "wire must depower");
+                        helper.assertTrue(helper.getBlockState(observer).getValue(
+                                        net.minecraft.world.level.block.ObserverBlock.POWERED),
+                                "observer must also detect the wire turning off");
+                        helper.succeed();
+                    });
+                });
+            });
+        });
+    }
+
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void coplanarWireAttenuatesAndLosesUnsupportedSegments(GameTestHelper helper) {
         BlockPos source = new BlockPos(1, 2, 2);
@@ -128,7 +192,10 @@ public final class RedAlloyWireGameTests {
                     "a powered wire must notify and energize an adjacent vanilla receiver");
             helper.destroyBlock(source);
             RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
-            helper.runAfterDelay(3, () -> {
+            helper.assertTrue(power(helper, wire) == 0,
+                    "removing the source must immediately clear authoritative wire power");
+            // Vanilla lamps deliberately wait four ticks before switching off.
+            helper.runAfterDelay(5, () -> {
                 helper.assertTrue(!helper.getBlockState(lamp).getValue(
                                 net.minecraft.world.level.block.RedstoneLampBlock.LIT),
                         "a depowered wire must notify and release an adjacent vanilla receiver");
@@ -161,9 +228,13 @@ public final class RedAlloyWireGameTests {
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wallWire));
         helper.assertTrue(power(helper, floorWire) == 15 && power(helper, wallWire) == 0,
                 "a solid block in the swept bend volume must split the external-corner connection");
-        helper.assertTrue(!RedAlloyWireBlock.isConnected(helper.getBlockState(floorWire), Direction.EAST)
-                        && !RedAlloyWireBlock.isConnected(helper.getBlockState(wallWire), Direction.UP),
-                "blocked external corners must retract both rendered arms");
+        helper.assertTrue((RedAlloyWireBlock.incomingPorts(helper.getLevel(), helper.absolutePos(floorWire),
+                        Direction.UP, 0, helper.getBlockState(floorWire).getValue(RedAlloyWireBlock.COLOR))
+                        & com.malice.terminalcraft.block.SurfaceCableRouting.port(Direction.EAST)) == 0
+                        && (RedAlloyWireBlock.incomingPorts(helper.getLevel(), helper.absolutePos(wallWire),
+                        Direction.EAST, 0, helper.getBlockState(wallWire).getValue(RedAlloyWireBlock.COLOR))
+                        & com.malice.terminalcraft.block.SurfaceCableRouting.port(Direction.UP)) == 0,
+                "the obstruction must remove reciprocal wire ports, even when a visible arm touches the solid block");
 
         helper.destroyBlock(bendVolume);
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(floorWire));
@@ -237,10 +308,10 @@ public final class RedAlloyWireGameTests {
         BlockPos worldPos = helper.absolutePos(space);
         Vec3 center = Vec3.atCenterOf(worldPos);
         helper.assertTrue(RedAlloyWireBlock.targetedFace(helper.getLevel(), worldPos,
-                        center.add(0.0D, 2.0D, 0.0D), center.add(0.0D, -2.0D, 0.0D)) == Direction.UP,
+                        center.add(0.25D, 2.0D, 0.0D), center.add(0.25D, -2.0D, 0.0D)) == Direction.UP,
                 "a ray from above must select the floor-mounted part");
         helper.assertTrue(RedAlloyWireBlock.targetedFace(helper.getLevel(), worldPos,
-                        center.add(2.0D, 0.0D, 0.0D), center.add(-2.0D, 0.0D, 0.0D)) == Direction.EAST,
+                        center.add(2.0D, 0.25D, 0.0D), center.add(-2.0D, 0.25D, 0.0D)) == Direction.EAST,
                 "a horizontal ray must select the wall-mounted part without hitting the floor part");
 
         helper.assertTrue(RedAlloyWireBlock.removeFace(helper.getLevel(), worldPos, Direction.EAST, true),
@@ -270,13 +341,18 @@ public final class RedAlloyWireGameTests {
         helper.setBlock(wire.below(), Blocks.STONE);
         helper.setBlock(repeater.below(), Blocks.STONE);
         helper.setBlock(repeater, Blocks.REPEATER.defaultBlockState()
-                .setValue(net.minecraft.world.level.block.RepeaterBlock.FACING, Direction.EAST)
+                .setValue(net.minecraft.world.level.block.RepeaterBlock.FACING, Direction.WEST)
                 .setValue(net.minecraft.world.level.block.RepeaterBlock.POWERED, true));
         helper.setBlock(wire, wire(Direction.UP));
 
         RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
         helper.assertTrue(power(helper, wire) == 15,
-                "wire must query a directional source from the source's face toward the receiver");
+                "wire must query the repeater using the receiver-to-source direction");
+        helper.setBlock(repeater, helper.getBlockState(repeater)
+                .setValue(net.minecraft.world.level.block.RepeaterBlock.FACING, Direction.EAST));
+        RedAlloyWireBlock.recomputeAt(helper.getLevel(), helper.absolutePos(wire));
+        helper.assertTrue(power(helper, wire) == 0,
+                "a repeater facing away must not power the wire through its input side");
         helper.succeed();
     }
 
@@ -332,7 +408,7 @@ public final class RedAlloyWireGameTests {
                 "reload sanitation must preserve the still-supported face");
         helper.assertTrue(!RedAlloyWireBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
                 "reload sanitation must remove a face whose support disappeared while unloaded");
-        helper.assertTrue(helper.getBlockState(space).getValue(RedAlloyWireBlock.POWER) == 0,
+        helper.assertTrue(power(helper, space) == 0,
                 "reload sanitation must recompute stale persisted power");
         helper.succeed();
     }
@@ -357,6 +433,6 @@ public final class RedAlloyWireGameTests {
     }
 
     private static int power(GameTestHelper helper, BlockPos pos) {
-        return helper.getBlockState(pos).getValue(RedAlloyWireBlock.POWER);
+        return ((RedAlloyWireBlockEntity) helper.getBlockEntity(pos)).maximumPower();
     }
 }

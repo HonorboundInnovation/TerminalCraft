@@ -49,11 +49,16 @@ public class ServerRackBlock extends BaseEntityBlock implements WiredNetworkNode
 
     public ServerRackBlock() {
         super(BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_GRAY).strength(3.5f, 8.0f)
-                .requiresCorrectToolForDrops());
+                .requiresCorrectToolForDrops().noOcclusion());
         registerDefaultState(stateDefinition.any()
                 .setValue(FACING, Direction.NORTH)
                 .setValue(LOWER_MODULE, RackModuleType.EMPTY)
                 .setValue(UPPER_MODULE, RackModuleType.EMPTY));
+    }
+
+    @Override
+    public java.util.List<ItemStack> getDrops(BlockState state, net.minecraft.world.level.storage.loot.LootParams.Builder context) {
+        return com.malice.terminalcraft.item.ComputerBlockItem.preserveDrops(super.getDrops(state, context), context);
     }
 
     @Override

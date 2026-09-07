@@ -23,6 +23,120 @@ public final class ServerRackGameTests {
 
     private ServerRackGameTests() {}
 
+    @GameTest(template = "empty", timeoutTicks = 100)
+    public static void namedServiceRunsStopsAndResumes(GameTestHelper helper) {
+        helper.setBlock(BOTTOM, ModRegistries.SERVER_RACK_BLOCK.get());
+        var rack = (ServerRackBlockEntity) helper.getBlockEntity(BOTTOM);
+        rack.installModule(0, new ItemStack(ModRegistries.SERVER_BLADE.get()), false);
+        var owner = DeviceCallContext.player(UUID.randomUUID(), "service-owner", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        var guest = DeviceCallContext.player(UUID.randomUUID(), "service-guest", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        var defined = rack.getShell().executeForResult("service define heartbeat 4 'echo beat >> /home/player/beats.txt'", owner);
+        helper.assertTrue(defined.succeeded(), "define recurring service: " + defined);
+        helper.assertTrue(rack.getShell().executeForResult("service start heartbeat", owner).succeeded(), "start service");
+        helper.runAfterDelay(18, () -> {
+            String beats = rack.getShell().getVfs().readFile("/home/player/beats.txt");
+            helper.assertTrue(beats != null && beats.lines().count() >= 2, "service repeatedly runs its real shell command");
+            helper.assertTrue(!rack.getShell().executeForResult("service stop heartbeat", guest).succeeded(), "other player cannot stop owner's service");
+            helper.assertTrue(rack.getShell().executeForResult("service stop heartbeat", owner).succeeded(), "owner stops service");
+            helper.runAfterDelay(8, () -> {
+                helper.assertTrue(beats.equals(rack.getShell().getVfs().readFile("/home/player/beats.txt")), "stopped service no longer executes");
+                helper.assertTrue(rack.getShell().executeForResult("service restart heartbeat", owner).succeeded(), "owner restarts service");
+                rack.load(rack.saveWithoutMetadata());
+                helper.runAfterDelay(12, () -> {
+                    helper.assertTrue(rack.getShell().getVfs().readFile("/home/player/beats.txt").length() > beats.length(), "enabled service resumes after saved-state reload");
+                    var status = rack.getShell().executeForResult("service status heartbeat", owner);
+                    helper.assertTrue(status.succeeded() && status.outputLines().get(0).contains("enabled=true"), "service status exposes desired state");
+                    rack.getShell().executeForResult("service stop heartbeat", owner);
+                    helper.assertTrue(rack.getShell().executeForResult("service remove heartbeat", owner).succeeded(), "stopped service can be removed");
+                    rack.getShell().executeForResult("service define broken 4 definitely-not-a-command", owner);
+                    rack.getShell().executeForResult("service start broken", owner);
+                    helper.runAfterDelay(6, () -> {
+                        var failed = rack.getShell().executeForResult("service status broken", owner);
+                        helper.assertTrue(failed.succeeded() && failed.outputLines().get(0).contains("failed enabled=false"), "failed command stops service with visible result: " + failed);
+                        helper.succeed();
+                    });
+                });
+            });
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void terminalRunsAuthorizedRemoteRackCommands(GameTestHelper helper) {
+        helper.setBlock(BOTTOM, ModRegistries.SERVER_RACK_BLOCK.get());
+        var rack = (ServerRackBlockEntity) helper.getBlockEntity(BOTTOM);
+        rack.installModule(0, new ItemStack(ModRegistries.SERVER_BLADE.get()), false);
+        BlockPos terminalPos = BOTTOM.east(3);
+        helper.setBlock(terminalPos, ModRegistries.TERMINAL_BLOCK.get());
+        var terminal = (com.malice.terminalcraft.blockentity.TerminalBlockEntity) helper.getBlockEntity(terminalPos);
+        var owner = DeviceCallContext.player(UUID.randomUUID(), "rack-owner", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        var teammate = DeviceCallContext.player(UUID.randomUUID(), "rack-teammate", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        helper.runAfterDelay(4, () -> {
+            String remote = "rsh " + rack.getDeviceId() + " ";
+            helper.assertTrue(!terminal.getShell().executeForResult(remote + "pwd", owner).succeeded(), "remote access starts disabled");
+            helper.assertTrue(rack.getShell().executeForResult("server remote on", owner).succeeded(), "owner enables access locally");
+            var discovery = terminal.getShell().executeForResult("device list remote_shell", owner);
+            helper.assertTrue(discovery.outputLines().stream().anyMatch(line -> line.contains(rack.getDeviceId().toString())), "rack is discoverable");
+            helper.assertTrue(terminal.getShell().executeForResult(remote + "'echo remote-file > /home/player/remote.txt'", owner).succeeded(), "owner writes on remote rack");
+            var read = terminal.getShell().executeForResult(remote + "'cat /home/player/remote.txt'", owner);
+            helper.assertTrue(read.succeeded() && read.outputLines().contains("remote-file"), "remote output returns to originating terminal: " + read);
+            helper.assertTrue(terminal.getShell().getVfs().readFile("/home/player/remote.txt") == null, "remote file is not created on client terminal");
+            helper.assertTrue(!terminal.getShell().executeForResult(remote + "pwd", teammate).succeeded(), "uninvited teammate cannot execute");
+            helper.assertTrue(rack.getShell().executeForResult("server remote allow " + teammate.principalId(), owner).succeeded(), "owner invites teammate");
+            helper.assertTrue(terminal.getShell().executeForResult(remote + "pwd", teammate).succeeded(), "invited teammate executes");
+            var saved = rack.saveWithoutMetadata();
+            rack.load(saved);
+            helper.assertTrue(terminal.getShell().executeForResult(remote + "'cat /home/player/remote.txt'", owner).succeeded(), "saved access and files reload");
+            var audit = rack.getShell().executeForResult("server remote audit", owner);
+            helper.assertTrue(audit.succeeded() && audit.outputLines().stream().anyMatch(line -> line.contains("exec exit=0")), "owner can inspect audit");
+            terminal.getShell().execute("export WHERE=local", owner);
+            rack.getShell().executeForResult("export WHERE=remote", owner);
+            terminal.getShell().execute("rsh connect " + rack.getDeviceId(), owner);
+            helper.assertTrue(terminal.getShell().getLastExitCode() == 0, "interactive session connects");
+            terminal.getShell().execute("mkdir /home/player/session", owner);
+            terminal.getShell().execute("cd /home/player/session", owner);
+            terminal.getShell().execute("echo $WHERE > answer.txt", owner);
+            helper.assertTrue("remote\n".equals(rack.getShell().getVfs().readFile("/home/player/session/answer.txt")), "session expands variables and redirects on rack");
+            helper.assertTrue("/home/player".equals(terminal.getShell().getCwd()), "session leaves local directory unchanged");
+            terminal.getShell().execute("cat answer.txt", owner);
+            helper.assertTrue(terminal.getShell().getLastExitCode() == 0, "session keeps remote working directory between commands");
+            terminal.getShell().execute("exit", owner);
+            terminal.getShell().execute("echo $WHERE > local.txt", owner);
+            helper.assertTrue("local\n".equals(terminal.getShell().getVfs().readFile("/home/player/local.txt")), "disconnect restores local shell execution");
+            terminal.getShell().execute("rsh connect " + rack.getDeviceId(), owner);
+            helper.assertTrue(rack.getShell().executeForResult("server remote off", owner).succeeded(), "owner disables access");
+            terminal.getShell().execute("echo denied > must-not-exist.txt", owner);
+            helper.assertTrue(terminal.getShell().getLastExitCode() != 0 && terminal.getShell().getVfs().readFile("/home/player/must-not-exist.txt") == null,
+                    "revoked session does not retry command locally");
+            helper.assertTrue(!terminal.getShell().executeForResult(remote + "pwd", owner).succeeded(), "disabled service refuses new commands");
+            helper.succeed();
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void shellSchedulesDelayedRackWork(GameTestHelper helper) {
+        helper.setBlock(BOTTOM, ModRegistries.SERVER_RACK_BLOCK.get());
+        var rack = (ServerRackBlockEntity) helper.getBlockEntity(BOTTOM);
+        helper.assertTrue(rack.installModule(0, new ItemStack(ModRegistries.SERVER_BLADE.get()), false), "compute blade installed");
+        var owner = DeviceCallContext.player(UUID.randomUUID(), "delayed-owner", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        var result = rack.getShell().executeForResult("server after 20 \"echo delayed-output > /home/player/delayed.txt\"", owner);
+        helper.assertTrue(result.succeeded() && rack.serverQueuedJobs() == 1, "shell schedules one delayed job: " + result);
+        helper.runAfterDelay(5, () -> {
+            helper.assertTrue(rack.getShell().getVfs().readFile("/home/player/delayed.txt") == null && rack.serverQueuedJobs() == 1,
+                    "delayed command does not run early");
+            var saved = rack.saveWithoutMetadata();
+            rack.load(saved);
+            helper.assertTrue(rack.serverQueuedJobs() == 1, "delayed job survives saved-state reload");
+            helper.runAfterDelay(25, () -> {
+                helper.assertTrue("delayed-output\n".equals(rack.getShell().getVfs().readFile("/home/player/delayed.txt")),
+                        "eligible delayed job executes through the real shell");
+                var jobs = rack.getShell().executeForResult("server list", owner);
+                helper.assertTrue(jobs.succeeded() && jobs.outputLines().stream().anyMatch(line -> line.contains("completed") && line.contains("exit=0")),
+                        "owner sees completed delayed job: " + jobs);
+                helper.succeed();
+            });
+        });
+    }
+
     @GameTest(template = "empty", timeoutTicks = 80)
     public static void threeRackCabinetHoldsSixBlades(GameTestHelper helper) {
         for (int y = 0; y < 3; y++) helper.setBlock(BOTTOM.above(y), ModRegistries.SERVER_RACK_BLOCK.get());

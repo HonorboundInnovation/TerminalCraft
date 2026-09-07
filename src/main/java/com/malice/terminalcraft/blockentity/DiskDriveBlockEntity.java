@@ -77,6 +77,14 @@ public class DiskDriveBlockEntity extends BlockEntity implements DiskDriveDevice
         return inventory.getStackInSlot(0);
     }
 
+    /** Includes drive identity so adjacent-drive selection cannot redirect an existing mount. */
+    public String mediaToken() {
+        if (!hasDisk()) return "";
+        String token = FloppyDiskItem.mediaToken(getDisk());
+        setChanged(); // Persist IDs lazily assigned to legacy/automation-inserted media.
+        return deviceId + ":" + token;
+    }
+
     public void setDisk(ItemStack stack) {
         if (stack.isEmpty()) {
             inventory.setStackInSlot(0, ItemStack.EMPTY);

@@ -45,13 +45,26 @@ import java.util.UUID;
  * Mobile bash computer (turtle). Right-click opens shell; turtle/* commands move it.
  */
 public class TurtleBlockEntity extends BlockEntity implements MenuProvider, TerminalHost, ShellComputer {
-    private final BashShell shell = new BashShell();
+   private BashShell shell = new BashShell();
+    private net.minecraft.nbt.Tag invalidShellPayload;
     private final EnumMap<Direction, Integer> redstoneOut = new EnumMap<>(Direction.class);
     private UUID deviceId = DeviceIdentity.create();
     private String label = "turtle";
-    private ItemStack selectedStack = new ItemStack(Items.COBBLESTONE, 64);
-    private boolean fuelUnlimited = true;
-    private int fuel = 1000;
+    private final net.minecraftforge.items.ItemStackHandler inventory = new net.minecraftforge.items.ItemStackHandler(16) {
+        @Override protected void onContentsChanged(int slot) { setChanged(); }
+        @Override public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+            return isRemoved() ? stack : super.insertItem(slot, stack, simulate);
+        }
+        @Override public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            return isRemoved() ? ItemStack.EMPTY : super.extractItem(slot, amount, simulate);
+        }
+    };
+    private net.minecraftforge.common.util.LazyOptional<net.minecraftforge.items.IItemHandler> inventoryCapability =
+            net.minecraftforge.common.util.LazyOptional.of(() -> inventory);
+    private int selectedSlot;
+    private boolean fuelUnlimited;
+    private int fuel;
+    private boolean movingInventory;
 
     public TurtleBlockEntity(BlockPos pos, BlockState state) {
         super(ModRegistries.TURTLE_BLOCK_ENTITY.get(), pos, state);
@@ -290,7 +303,7 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
 
     @Override
     public boolean turtleDig(String side) {
-        if (!(level instanceof ServerLevel server) || level.isClientSide) {
+        if (isRemoved() || !(level instanceof ServerLevel server) || level.isClientSide) {
             return false;
         }
         Direction dir = parseSide(side == null || side.isBlank() ? "front" : side);
@@ -298,6 +311,7 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
             dir = facing();
         }
         BlockPos target = worldPosition.relative(dir);
+        if (!canInteractAt(server, target)) return false;
         BlockState state = level.getBlockState(target);
         if (state.isAir() || state.getDestroySpeed(level, target) < 0) {
             return false;
@@ -306,15 +320,29 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
         if (state.is(Blocks.BEDROCK) || state.is(Blocks.BARRIER)) {
             return false;
         }
-        if (!consumeFuel(1)) {
+        if (!fuelUnlimited && fuel < 1) {
             return false;
         }
-        return server.destroyBlock(target, true);
+        // Preserve vanilla/Forge loot spawning. Only collect entities created by this
+        // synchronous break near its target; existing loose items are not a vacuum source.
+        var dropArea = new net.minecraft.world.phys.AABB(target).inflate(0.5);
+        var existingDrops = new java.util.HashSet<>(server.getEntitiesOfClass(
+                net.minecraft.world.entity.item.ItemEntity.class, dropArea));
+        if (!destroyTurtleTarget(server, target)) return false;
+        for (var drop : server.getEntitiesOfClass(net.minecraft.world.entity.item.ItemEntity.class, dropArea)) {
+            if (existingDrops.contains(drop) || !drop.isAlive()) continue;
+            ItemStack remainder = net.minecraftforge.items.ItemHandlerHelper.insertItemStacked(
+                    inventory, drop.getItem().copy(), false);
+            if (remainder.isEmpty()) drop.discard();
+            else drop.setItem(remainder);
+        }
+        consumeFuel(1);
+        return true;
     }
 
     @Override
     public boolean turtlePlace(String side) {
-        if (level == null || level.isClientSide) {
+        if (isRemoved() || !(level instanceof ServerLevel server) || level.isClientSide) {
             return false;
         }
         Direction dir = parseSide(side == null || side.isBlank() ? "front" : side);
@@ -322,25 +350,127 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
             dir = facing();
         }
         BlockPos target = worldPosition.relative(dir);
-        if (!level.getBlockState(target).canBeReplaced()) {
-            return false;
-        }
+        if (!canInteractAt(server, target)) return false;
+        ItemStack selectedStack = inventory.getStackInSlot(selectedSlot);
         if (selectedStack.isEmpty()) {
             return false;
         }
-        Block block = Block.byItem(selectedStack.getItem());
-        if (block == Blocks.AIR) {
+        if (!(selectedStack.getItem() instanceof net.minecraft.world.item.BlockItem)) {
             return false;
         }
-        if (!consumeFuel(1)) {
+        if (!fuelUnlimited && fuel < 1) {
             return false;
         }
-        level.setBlock(target, block.defaultBlockState(), 3);
+        ItemStack placementStack = selectedStack.copyWithCount(1);
+        Direction placementDirection = dir;
+        var context = new net.minecraft.world.item.context.DirectionalPlaceContext(
+                server, target, facing(), placementStack, dir.getOpposite()) {
+            // The target is explicit. Vanilla's directional implementation delegates this
+            // back to canPlace(), which recurses through SlabBlock.canBeReplaced().
+            @Override public boolean replacingClickedOnBlock() { return true; }
+            @Override public Direction getNearestLookingDirection() { return placementDirection; }
+            @Override public Direction getNearestLookingVerticalDirection() {
+                return placementDirection == Direction.UP ? Direction.UP : Direction.DOWN;
+            }
+            @Override public Direction[] getNearestLookingDirections() {
+                var directions = new java.util.LinkedHashSet<Direction>();
+                directions.add(placementDirection);
+                directions.add(Direction.DOWN);
+                directions.add(Direction.UP);
+                java.util.Collections.addAll(directions, Direction.values());
+                return directions.toArray(Direction[]::new);
+            }
+        };
+        if (!placeTurtleTarget(server, target, context)) return false;
+        consumeFuel(1);
         if (!fuelUnlimited) {
-            selectedStack.shrink(1);
+            inventory.extractItem(selectedSlot, 1, false);
         }
         setChanged();
         return true;
+    }
+
+    private static boolean canInteractAt(ServerLevel level, BlockPos pos) {
+        return level.isInWorldBounds(pos) && level.getWorldBorder().isWithinBounds(pos)
+                && level.hasChunkAt(pos);
+    }
+
+    /** World mutation boundaries also allow deterministic rejection tests. */
+    protected boolean destroyTurtleTarget(ServerLevel level, BlockPos pos) {
+        return level.destroyBlock(pos, true);
+    }
+
+    protected boolean placeTurtleTarget(ServerLevel level, BlockPos pos,
+                                       net.minecraft.world.item.context.BlockPlaceContext context) {
+        return ((net.minecraft.world.item.BlockItem) context.getItemInHand().getItem()).place(context).consumesAction();
+    }
+
+    @Override public boolean turtleSelect(int slot) {
+        if (isRemoved() || slot < 1 || slot > inventory.getSlots()) return false;
+        selectedSlot = slot - 1;
+        setChanged();
+        return true;
+    }
+
+    @Override public String turtleFuel() { return fuelUnlimited ? "unlimited" : Integer.toString(fuel); }
+    public int selectedInventorySlot() { return selectedSlot; }
+    public int fuelBalance() { return fuel; }
+    public boolean hasUnlimitedFuel() { return fuelUnlimited; }
+
+    @Override public List<String> turtleInventory() {
+        List<String> lines = new ArrayList<>();
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack stack = inventory.getStackInSlot(slot);
+            lines.add((slot == selectedSlot ? "* " : "  ") + (slot + 1) + ": "
+                    + (stack.isEmpty() ? "empty" : stack.getCount() + " "
+                    + net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem())));
+        }
+        return lines;
+    }
+
+    @Override public boolean turtleRefuel(int count) {
+        if (isRemoved() || level == null || level.isClientSide || fuelUnlimited || count < 1 || count > 64) return false;
+        ItemStack stack = inventory.getStackInSlot(selectedSlot);
+        if (stack.isEmpty()) return false;
+        int burnTime = net.minecraftforge.common.ForgeHooks.getBurnTime(stack, net.minecraft.world.item.crafting.RecipeType.SMELTING);
+        int perItem = burnTime / 20;
+        if (perItem < 1) return false;
+        int consumed = Math.min(Math.min(count, stack.getCount()), (Integer.MAX_VALUE - fuel) / perItem);
+        if (consumed < 1) return false;
+        ItemStack remainder = stack.getCraftingRemainingItem();
+        // Container fuels must have somewhere to return their container, without dropping it.
+        if (!remainder.isEmpty() && (consumed != 1 || stack.getCount() != 1)) return false;
+        inventory.extractItem(selectedSlot, consumed, false);
+        if (!remainder.isEmpty()) inventory.setStackInSlot(selectedSlot, remainder);
+        fuel += consumed * perItem;
+        setChanged();
+        return true;
+    }
+
+    public void dropInventory() {
+        if (movingInventory || level == null || level.isClientSide) return;
+        for (int slot = 0; slot < inventory.getSlots(); slot++) {
+            ItemStack stack = inventory.extractItem(slot, 64, false);
+            if (!stack.isEmpty()) net.minecraft.world.Containers.dropItemStack(level,
+                    worldPosition.getX(), worldPosition.getY(), worldPosition.getZ(), stack);
+        }
+    }
+
+    @Override public <T> net.minecraftforge.common.util.LazyOptional<T> getCapability(
+            net.minecraftforge.common.capabilities.Capability<T> cap, @Nullable Direction side) {
+        if (cap == net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER && !isRemoved())
+            return inventoryCapability.cast();
+        return super.getCapability(cap, side);
+    }
+
+    @Override public void invalidateCaps() {
+        super.invalidateCaps();
+        inventoryCapability.invalidate();
+    }
+
+    @Override public void reviveCaps() {
+        super.reviveCaps();
+        inventoryCapability = net.minecraftforge.common.util.LazyOptional.of(() -> inventory);
     }
 
     @Override
@@ -769,14 +899,15 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     // ------------------------------------------------------------------
 
     private boolean tryMove(Direction dir) {
-        if (!(level instanceof ServerLevel server) || level.isClientSide) {
+        if (isRemoved() || !(level instanceof ServerLevel server) || level.isClientSide) {
             return false;
         }
         BlockPos dest = worldPosition.relative(dir);
-        if (!level.getBlockState(dest).canBeReplaced()) {
+        if (!level.isInWorldBounds(dest) || !level.getWorldBorder().isWithinBounds(dest)
+                || !level.hasChunkAt(dest) || !level.getBlockState(dest).canBeReplaced()) {
             return false;
         }
-        if (!consumeFuel(1)) {
+        if (!fuelUnlimited && fuel < 1) {
             return false;
         }
 
@@ -788,21 +919,62 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
         }
 
         CompoundTag saved = saveWithoutMetadata();
-        level.removeBlockEntity(worldPosition);
-        level.setBlock(worldPosition, Blocks.AIR.defaultBlockState(), 3);
-
-        level.setBlock(dest, newState, 3);
+        BlockState previousDestination = level.getBlockState(dest);
+        BlockEntity previousEntity = level.getBlockEntity(dest);
+        CompoundTag previousData = previousEntity == null ? null : previousEntity.saveWithoutMetadata();
+        // Validate the destination before touching the authoritative source or charging fuel.
+        if (!placeMovementDestination(server, dest, newState)) return false;
         BlockEntity created = level.getBlockEntity(dest);
         if (!(created instanceof TurtleBlockEntity moved)) {
-            // Rollback best-effort
-            level.setBlock(worldPosition, oldState, 3);
+            restoreMovementDestination(server, dest, previousDestination, previousData);
             return false;
         }
-        moved.load(saved);
+        moved.movingInventory = true; // A rolled-back destination must not drop copied items.
+        // Deserialize before removing the source, so a rejected payload cannot destroy it.
+        try {
+            moved.load(saved);
+        } catch (RuntimeException failure) {
+            restoreMovementDestination(server, dest, previousDestination, previousData);
+            com.mojang.logging.LogUtils.getLogger().error("Turtle move payload could not be restored", failure);
+            return false;
+        }
+        movingInventory = true;
+        boolean removedSource;
+        try {
+            removedSource = level.setBlock(worldPosition, Blocks.AIR.defaultBlockState(), 3);
+        } finally {
+            movingInventory = false;
+        }
+        if (!removedSource) {
+            restoreMovementDestination(server, dest, previousDestination, previousData);
+            return false;
+        }
         moved.setLevel(level);
+        moved.movingInventory = false;
+        for (int slot = 0; slot < 16; slot++) inventory.setStackInSlot(slot, ItemStack.EMPTY);
+        // Continue the live command/script, including transient execution state, at its new host.
+        // A saved-shell copy would strand the running command chain on the removed source.
+        moved.shell = shell;
         moved.shell.setHost(moved);
+        moved.consumeFuel(1);
+        moved.setChanged();
         server.sendBlockUpdated(dest, newState, newState, 3);
         return true;
+    }
+
+    /** Isolated placement boundary permits failure injection without replacing the live world. */
+    protected boolean placeMovementDestination(ServerLevel server, BlockPos dest, BlockState state) {
+        return server.setBlock(dest, state, 3);
+    }
+
+    private static void restoreMovementDestination(ServerLevel server, BlockPos pos,
+                                                   BlockState state, CompoundTag data) {
+        server.setBlock(pos, state, 3);
+        BlockEntity restored = server.getBlockEntity(pos);
+        if (data != null && restored != null) {
+            restored.load(data);
+            restored.setChanged();
+        }
     }
 
     private boolean tryTurn(Direction newFacing) {
@@ -865,6 +1037,11 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     public CompoundTag readDiskMedia() {
         DiskDriveBlockEntity drive = findDiskDrive();
         return drive == null ? null : drive.readMedia();
+    }
+
+    @Override public String diskMediaToken() {
+        DiskDriveBlockEntity drive = findDiskDrive();
+        return drive == null ? "" : drive.mediaToken();
     }
 
     @Override
@@ -953,13 +1130,20 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        saveComputerState(tag, false);
+    }
+
+    private void saveComputerState(CompoundTag tag, boolean clientView) {
         PersistedDataVersions.stampCurrent(tag);
         DeviceIdentity.save(tag, deviceId);
-        tag.put("Shell", shell.save());
+        tag.put("Shell", clientView ? shell.saveClientView()
+                : invalidShellPayload != null ? invalidShellPayload.copy() : shell.save());
         tag.putString("Label", label);
         tag.putInt("Fuel", fuel);
         tag.putBoolean("FuelUnlimited", fuelUnlimited);
-        tag.put("Selected", selectedStack.save(new CompoundTag()));
+        tag.put("Inventory", inventory.serializeNBT());
+        tag.putInt("SelectedSlot", selectedSlot);
+        tag.put("Selected", inventory.getStackInSlot(selectedSlot).save(new CompoundTag()));
         CompoundTag rs = new CompoundTag();
         for (Map.Entry<Direction, Integer> e : redstoneOut.entrySet()) {
             rs.putInt(e.getKey().getName(), e.getValue());
@@ -969,10 +1153,26 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
 
     @Override
     public void load(CompoundTag tag) {
+        loadComputerState(tag, false);
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag) {
+        loadComputerState(tag, true);
+    }
+
+    private void loadComputerState(CompoundTag tag, boolean clientView) {
         super.load(tag);
         deviceId = DeviceIdentity.loadOrRetain(tag, deviceId);
         if (tag.contains("Shell", CompoundTag.TAG_COMPOUND)) {
-            shell.load(tag.getCompound("Shell"));
+            if (!clientView) invalidShellPayload = null;
+            if (clientView) shell.load(tag.getCompound("Shell"));
+            else com.malice.terminalcraft.persistence.ComputerShellPersistence.load(shell, tag.getCompound("Shell"));
+        } else if (!clientView && tag.contains("Shell")) {
+            invalidShellPayload = tag.get("Shell").copy();
+            CompoundTag retained = new CompoundTag();
+            retained.put("InvalidShellPayload", invalidShellPayload.copy());
+            shell.preserveUnreadableSnapshot(retained);
         }
         shell.setHost(this);
         if (tag.contains("Label", CompoundTag.TAG_STRING)) {
@@ -985,8 +1185,26 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
         if (tag.contains("FuelUnlimited")) {
             fuelUnlimited = tag.getBoolean("FuelUnlimited");
         }
-        if (tag.contains("Selected", CompoundTag.TAG_COMPOUND)) {
-            selectedStack = ItemStack.of(tag.getCompound("Selected"));
+        for (int slot = 0; slot < 16; slot++) inventory.setStackInSlot(slot, ItemStack.EMPTY);
+        selectedSlot = Math.max(0, Math.min(15, tag.getInt("SelectedSlot")));
+        if (tag.contains("Inventory", CompoundTag.TAG_COMPOUND)) {
+            // Do not trust serialized Size: the inventory is always bounded to sixteen slots.
+            var entries = tag.getCompound("Inventory").getList("Items", CompoundTag.TAG_COMPOUND);
+            boolean[] seen = new boolean[16];
+            for (int index = 0; index < Math.min(entries.size(), 128); index++) {
+                var entry = entries.getCompound(index);
+                int slot = entry.getInt("Slot");
+                if (slot < 0 || slot >= 16 || seen[slot]) continue;
+                seen[slot] = true;
+                ItemStack stack = ItemStack.of(entry);
+                if (!stack.isEmpty()) stack.setCount(Math.min(stack.getCount(), stack.getMaxStackSize()));
+                inventory.setStackInSlot(slot, stack);
+            }
+        } else if (tag.contains("Selected", CompoundTag.TAG_COMPOUND)) {
+            ItemStack legacy = ItemStack.of(tag.getCompound("Selected"));
+            if (!legacy.isEmpty()) legacy.setCount(Math.min(legacy.getCount(), legacy.getMaxStackSize()));
+            inventory.setStackInSlot(0, legacy);
+            selectedSlot = 0;
         }
         if (tag.contains("RedstoneOut", CompoundTag.TAG_COMPOUND)) {
             CompoundTag rs = tag.getCompound("RedstoneOut");
@@ -1001,7 +1219,7 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     @Override
     public CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
-        saveAdditional(tag);
+        saveComputerState(tag, true);
         if (tag.contains("Shell", CompoundTag.TAG_COMPOUND)
                 && !com.malice.terminalcraft.network.ShellSyncPolicy.isAdmissible(tag.getCompound("Shell"))) {
             tag.remove("Shell");
@@ -1019,7 +1237,7 @@ public class TurtleBlockEntity extends BlockEntity implements MenuProvider, Term
     public void onDataPacket(Connection net, ClientboundBlockEntityDataPacket pkt) {
         CompoundTag tag = pkt.getTag();
         if (tag != null) {
-            load(tag);
+            handleUpdateTag(tag);
         }
     }
 

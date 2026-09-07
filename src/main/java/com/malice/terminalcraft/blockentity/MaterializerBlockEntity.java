@@ -23,7 +23,7 @@ public class MaterializerBlockEntity extends BlockEntity {
     public MaterializerBlockEntity(BlockPos pos, BlockState state) { super(com.malice.terminalcraft.registry.ModRegistries.MATERIALIZER_BLOCK_ENTITY.get(), pos, state); }
 
     @Nullable NetworkAccessStorageBlockEntity nas() {
-        if (level == null) return null;
+        if (level == null || isRemoved()) return null;
         for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.values()) {
             BlockEntity entity = level.getBlockEntity(worldPosition.relative(direction));
             if (entity instanceof NetworkAccessStorageBlockEntity storage) return storage;

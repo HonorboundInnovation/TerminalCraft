@@ -97,6 +97,12 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         renderBackground(graphics);
         super.render(graphics, mouseX, mouseY, partialTick);
+        if (font.width(notice) > imageWidth - 24 && mouseX >= leftPos + 12
+                && mouseX < leftPos + imageWidth - 12 && mouseY >= topPos + imageHeight - 22
+                && mouseY < topPos + imageHeight - 8) {
+            graphics.renderTooltip(font, font.split(Component.literal(notice), Math.min(360, width - 24)),
+                    mouseX, mouseY);
+        }
     }
 
     @Override
@@ -105,9 +111,12 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
         graphics.fill(left - 4, top - 4, right + 4, bottom + 4, 0xFF050708);
         graphics.fill(left, top, right, bottom, 0xFF101820);
         graphics.fill(left, top, right, top + HEADER, 0xFF1B4053);
-        graphics.drawString(font, "TERMINALCRAFT // PLC PROGRAMMER", left + 10, top + 7, 0xFFE7F4FF, false);
-        String modeLabel = ladderMode ? "LADDER WORKSPACE [F7]" : "IEC-STYLE CONTROL LOGIC [F7]";
-        graphics.drawString(font, modeLabel, right - Math.min(190, font.width(modeLabel)), top + 7, 0xFF9BC4D5, false);
+        String modeLabel = compactLayout() ? (ladderMode ? "LADDER [F7]" : "SOURCE [F7]")
+                : ladderMode ? "LADDER WORKSPACE [F7]" : "IEC-STYLE CONTROL LOGIC [F7]";
+        int modeLeft = right - 10 - font.width(modeLabel);
+        String heading = compactLayout() ? "PLC PROGRAMMER" : "TERMINALCRAFT // PLC PROGRAMMER";
+        graphics.drawString(font, fitToWidth(heading, modeLeft - left - 20), left + 10, top + 7, 0xFFE7F4FF, false);
+        graphics.drawString(font, modeLabel, modeLeft, top + 7, 0xFF9BC4D5, false);
         int editorLeft = editorLeft();
         int editorTop = editorTop();
         int editorRight = editorRight();
@@ -125,7 +134,7 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
             graphics.fill(left + 438, top + 28, right - 8, bottom - 28, 0xFF0B1217);
             renderWatch(graphics, left + 448, top + 38, right - 16, bottom - 36);
         }
-        graphics.drawString(font, notice, left + 12, bottom - 19,
+        graphics.drawString(font, fitToWidth(notice, imageWidth - 24), left + 12, bottom - 19,
                 noticeTicks > 0 ? (notice.startsWith("Error") ? 0xFFFF7777 : 0xFF8FE6A5) : 0xFF91A8B5, false);
     }
 
@@ -194,11 +203,14 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
             row += rungHeight;
         }
         if (rungs.isEmpty()) {
-            graphics.drawString(font, "No RUNG instructions yet. Add one in source mode, then return here.",
-                    left + 12, top + 36, 0xFFFFB86C, false);
+            int emptyY = top + 36;
+            for (var line : font.split(Component.literal("No RUNG instructions yet. Add one in source mode [F7]."),
+                    right - left - 24)) {
+                if (emptyY + 9 > bottom) break;
+                graphics.drawString(font, line, left + 12, emptyY, 0xFFFFB86C, false);
+                emptyY += 10;
+            }
         }
-        graphics.drawString(font, "F7 toggles source/ladder • Compile & Load accepts the generated source",
-                left + 6, bottom + 7, 0xFF718A99, false);
     }
 
     private List<String> ladderSignals() {
@@ -508,7 +520,7 @@ public final class PlcProgrammingScreen extends AbstractContainerScreen<PlcProgr
 
     private boolean compactLayout() { return imageWidth < 560; }
     private int editorLeft() { return leftPos + 8; }
-    private int editorRight() { return leftPos + imageWidth - 8; }
+    private int editorRight() { return leftPos + PlcViewportLayout.editorRightOffset(imageWidth, ladderMode); }
     private int editorTop() { return topPos + (narrowLayout() ? 132 : compactLayout() ? 108 : 86); }
     private int editorBottom() { return topPos + imageHeight - 32; }
     private boolean narrowLayout() { return imageWidth < 440; }

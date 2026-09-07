@@ -19,6 +19,7 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
     private EditBox channel;
     private Button roleButton;
     private String notice = "";
+    private DisplayChannelDraft channelDraft;
 
     public DisplayDiagnosticsScreen(DisplayDiagnosticsMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -28,31 +29,37 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
 
     @Override
     protected void init() {
+        imageWidth = Math.min(PANEL_WIDTH, Math.max(1, width - 12));
         super.init();
         leftPos = (width - imageWidth) / 2;
         topPos = (height - imageHeight) / 2;
         if (menu.isLink()) {
-            channel = new EditBox(font, leftPos + 18, topPos + 55, 218, 18, Component.literal("Channel"));
+            if (channelDraft == null) channelDraft = new DisplayChannelDraft(currentChannel());
+            channel = new EditBox(font, leftPos + 18, topPos + 55, imageWidth - 142, 18, Component.literal("Channel"));
             channel.setMaxLength(48);
-            channel.setValue(currentChannel());
-            channel.setResponder(value -> notice = "Unsaved channel edit");
+            channel.setValue(channelDraft.value());
+            channel.setResponder(value -> {
+                channelDraft.edit(value);
+                notice = channelDraft.dirty() ? "Unsaved channel edit" : "";
+            });
             addRenderableWidget(channel);
             roleButton = addRenderableWidget(Button.builder(Component.literal(roleLabel()), button ->
                     minecraft.gameMode.handleInventoryButtonClick(menu.containerId, 0))
-                    .bounds(leftPos + 246, topPos + 53, 96, 20).build());
+                    .bounds(leftPos + imageWidth - 114, topPos + 53, 96, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Pair / Arm"), button ->
                     minecraft.gameMode.handleInventoryButtonClick(menu.containerId, 1))
-                    .bounds(leftPos + 18, topPos + 86, 104, 20).build());
+                    .bounds(leftPos + 18, topPos + 86, 88, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Clear"), button ->
                     minecraft.gameMode.handleInventoryButtonClick(menu.containerId, 2))
-                    .bounds(leftPos + 128, topPos + 86, 70, 20).build());
+                    .bounds(leftPos + 112, topPos + 86, 54, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Apply Channel"), button -> applyChannel())
-                    .bounds(leftPos + 204, topPos + 86, 138, 20).build());
+                    .bounds(leftPos + 172, topPos + 86, imageWidth - 190, 20).build());
         }
     }
 
     private void applyChannel() {
         if (channel == null) return;
+        channel.setValue(WirelessDisplayLinkBlockEntity.normalizeChannel(channel.getValue()));
         ModNetwork.sendDisplayConfig(menu.containerId, menu.targetPosition(), channel.getValue(), currentSource());
         notice = "Configuration sent";
     }
@@ -77,7 +84,10 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
     protected void containerTick() {
         super.containerTick();
         if (roleButton != null) roleButton.setMessage(Component.literal(roleLabel()));
-        if (channel != null && !channel.isFocused()) channel.setValue(currentChannel());
+        if (channel != null) {
+            channelDraft.observe(currentChannel());
+            if (!channel.getValue().equals(channelDraft.value())) channel.setValue(channelDraft.value());
+        }
     }
 
     @Override
@@ -99,7 +109,7 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
         graphics.drawString(font, link.isSource() ? "SOURCE HOST" : "MONITOR RECEIVER", left + 18, top + 122, 0xFF9DE6B0, false);
         graphics.drawString(font, "Host attached: " + (link.attachedHost() != null), left + 18, top + 141, 0xFFC8D7DF, false);
         graphics.drawString(font, "Monitor attached: " + (link.attachedMonitor() != null), left + 18, top + 157, 0xFFC8D7DF, false);
-        graphics.drawString(font, "Same-dimension pairing only; refresh interval: 4 ticks", left + 18, top + 183, 0xFF718A99, false);
+        graphics.drawString(font, "Same dimension only; refresh: 4 ticks", left + 18, top + 183, 0xFF718A99, false);
     }
 
     private void renderCable(GuiGraphics graphics, int left, int top) {
@@ -112,11 +122,15 @@ public final class DisplayDiagnosticsScreen extends AbstractContainerScreen<Disp
                 connections.append(direction.getName());
             }
         }
-        graphics.drawString(font, connections.toString(), left + 18, top + 70, 0xFFC8D7DF, false);
+        int connectionY = top + 70;
+        for (var line : font.split(Component.literal(connections.toString()), imageWidth - 36)) {
+            graphics.drawString(font, line, left + 18, connectionY, 0xFFC8D7DF, false);
+            connectionY += 10;
+        }
         graphics.drawString(font, "Six-direction routing", left + 18, top + 98, 0xFF9DE6B0, false);
         graphics.drawString(font, "Component limit: 2,048 cable nodes", left + 18, top + 117, 0xFFC8D7DF, false);
-        graphics.drawString(font, "Display cells only; no redstone or RedNet traffic", left + 18, top + 145, 0xFF718A99, false);
-        graphics.drawString(font, "Add a terminal/PLC and monitor at cable endpoints", left + 18, top + 164, 0xFF718A99, false);
+        graphics.drawString(font, "Display only; no redstone or RedNet", left + 18, top + 145, 0xFF718A99, false);
+        graphics.drawString(font, "Endpoints: terminal/PLC and monitor", left + 18, top + 164, 0xFF718A99, false);
     }
 
     @Override protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {}

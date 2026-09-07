@@ -17,6 +17,7 @@ public final class ServerJobSchedulerTest {
     private ServerJobSchedulerTest() {}
 
     public static void main(String[] args) {
+        administratorPolicyControlsAdmissionAndExecution();
         DeviceCallContext alice = new DeviceCallContext(UUID.randomUUID(), "alice",
                 Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
         DeviceCallContext bob = DeviceCallContext.readOnly("bob");
@@ -251,6 +252,33 @@ public final class ServerJobSchedulerTest {
         if (failure.get() != null) throw new AssertionError("scheduler proof thread failed", failure.get());
         require(scheduler.get(job.id()).state() == ServerJobScheduler.State.CANCELLED,
                 "blocked slice completion cannot overwrite cancellation");
+    }
+
+    private static void administratorPolicyControlsAdmissionAndExecution() {
+        var policy = new AtomicReference<>(new RackResourcePolicy(2, 1, 1, 1, 1, 10, true, 4096));
+        var scheduler = new ServerJobScheduler(policy::get);
+        var alice = DeviceCallContext.player(UUID.randomUUID(), "policy-alice", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        var bob = DeviceCallContext.player(UUID.randomUUID(), "policy-bob", Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
+        scheduler.submit(alice, "echo a", 0);
+        rejectState(() -> scheduler.submit(alice, "echo too-many", 0), "configured owner admission limit");
+        scheduler.submit(bob, "echo b", 0);
+        require(scheduler.tick(1, 2, job -> 0) == 1, "administrator cap reduces blade execution budget");
+        policy.set(new RackResourcePolicy(0, 0, 0, 1, 1, 10, false, 128));
+        require(scheduler.tick(2, 2, job -> 0) == 0 && scheduler.queuedCount() == 1, "pause retains existing queued work");
+        var restored = new ServerJobScheduler(policy::get);
+        restored.load(scheduler.save());
+        require(restored.queuedCount() == 1, "lower admission limits do not discard saved jobs");
+        policy.set(new RackResourcePolicy(2, 1, 1, 1, 1, 10, true, 4096));
+        require(restored.tick(3, 2, job -> 0) == 1, "restored budget resumes retained job");
+        var services = new RackServiceManager(policy::get);
+        require(services.command(alice, java.util.List.of("define", "poll", "1", "echo poll"), restored, 4).succeeded(), "service definition admitted by policy");
+        require(!services.command(alice, java.util.List.of("define", "extra", "1", "echo extra"), restored, 4).succeeded(), "configured service count enforced");
+        services.command(alice, java.util.List.of("start", "poll"), restored, 4);
+        services.tick(restored, 4);
+        restored.tick(4, 2, job -> 0);
+        services.tick(restored, 5);
+        var status = services.command(alice, java.util.List.of("status", "poll"), restored, 5);
+        require(status.outputLines().get(0).contains("next=15"), "administrator minimum interval overrides faster definition");
     }
 
     private static void await(CountDownLatch latch, String message) {

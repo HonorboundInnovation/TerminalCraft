@@ -128,6 +128,7 @@ public record TerminalHostServices(
                 },
                 new ServerJobs() {
                     @Override public String submit(DeviceCallContext context, String command) { return host.serverSubmit(context, command); }
+                    @Override public String schedule(DeviceCallContext context, String command, long delayTicks) { return host.serverSchedule(context, command, delayTicks); }
                     @Override public List<String> jobs(DeviceCallContext context) { return host.serverJobs(context); }
                     @Override public String job(DeviceCallContext context, String id) { return host.serverJob(context, id); }
                     @Override public boolean cancel(DeviceCallContext context, String id) { return host.serverCancel(context, id); }
@@ -234,6 +235,7 @@ public record TerminalHostServices(
 
     public interface ServerJobs {
         String submit(DeviceCallContext context, String command);
+        default String schedule(DeviceCallContext context, String command, long delayTicks) { return ""; }
         List<String> jobs(DeviceCallContext context);
         String job(DeviceCallContext context, String id);
         boolean cancel(DeviceCallContext context, String id);

@@ -71,7 +71,9 @@ public final class PlcDeviceEndpoint implements ContextualDeviceEndpoint {
             case "control.run" -> mutate(context, args, () -> {
                 if (!plc.compileError().isEmpty()) return failure(plc.compileError());
                 plc.start();
-                return DeviceResult.success();
+                return plc.isRunning() ? DeviceResult.success()
+                        : failure(plc.controllerFault().isEmpty() ? "no runnable PLC program"
+                                : plc.controllerFault() + "; restore inputs, then reset before running");
             });
             case "control.stop" -> mutate(context, args, () -> { plc.stop(); return DeviceResult.success(); });
             case "control.reset" -> mutate(context, args, () -> { plc.resetController(); return DeviceResult.success(); });

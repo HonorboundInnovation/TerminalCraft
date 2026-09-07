@@ -45,8 +45,28 @@ import java.util.UUID;
 public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, TerminalHost, ShellComputer {
     public static final int BAY_COUNT = 2;
 
-    private final BashShell shell = new BashShell();
-    private final ServerJobScheduler scheduler = new ServerJobScheduler();
+   private final BashShell shell = new BashShell();
+    private net.minecraft.nbt.Tag invalidShellPayload;
+    private final ServerJobScheduler scheduler = new ServerJobScheduler(com.malice.terminalcraft.Config::rackResourcePolicy);
+    private final com.malice.terminalcraft.server.RackServiceManager services = new com.malice.terminalcraft.server.RackServiceManager(com.malice.terminalcraft.Config::rackResourcePolicy);
+    @Override public String serverResourcePolicy() { return com.malice.terminalcraft.Config.rackResourcePolicy().diagnostics(); }
+    @Override public com.malice.terminalcraft.shell.ShellCommandResult serverServiceCommand(DeviceCallContext caller, List<String> args) {
+        if (!hasServerModule() || level == null || level.isClientSide)
+            return new com.malice.terminalcraft.shell.ShellCommandResult(1, List.of("service: server blade required"));
+        var result = services.command(caller, args, scheduler, level.getGameTime());
+        setChanged();
+        return result;
+    }
+    private final com.malice.terminalcraft.server.RackRemoteShell remoteShell = new com.malice.terminalcraft.server.RackRemoteShell();
+    public com.malice.terminalcraft.server.RackRemoteShell remoteShell() { return remoteShell; }
+
+    @Override public com.malice.terminalcraft.shell.ShellCommandResult serverRemoteConfigure(DeviceCallContext caller, List<String> args) {
+        if (!args.isEmpty() && args.get(0).equals("on") && !com.malice.terminalcraft.Config.rackResourcePolicy().remoteShellEnabled())
+            return new com.malice.terminalcraft.shell.ShellCommandResult(1, List.of("server remote: disabled by server administrator"));
+        var result = remoteShell.configure(caller, args, level == null ? 0 : level.getGameTime());
+        setChanged();
+        return result;
+    }
     private final ItemStack[] modules = {ItemStack.EMPTY, ItemStack.EMPTY};
     private UUID deviceId = DeviceIdentity.create();
     private String label = "server-rack";
@@ -254,9 +274,14 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
 
     @Override
     public String serverSubmit(DeviceCallContext context, String command) {
+        return serverSchedule(context, command, 0);
+    }
+
+    @Override
+    public String serverSchedule(DeviceCallContext context, String command, long delayTicks) {
         if (!hasServerModule() || level == null || level.isClientSide) return "";
         try {
-            ServerJobScheduler.Job job = scheduler.submit(context, command, level.getGameTime());
+            ServerJobScheduler.Job job = scheduler.schedule(context, command, level.getGameTime(), delayTicks);
             setChanged();
             return job.id().toString();
         } catch (IllegalArgumentException | IllegalStateException rejected) {
@@ -327,11 +352,18 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        saveComputerState(tag, false);
+    }
+
+    private void saveComputerState(CompoundTag tag, boolean clientView) {
         PersistedDataVersions.stampCurrent(tag);
         DeviceIdentity.save(tag, deviceId);
         tag.putString("Label", label);
-        tag.put("Shell", shell.save());
-        tag.put("Scheduler", scheduler.save());
+        tag.put("Shell", clientView ? shell.saveClientView()
+                : invalidShellPayload != null ? invalidShellPayload.copy() : shell.save());
+        if (!clientView) tag.put("Scheduler", scheduler.save());
+        if (!clientView) tag.put("ServiceManager", services.save());
+        if (!clientView) tag.put("RemoteShell", remoteShell.save());
         ListTag savedModules = new ListTag();
         for (int bay = 0; bay < BAY_COUNT; bay++) {
             if (modules[bay].isEmpty()) continue;
@@ -345,11 +377,31 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
 
     @Override
     public void load(CompoundTag tag) {
+        loadComputerState(tag, false);
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag) {
+        loadComputerState(tag, true);
+    }
+
+    private void loadComputerState(CompoundTag tag, boolean clientView) {
         super.load(tag);
         deviceId = DeviceIdentity.loadOrRetain(tag, deviceId);
         if (tag.contains("Label", Tag.TAG_STRING)) label = tag.getString("Label");
-        if (tag.contains("Shell", Tag.TAG_COMPOUND)) shell.load(tag.getCompound("Shell"));
-        if (tag.contains("Scheduler", Tag.TAG_COMPOUND)) scheduler.load(tag.getCompound("Scheduler"));
+        if (tag.contains("Shell", Tag.TAG_COMPOUND)) {
+            if (!clientView) invalidShellPayload = null;
+            if (clientView) shell.load(tag.getCompound("Shell"));
+            else com.malice.terminalcraft.persistence.ComputerShellPersistence.load(shell, tag.getCompound("Shell"));
+        } else if (!clientView && tag.contains("Shell")) {
+            invalidShellPayload = tag.get("Shell").copy();
+            CompoundTag retained = new CompoundTag();
+            retained.put("InvalidShellPayload", invalidShellPayload.copy());
+            shell.preserveUnreadableSnapshot(retained);
+        }
+        if (!clientView && tag.contains("Scheduler", Tag.TAG_COMPOUND)) scheduler.load(tag.getCompound("Scheduler"));
+        if (!clientView) services.load(tag.getCompound("ServiceManager"));
+        if (!clientView) remoteShell.load(tag.getCompound("RemoteShell"));
         modules[0] = ItemStack.EMPTY;
         modules[1] = ItemStack.EMPTY;
         if (tag.contains("Modules", Tag.TAG_LIST)) {
@@ -368,7 +420,7 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
 
     @Override public CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
-        saveAdditional(tag);
+        saveComputerState(tag, true);
         if (tag.contains("Shell", CompoundTag.TAG_COMPOUND)
                 && !com.malice.terminalcraft.network.ShellSyncPolicy.isAdmissible(tag.getCompound("Shell"))) {
             tag.remove("Shell");
@@ -380,7 +432,7 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     }
     @Override public void onDataPacket(Connection connection, ClientboundBlockEntityDataPacket packet) {
         CompoundTag tag = packet.getTag();
-        if (tag != null) load(tag);
+        if (tag != null) handleUpdateTag(tag);
     }
     @Override public void onLoad() {
         super.onLoad();
@@ -398,9 +450,11 @@ public class ServerRackBlockEntity extends BlockEntity implements MenuProvider, 
     public static void serverTick(Level level, BlockPos pos, BlockState state, ServerRackBlockEntity rack) {
         if (!(level instanceof ServerLevel)) return;
         if (rack.hasServerModule() || rack.hasRouterModule()) {
-            ServerDeviceManager.ensureRegistered(rack, rack.deviceId, rack.getDeviceAddress(), rack);
+            ServerDeviceManager.ensureRegistered(rack, rack.deviceId, rack.getDeviceAddress(),
+                    () -> new com.malice.terminalcraft.device.RackDeviceEndpoint(rack));
         }
         int budget = rack.localServerModules();
+        if (budget > 0 && rack.services.tick(rack.scheduler, level.getGameTime())) rack.setChanged();
         int executed = rack.scheduler.tick(level.getGameTime(), budget, job -> {
             rack.shell.execute(job.command(), job.context());
             return rack.shell.getLastExitCode();

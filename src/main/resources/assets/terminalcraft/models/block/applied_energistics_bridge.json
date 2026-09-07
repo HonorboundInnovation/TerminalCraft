@@ -2,12 +2,9 @@
   "parent": "minecraft:block/block",
   "ambientocclusion": true,
   "textures": {
-    "particle": "terminalcraft:block/applied_bridge_face_custom",
-    "side": "terminalcraft:block/applied_bridge_face_custom",
-    "top": "terminalcraft:block/applied_bridge_face_custom",
-    "front": "terminalcraft:block/applied_bridge_face_custom",
-    "crystal": "terminalcraft:block/applied_bridge_face_custom",
-    "port": "terminalcraft:block/applied_bridge_face_custom"
+    "particle": "#casing",
+    "casing": "terminalcraft:block/terminal_side",
+    "front": "terminalcraft:block/applied_bridge_face_custom"
   },
   "elements": [
     {
@@ -23,22 +20,22 @@
       ],
       "faces": {
         "down": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
         }
       }
     },
@@ -55,214 +52,92 @@
       ],
       "faces": {
         "down": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#top"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
         }
       }
     },
     {
       "from": [
-        3,
-        3,
-        0
+        2,
+        2,
+        0.25
       ],
       "to": [
-        13,
-        13,
-        2
+        14,
+        14,
+        1
       ],
       "faces": {
         "down": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#front"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
         },
         "south": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#front"
+          "texture": "#casing"
         }
       }
     },
     {
       "from": [
         6,
-        6,
-        2
+        15,
+        6
       ],
       "to": [
         10,
-        10,
-        4
+        16,
+        10
       ],
       "faces": {
         "down": {
-          "texture": "#crystal"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#crystal"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#crystal"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#crystal"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#crystal"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#crystal"
-        }
-      }
-    },
-    {
-      "from": [
-        3,
-        4,
-        0
-      ],
-      "to": [
-        5,
-        6,
-        1
-      ],
-      "faces": {
-        "down": {
-          "texture": "#port"
-        },
-        "up": {
-          "texture": "#port"
-        },
-        "north": {
-          "texture": "#port"
-        },
-        "south": {
-          "texture": "#port"
-        },
-        "west": {
-          "texture": "#port"
-        },
-        "east": {
-          "texture": "#port"
-        }
-      }
-    },
-    {
-      "from": [
-        11,
-        4,
-        0
-      ],
-      "to": [
-        13,
-        6,
-        1
-      ],
-      "faces": {
-        "down": {
-          "texture": "#port"
-        },
-        "up": {
-          "texture": "#port"
-        },
-        "north": {
-          "texture": "#port"
-        },
-        "south": {
-          "texture": "#port"
-        },
-        "west": {
-          "texture": "#port"
-        },
-        "east": {
-          "texture": "#port"
-        }
-      }
-    },
-    {
-      "from": [
-        3,
-        10,
-        0
-      ],
-      "to": [
-        5,
-        12,
-        1
-      ],
-      "faces": {
-        "down": {
-          "texture": "#port"
-        },
-        "up": {
-          "texture": "#port"
-        },
-        "north": {
-          "texture": "#port"
-        },
-        "south": {
-          "texture": "#port"
-        },
-        "west": {
-          "texture": "#port"
-        },
-        "east": {
-          "texture": "#port"
-        }
-      }
-    },
-    {
-      "from": [
-        11,
-        10,
-        0
-      ],
-      "to": [
-        13,
-        12,
-        1
-      ],
-      "faces": {
-        "down": {
-          "texture": "#port"
-        },
-        "up": {
-          "texture": "#port"
-        },
-        "north": {
-          "texture": "#port"
-        },
-        "south": {
-          "texture": "#port"
-        },
-        "west": {
-          "texture": "#port"
-        },
-        "east": {
-          "texture": "#port"
+          "texture": "#casing"
         }
       }
     }

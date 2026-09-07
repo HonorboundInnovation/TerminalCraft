@@ -64,9 +64,13 @@ public class BashShell implements ShellCommandModule.Context {
     private int scriptDepth = 0;
     private TerminalHost host;
     private DeviceCallContext deviceCallContext = DeviceCallContext.readOnly("local-shell");
+    private java.util.UUID remoteTarget;
+    private com.malice.terminalcraft.device.PrincipalIdentity remoteCaller;
+    private boolean remoteCommandExecution;
     private transient com.malice.terminalcraft.device.DeviceAccess cachedDeviceAccess;
     private transient DeviceCallContext cachedDeviceContext;
     private boolean diskMounted = false;
+    private String mountedMediaToken = "";
     private static final String DISK_MOUNT = "/disk";
 
     /** Interactive multi-line editor session (edit/nano). */
@@ -84,6 +88,20 @@ public class BashShell implements ShellCommandModule.Context {
     private boolean substitutionCapturing;
     private List<String> substitutionOutput = new ArrayList<>();
     private Integer lastSubstitutionExitCode;
+
+    private CompoundTag preservedUnreadableSnapshot;
+
+    /** Keeps the original persistence payload out of normal runtime mutation and client views. */
+    public synchronized void preserveUnreadableSnapshot(CompoundTag original) {
+        load(new BashShell().save());
+        preservedUnreadableSnapshot = original.copy();
+        output.clear();
+        println("Filesystem recovery required. Original saved data retained; execution disabled.");
+    }
+
+    public synchronized boolean isFileRecoveryRequired() {
+        return preservedUnreadableSnapshot != null;
+    }
 
     public BashShell() {
         env.put("HOME", "/home/player");
@@ -162,7 +180,7 @@ public class BashShell implements ShellCommandModule.Context {
     public synchronized CompletionResult complete(String line, int cursor) {
         String safeLine = line == null ? "" : line;
         int safeCursor = Math.max(0, Math.min(safeLine.length(), cursor));
-        if (editor.active) {
+        if (editor.active || remoteTarget != null) {
             return new CompletionResult(safeLine, safeCursor, safeCursor, safeCursor, List.of());
         }
 
@@ -314,6 +332,33 @@ public class BashShell implements ShellCommandModule.Context {
         lastExitCode = exitCode;
     }
 
+    @Override public synchronized boolean connectRemoteShell(java.util.UUID rack) {
+        if (remoteCommandExecution || host == null || remoteTarget != null) return false;
+        // A normal authenticated read verifies admission without inventing client-side credentials.
+        if (!OperationsCommandModule.callRemote(this, rack, "pwd") || lastExitCode != 0) return false;
+        remoteTarget = rack;
+        remoteCaller = deviceCallContext.principal();
+        println("Connected to rack " + rack + ". Commands run remotely; exit or rsh disconnect returns locally.");
+        return true;
+    }
+
+    private void disconnectRemoteShell() { remoteTarget = null; remoteCaller = null; }
+
+    private void executeConnectedCommand(String command) {
+        if (!deviceCallContext.principal().equals(remoteCaller)) {
+            disconnectRemoteShell();
+            println("rsh: caller changed; disconnected without executing the command");
+            lastExitCode = 1;
+        } else if (command.equals("exit") || command.equals("rsh disconnect")) {
+            disconnectRemoteShell();
+            println("rsh: disconnected; local terminal restored");
+            lastExitCode = 0;
+        } else if (!OperationsCommandModule.callRemote(this, remoteTarget, command)) {
+            disconnectRemoteShell();
+            println("rsh: remote access unavailable; disconnected (command was not retried locally)");
+        }
+    }
+
     /** Executes one interactive command with a server-authenticated device caller context. */
     public synchronized void execute(String rawLine, DeviceCallContext context) {
         DeviceCallContext previous = deviceCallContext;
@@ -327,18 +372,24 @@ public class BashShell implements ShellCommandModule.Context {
 
     /** Interactive entry point used by trusted local/test callers with read-only device access. */
     public synchronized void execute(String rawLine) {
+        if (isFileRecoveryRequired()) {
+            println("Filesystem recovery required; command refused. Original saved data retained.");
+            lastExitCode = 1;
+            trimOutput();
+            return;
+        }
         ensureBooted();
         String line = rawLine == null ? "" : rawLine;
+        if (editor.active) {
+            handleEditorInput(line.replace("\r", ""));
+            trimOutput();
+            return;
+        }
         if (line.length() > Config.maxCommandLength) {
             line = line.substring(0, Config.maxCommandLength);
         }
         line = line.replace("\r", "");
 
-        if (editor.active) {
-            handleEditorInput(line);
-            trimOutput();
-            return;
-        }
         // Full-screen programs accept only their typed action packet surface. A forged command
         // packet must not escape back into the shell while the Control Center is active.
         if (controlCenter.active() || hmiProgram.active()) {
@@ -358,7 +409,8 @@ public class BashShell implements ShellCommandModule.Context {
             while (commandHistory.size() > 50) {
                 commandHistory.removeFirst();
             }
-            runScriptText(trimmed);
+            if (remoteTarget != null) executeConnectedCommand(trimmed);
+            else runScriptText(trimmed);
         }
         printPromptLine();
         trimOutput();
@@ -399,9 +451,11 @@ public class BashShell implements ShellCommandModule.Context {
         return editor.dirty;
     }
 
+    public synchronized boolean isEditorRecoveryRequired() { return editor.recoveryRequired; }
+
     /** Complete editor buffer for the dedicated GUI. */
     public synchronized String getEditorText() {
-        return String.join("\n", editor.lines);
+        return String.join("\n", editor.lines) + (editor.finalNewline ? "\n" : "");
     }
 
     /**
@@ -409,16 +463,20 @@ public class BashShell implements ShellCommandModule.Context {
      * authoritative over paths, VFS limits, mounted-media synchronization, and persistence.
      */
     public synchronized boolean saveEditorFromGui(String content, boolean closeAfterSave) {
+        if (isFileRecoveryRequired()) return false;
         if (!editor.active) {
             return false;
         }
+        if (rejectUnsafeEditorSave()) return false;
         String normalized = content == null ? "" : content.replace("\r\n", "\n").replace('\r', '\n');
         if (normalized.length() > 64 * 1024) {
-            println("edit: file too large to save (64KiB max)");
+            println("edit: file too large to save (65,536 characters max)");
             lastExitCode = 1;
             return false;
         }
-        String[] incoming = normalized.split("\n", -1);
+        boolean finalNewline = normalized.endsWith("\n");
+        String body = finalNewline ? normalized.substring(0, normalized.length() - 1) : normalized;
+        String[] incoming = body.split("\n", -1);
         if (incoming.length > MAX_EDITOR_LINES) {
             println("edit: too many lines (" + MAX_EDITOR_LINES + " max)");
             lastExitCode = 1;
@@ -433,6 +491,7 @@ public class BashShell implements ShellCommandModule.Context {
         }
         editor.lines.clear();
         java.util.Collections.addAll(editor.lines, incoming);
+        editor.finalNewline = finalNewline;
         if (editor.lines.isEmpty()) editor.lines.add("");
         editor.cursor = Math.max(0, editor.lines.size() - 1);
         editor.dirty = true;
@@ -487,8 +546,31 @@ public class BashShell implements ShellCommandModule.Context {
         }
     }
 
+    /** Command-only remote execution does not open full-screen programs on the shared rack. */
+    public synchronized ShellCommandResult executeRemoteForResult(String text, DeviceCallContext context) {
+        if (editor.active || controlCenter.active() || hmiProgram.active())
+            return new ShellCommandResult(1, List.of("rsh: rack is in a local full-screen program; close it at the rack first"));
+        boolean previous = remoteCommandExecution;
+        remoteCommandExecution = true;
+        try { return executeForResult(text, context); }
+        finally { remoteCommandExecution = previous; }
+    }
+
+    private boolean requireLocalScreen() {
+        if (!remoteCommandExecution) return true;
+        println("rsh: this full-screen program requires the local rack screen; command sessions do not forward its UI");
+        lastExitCode = 1;
+        return false;
+    }
+
     /** Run multi-line script text without mutating the prompt. */
     public synchronized int runScriptText(String text) {
+        if (isFileRecoveryRequired()) {
+            println("Filesystem recovery required; script refused. Original saved data retained.");
+            lastExitCode = 1;
+            trimOutput();
+            return 1;
+        }
         boolean outermost = executionDepth == 0;
         if (outermost) controlSignal = ControlSignal.NONE;
         executionDepth++;
@@ -1594,6 +1676,7 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void cmdControlCenter(List<String> args) {
+        if (!requireLocalScreen()) return;
         if (args.size() == 1 && ("help".equalsIgnoreCase(args.get(0))
                 || "--help".equalsIgnoreCase(args.get(0))
                 || "-h".equalsIgnoreCase(args.get(0)))) {
@@ -1611,6 +1694,7 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void cmdAdvancedHmi(List<String> args) {
+        if (!requireLocalScreen()) return;
         if (args.size() == 1 && ("help".equalsIgnoreCase(args.get(0))
                 || "--help".equalsIgnoreCase(args.get(0))
                 || "-h".equalsIgnoreCase(args.get(0)))) {
@@ -1775,6 +1859,10 @@ public class BashShell implements ShellCommandModule.Context {
         println("  monitor                     Control an adjacent monitor");
         println("  modem / rednet              Configure wireless and wired networking");
         println("  server / jobs               Submit and inspect server-rack jobs");
+        println("  server remote               Configure local rack remote access");
+        println("  service                     Define and manage recurring rack commands");
+        println("  rsh <rack-uuid> '<command>'  Run a command on an authorized rack");
+        println("  rsh connect <rack-uuid>     Connect until exit/rsh disconnect");
         println("  mount / umount              Mount or unmount a floppy at /disk");
         println("  disk                        Show disk status, label, or sync");
         println("");
@@ -1863,26 +1951,34 @@ public class BashShell implements ShellCommandModule.Context {
             return;
         }
         diskMounted = true;
+        mountedMediaToken = host.diskMediaToken();
         String label = host.getDiskLabel();
         println("mounted '" + label + "' on " + DISK_MOUNT);
         lastExitCode = 0;
     }
 
     private void cmdUmount(List<String> args) {
+        boolean discard = args.equals(List.of("--discard"));
+        if (!args.isEmpty() && !discard) {
+            println("usage: umount [--discard]");
+            lastExitCode = 2;
+            return;
+        }
         if (!diskMounted && !vfs.isDirectory(DISK_MOUNT)) {
             println("umount: " + DISK_MOUNT + " not mounted");
             lastExitCode = 1;
             return;
         }
-        // Flush changes back to media when a host/drive is available
-        if (host != null && host.hasDiskMedia()) {
-            CompoundTag exported = vfs.exportMount(DISK_MOUNT);
-            if (exported != null) {
-                host.writeDiskMedia(exported);
-            }
+        // Keep the mounted copy recoverable unless the physical media accepts it.
+        // An absent drive or rejected write must never turn unmount into silent data loss.
+        if (!discard && !syncMountedDiskSilent()) {
+            println("umount: media missing, changed, or write failed; /disk retained. Recover files before umount --discard.");
+            lastExitCode = 1;
+            return;
         }
         vfs.unmountDisk(DISK_MOUNT);
         diskMounted = false;
+        mountedMediaToken = "";
         // If cwd was under /disk, bounce home
         if (cwd.equals(DISK_MOUNT) || cwd.startsWith(DISK_MOUNT + "/")) {
             cwd = env.getOrDefault("HOME", "/home/player");
@@ -1942,9 +2038,8 @@ public class BashShell implements ShellCommandModule.Context {
                 lastExitCode = 1;
                 return;
             }
-            CompoundTag exported = vfs.exportMount(DISK_MOUNT);
-            if (exported == null || !host.writeDiskMedia(exported)) {
-                println("disk: sync failed");
+            if (!syncMountedDiskSilent()) {
+                println("disk: sync failed (media changed, unavailable, or write rejected); /disk retained");
                 lastExitCode = 1;
                 return;
             }
@@ -2176,6 +2271,7 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private void cmdEdit(List<String> args) {
+        if (!requireLocalScreen()) return;
         if (editor.active) {
             println("edit: already editing " + editor.path);
             lastExitCode = 1;
@@ -2196,49 +2292,41 @@ public class BashShell implements ShellCommandModule.Context {
             lastExitCode = 1;
             return;
         }
-        openEditor(path);
-        lastExitCode = 0;
+        lastExitCode = openEditor(path) ? 0 : 1;
     }
 
-    private void openEditor(String path) {
+    private boolean openEditor(String path) {
+        String existing = vfs.readFile(path);
+        String normalized = existing == null ? "" : existing.replace("\r\n", "\n").replace('\r', '\n');
+        boolean finalNewline = normalized.endsWith("\n");
+        String body = finalNewline ? normalized.substring(0, normalized.length() - 1) : normalized;
+        String[] lines = body.split("\n", -1);
+        if (normalized.length() > 64 * 1024 || lines.length > MAX_EDITOR_LINES
+                || java.util.Arrays.stream(lines).anyMatch(line -> line.length() > MAX_EDITOR_LINE_LEN)) {
+            println("edit: file exceeds editor limits (64Ki characters, 512 lines, 512 characters per line); file unchanged");
+            return false;
+        }
         editor.active = true;
+        editor.recoveryRequired = false;
         editor.path = path;
         editor.lines.clear();
         editor.cursor = 0;
         editor.dirty = false;
-
-        String existing = vfs.readFile(path);
-        if (existing != null) {
-            String normalized = existing.replace("\r\n", "\n").replace('\r', '\n');
-            if (normalized.endsWith("\n") && normalized.length() > 0) {
-                normalized = normalized.substring(0, normalized.length() - 1);
-            }
-            if (normalized.isEmpty()) {
-                editor.lines.add("");
-            } else {
-                for (String ln : normalized.split("\n", -1)) {
-                    if (editor.lines.size() >= MAX_EDITOR_LINES) {
-                        break;
-                    }
-                    if (ln.length() > MAX_EDITOR_LINE_LEN) {
-                        ln = ln.substring(0, MAX_EDITOR_LINE_LEN);
-                    }
-                    editor.lines.add(ln);
-                }
-            }
-        } else {
-            // New file buffer
-            editor.lines.add("");
-            editor.dirty = true;
-        }
+        editor.finalNewline = finalNewline;
+        java.util.Collections.addAll(editor.lines, lines);
+        if (existing == null) editor.dirty = true;
         editor.cursor = Math.max(0, editor.lines.size() - 1);
         renderEditorBuffer(true);
+        return true;
     }
 
     private void handleEditorInput(String rawLine) {
         String line = rawLine == null ? "" : rawLine;
         if (line.length() > MAX_EDITOR_LINE_LEN) {
-            line = line.substring(0, MAX_EDITOR_LINE_LEN);
+            println("edit: line too long (512 characters max); buffer unchanged");
+            lastExitCode = 1;
+            printEditorPrompt();
+            return;
         }
 
         // Colon-commands drive the editor (vim-lite / nano-ish hybrid).
@@ -2254,6 +2342,11 @@ public class BashShell implements ShellCommandModule.Context {
         }
 
         // Append typed line to the buffer.
+        if (editor.recoveryRequired) {
+            rejectUnsafeEditorSave();
+            printEditorPrompt();
+            return;
+        }
         if (editor.cursor >= editor.lines.size() - 1) {
             // Replace trailing empty seed line once the user starts typing,
             // then append subsequent lines.
@@ -2268,6 +2361,7 @@ public class BashShell implements ShellCommandModule.Context {
             editor.cursor++;
         }
         editor.dirty = true;
+        editor.finalNewline = true; // A submitted line terminates with a newline.
 
         // Echo the accepted line into scrollback so players can see what they typed.
         String num = String.format("%3d", editor.cursor + 1);
@@ -2348,7 +2442,15 @@ public class BashShell implements ShellCommandModule.Context {
         lastExitCode = 1;
     }
 
+    private boolean rejectUnsafeEditorSave() {
+        if (!editor.recoveryRequired) return false;
+        println("edit: restored buffer is incomplete or malformed; saving disabled. Copy visible text for recovery, then discard and reopen the original file.");
+        lastExitCode = 1;
+        return true;
+    }
+
     private boolean saveEditor(String maybePath) {
+        if (rejectUnsafeEditorSave()) return false;
         String path = editor.path;
         if (maybePath != null && !maybePath.isBlank()) {
             path = vfs.resolve(cwd, maybePath);
@@ -2364,14 +2466,9 @@ public class BashShell implements ShellCommandModule.Context {
             return false;
         }
 
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < editor.lines.size(); i++) {
-            sb.append(editor.lines.get(i));
-            sb.append('\n');
-        }
-        String content = sb.toString();
+        String content = getEditorText();
         if (content.length() > 64 * 1024) {
-            println("edit: file too large to save (64KiB max)");
+            println("edit: file too large to save (65,536 characters max)");
             lastExitCode = 1;
             return false;
         }
@@ -2405,16 +2502,14 @@ public class BashShell implements ShellCommandModule.Context {
             return false;
         }
         CompoundTag exported = vfs.exportMount(DISK_MOUNT);
-        return exported != null && host.writeDiskMedia(exported);
+        if (exported == null || !host.writeDiskMediaIfUnchanged(mountedMediaToken, exported)) return false;
+        mountedMediaToken = host.diskMediaToken();
+        return true;
     }
 
     private void closeEditor(boolean afterSave) {
         String path = editor.path;
-        editor.active = false;
-        editor.path = null;
-        editor.lines.clear();
-        editor.cursor = 0;
-        editor.dirty = false;
+        editor.close();
         if (afterSave) {
             println("edit: closed " + path);
         } else {
@@ -3075,12 +3170,38 @@ public class BashShell implements ShellCommandModule.Context {
         if (args.isEmpty() || "help".equals(args.get(0))) {
             println("turtle forward|back|up|down|left|right|turn left|turn right");
             println("turtle dig [side] | place [side] | inspect [side] | facing");
+            println("turtle inventory | select <1-16> | fuel | refuel [1-64]");
             lastExitCode = 0;
             return;
         }
         String op = args.get(0).toLowerCase(Locale.ROOT);
         boolean ok;
         switch (op) {
+            case "inventory", "fuel" -> {
+                if (args.size() != 1) {
+                    println("turtle: usage: turtle " + op);
+                    lastExitCode = 2;
+                } else {
+                    if ("fuel".equals(op)) println(host.turtleFuel());
+                    else host.turtleInventory().forEach(this::println);
+                    lastExitCode = 0;
+                }
+                return;
+            }
+            case "select", "refuel" -> {
+                boolean selecting = "select".equals(op);
+                int value;
+                try {
+                    if (args.size() > 2 || (selecting && args.size() != 2)) throw new NumberFormatException();
+                    value = args.size() == 2 ? Integer.parseInt(args.get(1)) : 1;
+                    if (value < 1 || value > (selecting ? 16 : 64)) throw new NumberFormatException();
+                } catch (NumberFormatException invalid) {
+                    println("turtle: usage: turtle " + (selecting ? "select <1-16>" : "refuel [1-64]"));
+                    lastExitCode = 2;
+                    return;
+                }
+                ok = selecting ? host.turtleSelect(value) : host.turtleRefuel(value);
+            }
             case "forward", "fd", "f" -> ok = host.turtleForward();
             case "back", "bk", "b" -> ok = host.turtleBack();
             case "up", "u" -> ok = host.turtleUp();
@@ -3728,6 +3849,7 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     private String prompt() {
+        if (remoteTarget != null) return "rsh[" + remoteTarget.toString().substring(0, 8) + "]$ ";
         String user = env.getOrDefault("USER", "player");
         String shortCwd = cwd;
         String home = env.getOrDefault("HOME", "/home/player");
@@ -3778,6 +3900,16 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     public synchronized CompoundTag save() {
+        if (preservedUnreadableSnapshot != null) return preservedUnreadableSnapshot.copy();
+        return saveSnapshot(false);
+    }
+
+    /** Display-only snapshot: never copy the filesystem or private environment to the client. */
+    public synchronized CompoundTag saveClientView() {
+        return saveSnapshot(true);
+    }
+
+    private CompoundTag saveSnapshot(boolean clientView) {
         CompoundTag tag = new CompoundTag();
         PersistedDataVersions.stampCurrent(tag);
         tag.putString("Cwd", cwd);
@@ -3786,31 +3918,44 @@ public class BashShell implements ShellCommandModule.Context {
 
         CompoundTag envTag = new CompoundTag();
         for (Map.Entry<String, String> e : env.entrySet()) {
-            envTag.putString(e.getKey(), e.getValue());
+            if (!clientView) envTag.putString(e.getKey(), e.getValue());
         }
         tag.put("Env", envTag);
 
         ListTag outTag = new ListTag();
-        for (String line : output) {
-            outTag.add(StringTag.valueOf(line));
+        int remaining = 64_000;
+        for (int index = output.size() - 1; index >= 0; index--) {
+            String line = output.get(index);
+            if (clientView) {
+                if (remaining <= 0) break;
+                line = PersistedDataLimits.truncate(line, Math.min(remaining, PersistedDataLimits.MAX_OUTPUT_LINE_CHARS));
+                remaining -= Math.max(1, line.length());
+            }
+            outTag.add(0, StringTag.valueOf(line));
         }
         tag.put("Output", outTag);
 
         ListTag histTag = new ListTag();
+        int historyIndex = 0;
         for (String h : commandHistory) {
-            histTag.add(StringTag.valueOf(h));
+            if (!clientView || historyIndex++ >= commandHistory.size() - PersistedDataLimits.MAX_HISTORY_ENTRIES)
+                histTag.add(StringTag.valueOf(clientView ? PersistedDataLimits.truncate(h,
+                        PersistedDataLimits.MAX_HISTORY_LINE_CHARS) : h));
         }
         tag.put("History", histTag);
         tag.put("ControlCenter", controlCenter.save());
         tag.put("HmiProgram", hmiProgram.save());
         tag.put("Surface", terminalSurface.save(new CompoundTag()));
-        tag.put("Vfs", vfs.save());
+        if (!clientView) tag.put("Vfs", vfs.save());
         tag.putBoolean("DiskMounted", diskMounted);
+        if (!clientView && diskMounted && !mountedMediaToken.isEmpty()) tag.putString("MountedMediaToken", mountedMediaToken);
         tag.putBoolean("EditorActive", editor.active);
         if (editor.path != null) {
             tag.putString("EditorPath", editor.path);
         }
         tag.putBoolean("EditorDirty", editor.dirty);
+        tag.putBoolean("EditorRecoveryRequired", editor.recoveryRequired);
+        tag.putBoolean("EditorFinalNewline", editor.finalNewline);
         tag.putInt("EditorCursor", editor.cursor);
         ListTag edLines = new ListTag();
         for (String ln : editor.lines) {
@@ -3822,6 +3967,8 @@ public class BashShell implements ShellCommandModule.Context {
     }
 
     public synchronized void load(CompoundTag tag) {
+        disconnectRemoteShell();
+        preservedUnreadableSnapshot = null;
         cwd = PersistedDataLimits.readString(tag, "Cwd", PersistedDataLimits.MAX_PATH_CHARS,
                 "/home/player");
         if (cwd.isEmpty() || !cwd.startsWith("/")) {
@@ -3877,27 +4024,41 @@ public class BashShell implements ShellCommandModule.Context {
         }
         vfs.installMachinePrograms();
         diskMounted = tag.contains("DiskMounted") && tag.getBoolean("DiskMounted");
+        mountedMediaToken = PersistedDataLimits.readString(tag, "MountedMediaToken", 128, "");
         if (!diskMounted && vfs.isDirectory(DISK_MOUNT)) {
             diskMounted = true;
         }
 
         editor.active = tag.contains("EditorActive") && tag.getBoolean("EditorActive");
+        editor.recoveryRequired = tag.getBoolean("EditorRecoveryRequired");
+        if (editor.active && (!tag.contains("EditorPath", Tag.TAG_STRING)
+                || !tag.getString("EditorPath").startsWith("/")
+                || tag.getString("EditorPath").length() > PersistedDataLimits.MAX_PATH_CHARS)) {
+            editor.recoveryRequired = true;
+        }
         editor.path = tag.contains("EditorPath", Tag.TAG_STRING)
                 ? PersistedDataLimits.readString(tag, "EditorPath",
                 PersistedDataLimits.MAX_PATH_CHARS, null) : null;
         editor.dirty = tag.contains("EditorDirty") && tag.getBoolean("EditorDirty");
+        editor.finalNewline = !tag.contains("EditorFinalNewline") || tag.getBoolean("EditorFinalNewline");
         editor.cursor = tag.contains("EditorCursor") ? tag.getInt("EditorCursor") : 0;
         editor.lines.clear();
         if (tag.contains("EditorLines", Tag.TAG_LIST)) {
             ListTag edLines = tag.getList("EditorLines", Tag.TAG_STRING);
+            if (edLines.size() > MAX_EDITOR_LINES || edLines.isEmpty()) editor.recoveryRequired = true;
             for (int i = 0; i < edLines.size() && i < MAX_EDITOR_LINES; i++) {
                 String ln = edLines.getString(i);
+                if (ln.contains("\n") || ln.contains("\r")) editor.recoveryRequired = true;
                 if (ln.length() > MAX_EDITOR_LINE_LEN) {
+                    editor.recoveryRequired = true;
                     ln = ln.substring(0, MAX_EDITOR_LINE_LEN);
                 }
                 editor.lines.add(ln);
             }
+        } else if (editor.active) {
+            editor.recoveryRequired = true;
         }
+        if (editor.active && getEditorText().length() > 64 * 1024) editor.recoveryRequired = true;
         if (editor.active && editor.lines.isEmpty()) {
             editor.lines.add("");
         }
@@ -3905,10 +4066,7 @@ public class BashShell implements ShellCommandModule.Context {
             editor.cursor = Math.max(0, editor.lines.size() - 1);
         }
         if (!editor.active) {
-            editor.path = null;
-            editor.dirty = false;
-            editor.lines.clear();
-            editor.cursor = 0;
+            editor.close();
         }
         ensureBooted();
     }

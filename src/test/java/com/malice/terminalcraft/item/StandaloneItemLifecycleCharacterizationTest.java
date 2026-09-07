@@ -117,8 +117,10 @@ public final class StandaloneItemLifecycleCharacterizationTest {
                 PersistedDataVersions.read(stored), "nested floppy VFS version");
         assertTrue(!stored.contains("/wrong-type"), "wrong-type floppy node removed");
         assertTrue(!stored.contains("relative"), "relative floppy node removed");
+        BashShell.VirtualFileSystem decoded = new BashShell.VirtualFileSystem();
+        decoded.load(stored);
         assertEquals(PersistedDataLimits.MAX_VFS_FILE_CHARS,
-                stored.getCompound("/000-huge").getString("Data").length(),
+                decoded.readFile("/000-huge").length(),
                 "oversized floppy file truncated");
     }
 

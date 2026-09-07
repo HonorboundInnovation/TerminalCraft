@@ -89,6 +89,7 @@ public final class MonitorDeviceEndpointTest {
                 registry.call(id, "lines.get", List.of()), "unloaded monitor");
 
         assertReentrantSurfaceImport();
+        assertReentrantLineMirrorPreservesCells();
         assertSharedSurfaceRefreshPreservesCellColors();
         assertAtomicFullColorFrame();
 
@@ -108,6 +109,19 @@ public final class MonitorDeviceEndpointTest {
         holder[0].descriptor();
         assertEquals(List.of("changed"), monitor.surface.lines(),
                 "re-entrant surface import completes");
+    }
+
+    private static void assertReentrantLineMirrorPreservesCells() {
+        ReentrantMonitor monitor = new ReentrantMonitor();
+        MonitorDeviceEndpoint endpoint = new MonitorDeviceEndpoint(UUID.randomUUID(),
+                "minecraft:overworld:7,64,8", monitor, () -> true, () -> true);
+        monitor.mirrorCallback = endpoint::descriptor;
+        endpoint.call("term.set_cursor_pos", List.of(DeviceValue.of(1), DeviceValue.of(1)));
+        assertTrue(endpoint.call("term.blit", List.of(DeviceValue.of("ABCD"),
+                DeviceValue.of("0123"), DeviceValue.of("4567"))).isSuccess(), "reentrant blit succeeds");
+        assertEquals("ABCD", monitor.surface.line(1).substring(0, 4),
+                "event callbacks during partial line mirroring must not erase authoritative cells");
+        assertEquals(2, monitor.surface.foregroundAt(2, 0), "reentrant mirroring preserves colors");
     }
 
     private static void assertSharedSurfaceRefreshPreservesCellColors() {
@@ -194,6 +208,7 @@ public final class MonitorDeviceEndpointTest {
     private static final class ReentrantMonitor implements MonitorDevice {
         private final List<String> lines = new ArrayList<>(List.of("boot"));
         private final ReentrantSurface surface = new ReentrantSurface();
+        private Runnable mirrorCallback = () -> {};
         private String title = "Monitor";
         private int foreground = 0x66FF99;
         private int background = 0x050A05;
@@ -209,6 +224,12 @@ public final class MonitorDeviceEndpointTest {
             lines.set(row, text);
         }
         @Override public TerminalBuffer terminalSurface() { return surface; }
+        @Override public void setLineFromSurface(int row, String text) {
+            // Model a wall publishing after its first tile is mirrored, before its second tile.
+            setLine(row, text.substring(0, Math.min(2, text.length())));
+            mirrorCallback.run();
+            setLine(row, text);
+        }
         @Override public int foregroundColor() { return foreground; }
         @Override public int backgroundColor() { return background; }
         @Override public void setPalette(int foreground, int background) {

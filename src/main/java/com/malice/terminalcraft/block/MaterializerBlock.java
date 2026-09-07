@@ -22,7 +22,26 @@ import org.jetbrains.annotations.Nullable;
 
 /** Read-only output port for pulling items and fluids from an adjacent NAS. */
 public final class MaterializerBlock extends BaseEntityBlock {
-    public MaterializerBlock() { super(BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_PURPLE).strength(2.0f, 4.0f).requiresCorrectToolForDrops().isRedstoneConductor((s,l,p)->false)); }
+    private static final net.minecraft.world.phys.shapes.VoxelShape SHAPE = net.minecraft.world.phys.shapes.Shapes.or(
+            net.minecraft.world.level.block.Block.box(0, 0, 0, 16, 1, 16),
+            net.minecraft.world.level.block.Block.box(1, 1, 1, 15, 3, 15),
+            net.minecraft.world.level.block.Block.box(2, 3, 2, 4, 14, 4),
+            net.minecraft.world.level.block.Block.box(12, 3, 2, 14, 14, 4),
+            net.minecraft.world.level.block.Block.box(2, 3, 12, 4, 14, 14),
+            net.minecraft.world.level.block.Block.box(12, 3, 12, 14, 14, 14),
+            net.minecraft.world.level.block.Block.box(2, 14, 2, 14, 16, 4),
+            net.minecraft.world.level.block.Block.box(2, 14, 12, 14, 16, 14),
+            net.minecraft.world.level.block.Block.box(2, 14, 4, 4, 16, 12),
+            net.minecraft.world.level.block.Block.box(12, 14, 4, 14, 16, 12),
+            net.minecraft.world.level.block.Block.box(5, 5, 5, 11, 13, 11),
+            net.minecraft.world.level.block.Block.box(6, 3, 6, 10, 5, 10));
+
+    public MaterializerBlock() { super(BlockBehaviour.Properties.of().mapColor(MapColor.COLOR_PURPLE).strength(2.0f, 4.0f).requiresCorrectToolForDrops().noOcclusion().isRedstoneConductor((s,l,p)->false)); }
+    @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return SHAPE;
+    }
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
     @Nullable @Override public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new MaterializerBlockEntity(pos, state); }
     @Nullable @Override public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) { return null; }

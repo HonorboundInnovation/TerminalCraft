@@ -52,6 +52,7 @@ final class PlcShellCommandModule implements ShellCommandModule {
                 context.printLine("plc alarm|acknowledge | plc page <0|1|2|3|next|previous>");
                 context.printLine("plc slot save|load|clear <0-3>");
                 context.printLine("plc remote open <x> <y> <z>");
+                context.printLine("plc remote load <name|uuid> <file>");
                 context.printLine("plc template categories | list [category] | show|load <name>");
                 context.setExitCode(0);
             }
@@ -86,7 +87,13 @@ final class PlcShellCommandModule implements ShellCommandModule {
             }
             case "start", "run" -> {
                 if (!controller.compileError().isEmpty()) fail(context, "plc: " + controller.compileError());
-                else { controller.start(); context.printLine("plc: running"); context.setExitCode(0); }
+                else {
+                    controller.start();
+                    if (!controller.isRunning()) fail(context, controller.controllerFault().isEmpty()
+                            ? "plc: no runnable program" : "plc: " + controller.controllerFault()
+                            + "; restore inputs, then reset before running");
+                    else { context.printLine("plc: running"); context.setExitCode(0); }
+                }
             }
             case "stop", "halt" -> { controller.stop(); context.printLine("plc: stopped"); context.setExitCode(0); }
             case "reset" -> { controller.resetController(); context.printLine("plc: runtime reset"); context.setExitCode(0); }
@@ -155,8 +162,39 @@ final class PlcShellCommandModule implements ShellCommandModule {
     }
 
     private static void handleRemote(Context context, List<String> arguments) {
+        if (arguments.size() > 1 && "load".equalsIgnoreCase(arguments.get(1))) {
+            if (arguments.size() != 4) {
+                fail(context, "plc: usage: plc remote load <name|uuid> <file>");
+                return;
+            }
+            var host = context.worldHost();
+            if (host == null || context.callerContext() == null) {
+                fail(context, "plc: remote loading requires a server terminal session");
+                return;
+            }
+            String source = context.readFile(arguments.get(3));
+            if (source == null) {
+                fail(context, "plc: file not found: " + arguments.get(3));
+                return;
+            }
+            // Pass the complete file as one typed device argument. Re-parsing it as
+            // shell text would split multiline PLC instructions into commands.
+            var outcome = com.malice.terminalcraft.device.DeviceShellCommand.execute(
+                    host.deviceAccess(context.callerContext()),
+                    List.of("call", arguments.get(2), "program.set", source), selector -> {
+                        try { return java.util.UUID.fromString(selector); }
+                        catch (IllegalArgumentException invalid) {
+                            return com.malice.terminalcraft.network.RednetNetwork.resolveAddress(host.getLevel(), selector)
+                                    .map(com.malice.terminalcraft.network.RednetAddress::deviceId).orElse(null);
+                        }
+                    });
+            if (outcome.exitCode() == 0) context.printLine("plc: remote program compiled and loaded");
+            else outcome.lines().forEach(context::printLine);
+            context.setExitCode(outcome.exitCode());
+            return;
+        }
         if (arguments.size() != 5 || !"open".equalsIgnoreCase(arguments.get(1))) {
-            fail(context, "plc: usage: plc remote open <x> <y> <z>");
+            fail(context, "plc: usage: plc remote open <x> <y> <z> | plc remote load <name|uuid> <file>");
             return;
         }
         int x;

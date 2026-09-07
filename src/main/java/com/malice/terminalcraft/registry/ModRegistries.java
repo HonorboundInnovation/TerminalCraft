@@ -146,9 +146,9 @@ public final class ModRegistries {
 
     // Items
     public static final RegistryObject<Item> TERMINAL_ITEM = ITEMS.register("terminal",
-            () -> new BlockItem(TERMINAL_BLOCK.get(), new Item.Properties()));
+            () -> new com.malice.terminalcraft.item.ComputerBlockItem(TERMINAL_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> TURTLE_ITEM = ITEMS.register("turtle",
-            () -> new BlockItem(TURTLE_BLOCK.get(), new Item.Properties()));
+            () -> new com.malice.terminalcraft.item.ComputerBlockItem(TURTLE_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> MONITOR_ITEM = ITEMS.register("monitor",
             () -> new BlockItem(MONITOR_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> MODEM_ITEM = ITEMS.register("modem",
@@ -168,7 +168,7 @@ public final class ModRegistries {
     public static final RegistryObject<Item> NETWORK_ROUTER_ITEM = ITEMS.register("network_router",
             () -> new BlockItem(NETWORK_ROUTER_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> SERVER_RACK_ITEM = ITEMS.register("server_rack",
-            () -> new BlockItem(SERVER_RACK_BLOCK.get(), new Item.Properties()));
+            () -> new com.malice.terminalcraft.item.ComputerBlockItem(SERVER_RACK_BLOCK.get(), new Item.Properties()));
     public static final RegistryObject<Item> REFINED_STORAGE_BRIDGE_ITEM = ITEMS.register(
             "refined_storage_bridge",
             () -> new BlockItem(REFINED_STORAGE_BRIDGE_BLOCK.get(), new Item.Properties()));
@@ -282,6 +282,9 @@ public final class ModRegistries {
             BLOCK_ENTITIES.register("materializer",
                     () -> BlockEntityType.Builder.of(MaterializerBlockEntity::new, MATERIALIZER_BLOCK.get()).build(null));
 
+    public static final RegistryObject<MenuType<com.malice.terminalcraft.menu.TurtleInventoryMenu>> TURTLE_INVENTORY_MENU =
+            MENUS.register("turtle_inventory", () -> net.minecraftforge.common.extensions.IForgeMenuType.create(
+                    com.malice.terminalcraft.menu.TurtleInventoryMenu::fromNetwork));
     public static final RegistryObject<MenuType<TerminalMenu>> TERMINAL_MENU = MENUS.register("terminal",
             () -> IForgeMenuType.create(TerminalMenu::fromNetwork));
     public static final RegistryObject<MenuType<DisplayDiagnosticsMenu>> DISPLAY_DIAGNOSTICS_MENU = MENUS.register(

@@ -35,7 +35,7 @@ import java.util.UUID;
 public class NetworkAccessStorageBlockEntity extends BlockEntity implements GenericCapabilityDevice {
     public static final int DRIVE_SLOTS = NasStorage.DRIVE_SLOTS;
     private UUID deviceId = DeviceIdentity.create();
-    private final NasStorage storage = new NasStorage(this::storageChanged);
+    private final NasStorage storage = new NasStorage(this::storageChanged, () -> !isRemoved());
     private LazyOptional<IItemHandler> itemOptional = LazyOptional.of(storage::itemHandler);
     private LazyOptional<IFluidHandler> fluidOptional = LazyOptional.of(storage::fluidHandler);
 

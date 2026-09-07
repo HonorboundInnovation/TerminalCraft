@@ -16,7 +16,6 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ContainerLevelAccess;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -32,7 +31,6 @@ public class TerminalMenu extends AbstractContainerMenu {
     public static final byte TYPE_PLC = 2;
 
     private final ShellComputer computer;
-    private final ContainerLevelAccess access;
     private final Block validBlock;
     private final boolean pocket;
     private final InteractionHand pocketHand;
@@ -65,11 +63,6 @@ public class TerminalMenu extends AbstractContainerMenu {
         this.validBlock = validBlock;
         this.pocket = pocket;
         this.pocketHand = pocketHand;
-        if (pocket) {
-            this.access = ContainerLevelAccess.NULL;
-        } else {
-            this.access = ContainerLevelAccess.create(computer.getLevel(), computer.getBlockPos());
-        }
     }
 
     public static TerminalMenu fromNetwork(int containerId, Inventory playerInventory, FriendlyByteBuf buf) {
@@ -102,6 +95,14 @@ public class TerminalMenu extends AbstractContainerMenu {
     }
 
     public ShellComputer getComputer() {
+        // Movement carries the same live shell to a new turtle entity. Follow that exact
+        // session, never a replacement block that happens to occupy the old position.
+        if (computer instanceof TurtleBlockEntity original
+                && original.getShell().getHost() instanceof TurtleBlockEntity current
+                && current.getShell() == original.getShell()
+                && current.getDeviceId().equals(original.getDeviceId())) {
+            return current;
+        }
         return computer;
     }
 
@@ -119,7 +120,7 @@ public class TerminalMenu extends AbstractContainerMenu {
     }
 
     public BashShell getShell() {
-        return computer.getShell();
+        return getComputer().getShell();
     }
 
     /** Execute a command line on the bound shell (server-side authority). */
@@ -127,8 +128,8 @@ public class TerminalMenu extends AbstractContainerMenu {
         if (line == null) {
             return;
         }
-        computer.getShell().execute(line, context);
-        computer.markShellChanged();
+        getShell().execute(line, context);
+        getComputer().markShellChanged();
     }
 
     @Override
@@ -144,6 +145,15 @@ public class TerminalMenu extends AbstractContainerMenu {
             }
             return pocketComputer.isStillHolding() && player == pocketComputer.getPlayer();
         }
-        return stillValid(access, player, validBlock);
+        ShellComputer current = getComputer();
+        if (current instanceof BlockEntity entity) {
+            var level = entity.getLevel();
+            var pos = entity.getBlockPos();
+            return level != null && level == player.level() && !entity.isRemoved()
+                    && level.hasChunkAt(pos) && level.getBlockEntity(pos) == entity
+                    && level.getBlockState(pos).is(validBlock)
+                    && player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) <= 64.0;
+        }
+        return false;
     }
 }

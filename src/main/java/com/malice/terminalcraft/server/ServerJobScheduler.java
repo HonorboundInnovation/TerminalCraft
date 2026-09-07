@@ -99,6 +99,11 @@ public final class ServerJobScheduler {
     }
 
     private final LinkedHashMap<UUID, Job> jobs = new LinkedHashMap<>();
+    private final java.util.function.Supplier<RackResourcePolicy> policy;
+    public ServerJobScheduler() { this(() -> RackResourcePolicy.DEFAULT); }
+    public ServerJobScheduler(java.util.function.Supplier<RackResourcePolicy> policy) {
+        this.policy = java.util.Objects.requireNonNull(policy);
+    }
     private PrincipalIdentity lastServedOwner;
     private Diagnostics diagnostics = new Diagnostics(-1, 0, 0, 0, 0, 0, 0, 0);
 
@@ -123,12 +128,13 @@ public final class ServerJobScheduler {
         long active = jobs.values().stream()
                 .filter(job -> job.state == State.QUEUED || job.state == State.RUNNING)
                 .count();
-        if (active >= MAX_JOBS) throw new IllegalStateException("server job queue is full");
+        RackResourcePolicy limits = policy.get();
+        if (active >= limits.jobs()) throw new IllegalStateException("server job queue policy limit reached");
         long ownedActive = jobs.values().stream()
                 .filter(job -> (job.state == State.QUEUED || job.state == State.RUNNING)
                         && job.context.principal().equals(context.principal()))
                 .count();
-        if (ownedActive >= MAX_ACTIVE_JOBS_PER_OWNER) {
+        if (ownedActive >= limits.jobsPerOwner()) {
             throw new IllegalStateException("owner server job quota exceeded");
         }
         UUID jobId = UUID.randomUUID();
@@ -185,7 +191,7 @@ public final class ServerJobScheduler {
 
     /** Executes callbacks outside the scheduler monitor and commits only if cancellation did not win. */
     public int tickSteps(long gameTime, int budget, Function<Job, StepResult> executor) {
-        int boundedBudget = Math.max(0, Math.min(budget, MAX_TICK_BUDGET));
+        int boundedBudget = Math.max(0, Math.min(budget, policy.get().jobsPerTick()));
         int executed = 0;
         while (executed < boundedBudget && executor != null) {
             Job running;
@@ -288,12 +294,7 @@ public final class ServerJobScheduler {
             tag.putUUID("Id", job.id);
             tag.putUUID("ProcessId", job.process.id());
             tag.putString("ProcessName", job.process.name());
-            tag.putUUID("PrincipalId", job.context.principalId());
-            tag.putString("PrincipalKind", job.context.principalKind().serializedName());
-            tag.putString("Owner", job.owner());
-            ListTag permissions = new ListTag();
-            job.context.permissions().stream().sorted().map(StringTag::valueOf).forEach(permissions::add);
-            tag.put("Permissions", permissions);
+            saveContext(tag, job.context);
             tag.putString("Command", job.command);
             tag.putString("State", job.state.name());
             tag.putInt("ExitCode", job.exitCode);
@@ -346,7 +347,16 @@ public final class ServerJobScheduler {
         pruneFinished();
     }
 
-    private static DeviceCallContext loadContext(CompoundTag tag) {
+    static void saveContext(CompoundTag tag, DeviceCallContext context) {
+        tag.putUUID("PrincipalId", context.principalId());
+        tag.putString("PrincipalKind", context.principalKind().serializedName());
+        tag.putString("Owner", context.principalName());
+        ListTag permissions = new ListTag();
+        context.permissions().stream().sorted().map(StringTag::valueOf).forEach(permissions::add);
+        tag.put("Permissions", permissions);
+    }
+
+    static DeviceCallContext loadContext(CompoundTag tag) {
         UUID principalId = tag.hasUUID("PrincipalId") ? tag.getUUID("PrincipalId") : new UUID(0L, 0L);
         String owner = tag.getString("Owner");
         if (owner.isBlank()) owner = "unknown";

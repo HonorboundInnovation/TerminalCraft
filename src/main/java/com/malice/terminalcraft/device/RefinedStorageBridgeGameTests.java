@@ -29,6 +29,55 @@ public final class RefinedStorageBridgeGameTests {
     private RefinedStorageBridgeGameTests() {}
 
     @GameTest(template = "empty", timeoutTicks = 200)
+    public static void explicitCraftingRequestsProduceTheirFullQuantities(GameTestHelper helper) {
+        var controller = ForgeRegistries.BLOCKS.getValue(new net.minecraft.resources.ResourceLocation("refinedstorage", "creative_controller"));
+        var storage = ForgeRegistries.BLOCKS.getValue(new net.minecraft.resources.ResourceLocation("refinedstorage", "1k_storage_block"));
+        var crafter = ForgeRegistries.BLOCKS.getValue(new net.minecraft.resources.ResourceLocation("refinedstorage", "crafter"));
+        helper.assertTrue(controller != null && storage != null && crafter != null, "native crafting fixture blocks exist");
+        helper.setBlock(NODE, controller);
+        helper.setBlock(NODE.above(), storage);
+        helper.setBlock(NODE.east(), crafter);
+        var pattern = new ItemStack(ForgeRegistries.ITEMS.getValue(new net.minecraft.resources.ResourceLocation("refinedstorage", "pattern")));
+        com.refinedmods.refinedstorage.item.PatternItem.setToCurrentVersion(pattern);
+        com.refinedmods.refinedstorage.item.PatternItem.setInputSlot(pattern, 0, new ItemStack(Items.OAK_LOG));
+        com.refinedmods.refinedstorage.item.PatternItem.setOutputSlot(pattern, 0, new ItemStack(Items.OAK_PLANKS, 4));
+        var crafterNode = ((INetworkNodeProxy<?>) helper.getBlockEntity(NODE.east())).getNode();
+        helper.assertTrue(crafterNode instanceof com.refinedmods.refinedstorage.api.autocrafting.ICraftingPatternContainer, "crafter exposes public pattern container");
+        ((com.refinedmods.refinedstorage.api.autocrafting.ICraftingPatternContainer) crafterNode).getPatternInventory().setStackInSlot(0, pattern);
+        boolean[] inserted = {false};
+        boolean[] submitted = {false};
+        UUID[] nativeJobs = new UUID[2];
+        var receipts = CraftingCompletionSavedData.get(helper.getLevel().getServer());
+        helper.succeedWhen(() -> {
+            var network = ((INetworkNodeProxy<?>) helper.getBlockEntity(NODE)).getNode().getNetwork();
+            helper.assertTrue(network != null && network.canRun(), "native crafting network online");
+            if (!inserted[0]) {
+                var remainder = network.insertItem(new ItemStack(Items.OAK_LOG, 4), 4, Action.PERFORM);
+                helper.assertTrue(remainder.isEmpty() || remainder.getCount() == 4, "fixture ingredients accepted together");
+                inserted[0] = remainder.isEmpty();
+                helper.assertTrue(inserted[0], "storage ready for ingredients");
+            }
+            var manager = network.getCraftingManager();
+            helper.assertTrue(manager.getPattern(new ItemStack(Items.OAK_PLANKS)) != null, "native log-to-planks recipe available");
+            if (!submitted[0]) {
+                submitted[0] = true;
+                var first = com.malice.terminalcraft.integration.refinedstorage.NativeCraftingSubmission.createAndStart(manager, new ItemStack(Items.OAK_PLANKS), 8, receipts::record);
+                var second = com.malice.terminalcraft.integration.refinedstorage.NativeCraftingSubmission.createAndStart(manager, new ItemStack(Items.OAK_PLANKS), 8, receipts::record);
+                nativeJobs[0] = first;
+                nativeJobs[1] = second;
+                helper.assertTrue(first != null && second != null && !first.equals(second), "two explicit requests create distinct full-quantity jobs");
+            }
+            var output = network.extractItem(new ItemStack(Items.OAK_PLANKS), 64, Action.SIMULATE);
+            helper.assertTrue(output.getCount() == 16, "both eight-plank requests complete: " + output.getCount());
+            helper.assertTrue(Boolean.TRUE.equals(receipts.outcome(nativeJobs[0])) && Boolean.TRUE.equals(receipts.outcome(nativeJobs[1])), "explicit native completion receipts retained");
+            helper.assertTrue(manager.getTask(nativeJobs[0]) == null && manager.getTask(nativeJobs[1]) == null, "completion remains known after native tasks leave active list");
+            var restored = CraftingCompletionSavedData.load(receipts.save(new net.minecraft.nbt.CompoundTag()));
+            helper.assertTrue(Boolean.TRUE.equals(restored.outcome(nativeJobs[0])), "completed receipt survives saved-data reload");
+            helper.assertTrue(network.extractItem(new ItemStack(Items.OAK_LOG), 64, Action.SIMULATE).isEmpty(), "four recipe inputs consumed");
+        });
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 200)
     public static void dedicatedBridgeAttachesReadOnlyToOneAdjacentNetwork(GameTestHelper helper) {
         if (!ModList.get().isLoaded("refinedstorage")) {
             helper.succeed();
@@ -40,6 +89,7 @@ public final class RefinedStorageBridgeGameTests {
         Block storage = ForgeRegistries.BLOCKS.getValue(
                 new net.minecraft.resources.ResourceLocation("refinedstorage", "1k_storage_block"));
         helper.assertTrue(storage != null, "Refined Storage 1K item storage block is required");
+        helper.setBlock(HOST, ModRegistries.TERMINAL_BLOCK.get());
         helper.setBlock(BRIDGE, ModRegistries.REFINED_STORAGE_BRIDGE_BLOCK.get());
         helper.setBlock(NODE, controller);
         helper.setBlock(NODE.above(), storage);
@@ -93,6 +143,11 @@ public final class RefinedStorageBridgeGameTests {
             String count = ((DeviceValue.StringValue) diamond.values().get("count")).value();
             helper.assertTrue("37".equals(count),
                     "network item telemetry must preserve the exact aggregate count, got " + count);
+
+            var terminal = (com.malice.terminalcraft.blockentity.TerminalBlockEntity) helper.getBlockEntity(HOST);
+            var shellCount = terminal.getShell().executeForResult("storage count " + candidate.id() + " minecraft:diamond", context);
+            helper.assertTrue(shellCount.succeeded() && shellCount.outputLines().stream().anyMatch(line -> line.contains("37")),
+                    "normal terminal command reads the attached native storage: " + shellCount);
 
             DeviceResult denied = access.call(candidate.id(), "storage.extract",
                     List.of(DeviceValue.of("minecraft:stone"), DeviceValue.of(1)));

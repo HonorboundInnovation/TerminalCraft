@@ -50,7 +50,6 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
     public static final DirectionProperty FACE = DirectionProperty.create("face");
     public static final IntegerProperty LANE = IntegerProperty.create("lane", 0, 3);
     public static final IntegerProperty COLOR = IntegerProperty.create("color", 0, 15);
-    public static final IntegerProperty POWER = IntegerProperty.create("power", 0, 15);
     public static final int MAX_COMPONENT_SIZE = 4096;
     private static final ThreadLocal<Boolean> UPDATING = ThreadLocal.withInitial(() -> false);
 
@@ -64,12 +63,14 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
                 .noCollission().noOcclusion());
         registerDefaultState(CableShapeSupport.disconnected(stateDefinition.any()
                 .setValue(FACE, Direction.UP).setValue(LANE, 0)
-                .setValue(COLOR, DyeColor.RED.getId()).setValue(POWER, 0)));
+                .setValue(COLOR, DyeColor.RED.getId())));
     }
 
     @Override
     protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-        builder.add(FACE, LANE, COLOR, POWER, CableShapeSupport.DOWN, CableShapeSupport.UP,
+        // Signal strength belongs to each persisted block-entity run. Projecting it into
+        // blockstate multiplies this table by 16 (393,216 states) during every startup.
+        builder.add(FACE, LANE, COLOR, CableShapeSupport.DOWN, CableShapeSupport.UP,
                 CableShapeSupport.NORTH, CableShapeSupport.SOUTH,
                 CableShapeSupport.WEST, CableShapeSupport.EAST);
     }
@@ -347,11 +348,9 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
             }
             return maximum;
         }
-        return isOutputDirection(state.getValue(FACE), direction) ? state.getValue(POWER) : 0;
-    }
-
-    private static boolean isOutputDirection(Direction face, Direction direction) {
-        return face != null && direction != null && face.getAxis() != direction.getAxis();
+        // A missing block entity has no authoritative live signal. Saved RunPower/FacePower
+        // is restored by the block entity and reconciled with the circuit on load.
+        return 0;
     }
 
     public static String diagnostic(BlockGetter level, BlockPos pos, @Nullable Target target) {
@@ -401,8 +400,7 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
 
     public static BlockState renderState(BlockGetter level, BlockPos pos, Direction face, int lane, int color) {
         BlockState state = ModRegistries.RED_ALLOY_WIRE_BLOCK.get().defaultBlockState()
-                .setValue(FACE, face).setValue(LANE, 0).setValue(COLOR, color)
-                .setValue(POWER, power(level, pos, face, lane));
+                .setValue(FACE, face).setValue(LANE, 0).setValue(COLOR, color);
         if (!(level instanceof LevelAccessor accessor)) return state;
         int route = visibleRoute(level, pos, face, lane, color);
         for (Direction direction : Direction.values()) {
@@ -486,6 +484,7 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
                 || !(level.getBlockEntity(start) instanceof RedAlloyWireBlockEntity startWire)) return;
         Set<Node> processed = new HashSet<>();
         Set<BlockPos> changedPositions = new HashSet<>();
+        Set<BlockPos> signalChanges = new HashSet<>();
         UPDATING.set(true);
         try {
             for (RedAlloyWireBlockEntity.Run startRun : startWire.runs()) {
@@ -496,7 +495,9 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
                 Map<Node, Integer> powers = propagate(level, component, true, null);
                 for (Node node : component) {
                     if (level.getBlockEntity(node.pos()) instanceof RedAlloyWireBlockEntity wire) {
-                        wire.setPower(node.face(), node.lane(), powers.getOrDefault(node, 0));
+                        int nextPower = powers.getOrDefault(node, 0);
+                        if (wire.power(node.face(), node.lane()) != nextPower) signalChanges.add(node.pos());
+                        wire.setPower(node.face(), node.lane(), nextPower);
                         changedPositions.add(node.pos());
                     }
                 }
@@ -506,6 +507,11 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
             }
         } finally {
             UPDATING.set(false);
+        }
+        // The former POWER blockstate projection also notified observers via shape updates.
+        // Preserve those notifications when the signal changes solely inside the block entity.
+        for (BlockPos pos : signalChanges) {
+            level.getBlockState(pos).updateNeighbourShapes(level, pos, Block.UPDATE_CLIENTS);
         }
         for (BlockPos pos : changedPositions) level.updateNeighborsAt(pos, ModRegistries.RED_ALLOY_WIRE_BLOCK.get());
     }
@@ -618,13 +624,16 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
         int maximum = 0;
         Set<BlockPos> componentPositions = new HashSet<>();
         for (Node member : component) componentPositions.add(member.pos());
-        for (Direction direction : SurfaceCableSupport.planeDirections(node.face())) {
+        // Vanilla sources may touch the support or outward face too. Wire-to-wire
+        // connectivity and output remain constrained to each mounted surface plane.
+        for (Direction direction : Direction.values()) {
             BlockPos neighbor = node.pos().relative(direction);
             BlockState neighborState = level.getBlockState(neighbor);
             if (neighbor.equals(excludedSource) || componentPositions.contains(neighbor)
                     || neighborState.getBlock() instanceof RedAlloyWireBlock
                     || neighborState.getBlock() instanceof BundledCableBlock) continue;
-            maximum = Math.max(maximum, level.getSignal(neighbor, direction.getOpposite()));
+            // Vanilla signal queries use the direction from the receiver toward the source.
+            maximum = Math.max(maximum, level.getSignal(neighbor, direction));
         }
         if (includeBundles && isShielded(level, node)) {
             for (Direction direction : SurfaceCableSupport.planeDirections(node.face())) {
@@ -688,8 +697,7 @@ public class RedAlloyWireBlock extends BaseEntityBlock {
     private static void syncPrimaryState(Level level, BlockPos pos, RedAlloyWireBlockEntity wire) {
         RedAlloyWireBlockEntity.Run primary = wire.runs().stream().findFirst().orElse(null);
         if (primary == null) return;
-        BlockState rendered = renderState(level, pos, primary.face(), primary.lane(), primary.color())
-                .setValue(POWER, wire.maximumPower());
+        BlockState rendered = renderState(level, pos, primary.face(), primary.lane(), primary.color());
         if (!level.getBlockState(pos).equals(rendered)) level.setBlock(pos, rendered, Block.UPDATE_CLIENTS);
     }
 

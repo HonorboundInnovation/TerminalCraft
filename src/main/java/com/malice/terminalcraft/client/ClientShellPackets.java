@@ -12,6 +12,14 @@ import net.minecraft.nbt.CompoundTag;
 public final class ClientShellPackets {
     private ClientShellPackets() {}
 
+    public static void applyCompletion(com.malice.terminalcraft.network.RemoteCompletionPackets.Response response) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player != null && mc.player.containerMenu instanceof TerminalMenu menu
+                && menu.containerId == response.container() && mc.screen instanceof TerminalScreen screen) {
+            screen.applyCompletion(response);
+        }
+    }
+
     public static void applyShell(int containerId, CompoundTag shellTag) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player != null && mc.player.containerMenu instanceof TerminalMenu menu

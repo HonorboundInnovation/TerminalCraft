@@ -81,19 +81,22 @@ public final class TerminalChunkLoaderGameTests {
         UUID terminalId = UUID.randomUUID();
         BlockPos first = helper.absolutePos(new BlockPos(2, 2, 2));
         BlockPos moved = first.offset(32, 0, 0);
+        int firstOwners = TerminalChunkLoader.trackedOwners(level, first);
+        int movedOwners = TerminalChunkLoader.trackedOwners(level, moved);
 
         TerminalChunkLoader.ensureLoaded(level, first, terminalId);
-        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, first) == 1,
+        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, first) == firstOwners + 1,
                 "initial chunk must track the terminal identity once");
 
         TerminalChunkLoader.ensureLoaded(level, moved, terminalId);
-        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, first) == 0,
+        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, first) == firstOwners,
                 "moving one stable identity must release its previous chunk ownership");
-        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, moved) == 1,
+        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, moved) == movedOwners + 1,
                 "moved identity must be tracked exactly once in its new chunk");
 
         TerminalChunkLoader.terminalRemoved(level, terminalId);
-        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, moved) == 0,
+        helper.assertTrue(TerminalChunkLoader.trackedOwners(level, moved) == movedOwners
+                        && !TerminalChunkLoader.tracksTerminal(level, terminalId),
                 "final removal must leave no relocated ownership record");
         helper.succeed();
     }

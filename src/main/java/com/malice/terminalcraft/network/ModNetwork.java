@@ -32,7 +32,16 @@ import java.util.function.Supplier;
  * Networking for terminal command submission and shell state sync.
  */
 public final class ModNetwork {
-    private static final String PROTOCOL = "6";
+    private static void syncTurtleViewers(ServerPlayer actor, ShellComputer computer) {
+        for (ServerPlayer viewer : actor.server.getPlayerList().getPlayers()) {
+            if (viewer.containerMenu instanceof TerminalMenu menu
+                    && menu.getShell() == computer.getShell() && menu.stillValid(viewer)) {
+                syncShellTo(viewer, computer.getShell());
+            }
+        }
+    }
+
+    private static final String PROTOCOL = "8";
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(TerminalCraftMod.MODID, "main"),
             () -> PROTOCOL,
@@ -57,6 +66,7 @@ public final class ModNetwork {
 
     public static synchronized void register() {
         if (registered) return;
+        RemoteCompletionPackets.register();
         CHANNEL.registerMessage(
                 RUN_COMMAND_PACKET_ID,
                 RunCommandPacket.class,
@@ -403,7 +413,7 @@ public final class ModNetwork {
     }
 
     public static boolean syncShellTo(ServerPlayer player, BashShell shell) {
-        CompoundTag snapshot = shell.save();
+        CompoundTag snapshot = shell.saveClientView();
         if (!ShellSyncPolicy.isAdmissible(snapshot)) return false;
         CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                 new ShellSyncPacket(player.containerMenu.containerId, snapshot));
@@ -457,9 +467,11 @@ public final class ModNetwork {
                         Set.of(DeviceCallContext.READ, DeviceCallContext.WRITE));
                 menu.submitCommand(pkt.command, deviceContext);
                 ShellComputer computer = menu.getComputer();
-                if (computer instanceof PocketShellComputer
+                if (computer instanceof com.malice.terminalcraft.blockentity.TurtleBlockEntity) {
+                    syncTurtleViewers(player, computer);
+                } else if (computer instanceof PocketShellComputer
                         || computer.getShell().isControlCenterActive()) {
-                    // Pocket state lives on the item stack; push shell NBT to client GUI.
+                    // Pocket files live in world data; push only the bounded shell view to its GUI.
                     // A newly-opened Control Center also needs an immediate authoritative snapshot.
                     syncShellTo(player, computer.getShell());
                 } else if (computer.getLevel() != null) {
@@ -526,12 +538,16 @@ public final class ModNetwork {
                 boolean closed = success && packet.action != EditorAction.SAVE;
                 String resultMessage = success
                         ? (packet.action == EditorAction.CLOSE ? "Changes discarded" : "Saved")
-                        : (packet.action == EditorAction.CLOSE ? "Could not close editor" : "Save failed");
+                        : (packet.action == EditorAction.CLOSE ? "Could not close editor"
+                        : shell.isEditorRecoveryRequired() ? "Incomplete restored buffer: copy text, then discard and reopen"
+                        : "Save failed");
                 CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
                         new EditorResultPacket(menu.containerId, success, closed, resultMessage));
                 if (!success) return;
                 menu.getComputer().markShellChanged();
-                if (menu.getComputer() instanceof PocketShellComputer) {
+                if (menu.getComputer() instanceof com.malice.terminalcraft.blockentity.TurtleBlockEntity) {
+                    syncTurtleViewers(player, menu.getComputer());
+                } else if (menu.getComputer() instanceof PocketShellComputer) {
                     syncShellTo(player, shell);
                 } else if (menu.getComputer().getLevel() != null) {
                     menu.getComputer().getLevel().sendBlockUpdated(menu.getComputer().getBlockPos(),

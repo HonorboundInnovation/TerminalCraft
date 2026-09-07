@@ -1,6 +1,6 @@
 {
-  "parent": "minecraft:item/generated",
+  "parent": "terminalcraft:item/rack_blade",
   "textures": {
-    "layer0": "terminalcraft:item/router_blade"
+    "front": "terminalcraft:block/network_router_face_custom"
   }
 }

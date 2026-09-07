@@ -105,9 +105,9 @@ public class TerminalBlock extends BaseEntityBlock {
     public int getSignal(BlockState state, BlockGetter level, BlockPos pos, Direction side) {
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof TerminalBlockEntity terminal) {
-            // Vanilla passes the source block face pointing toward the receiver. Terminal output
-            // directions use that same world-space convention, so this must not be inverted.
-            return terminal.getDirectSignal(side);
+            // Vanilla queries from the receiver toward this source; stored output directions
+            // point outward from the terminal toward the receiver.
+            return terminal.getDirectSignal(side.getOpposite());
         }
         return 0;
     }
@@ -143,5 +143,10 @@ public class TerminalBlock extends BaseEntityBlock {
 
     public static Block getRegistered() {
         return ModRegistries.TERMINAL_BLOCK.get();
+    }
+
+    @Override public java.util.List<net.minecraft.world.item.ItemStack> getDrops(BlockState state,
+            net.minecraft.world.level.storage.loot.LootParams.Builder context) {
+        return com.malice.terminalcraft.item.ComputerBlockItem.preserveDrops(super.getDrops(state, context), context);
     }
 }

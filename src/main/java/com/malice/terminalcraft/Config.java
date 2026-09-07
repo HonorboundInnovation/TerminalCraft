@@ -57,7 +57,34 @@ public final class Config {
             .comment("Maximum TerminalCraft-owned terminal chunk tickets across the server. Zero denies all terminal tickets.")
             .defineInRange("maxTerminalChunkTicketsPerServer", 64, 0, 16384);
 
+    private static final ForgeConfigSpec.IntValue RACK_MAX_JOBS = BUILDER
+            .comment("Maximum active jobs admitted per rack. Zero prevents new jobs; saved jobs are retained.")
+            .defineInRange("rackMaxJobs", 128, 0, 128);
+    private static final ForgeConfigSpec.IntValue RACK_MAX_JOBS_PER_OWNER = BUILDER
+            .comment("Maximum active jobs admitted per owner on a rack.")
+            .defineInRange("rackMaxJobsPerOwner", 32, 0, 32);
+    private static final ForgeConfigSpec.IntValue RACK_MAX_JOBS_PER_TICK = BUILDER
+            .comment("Upper cap on rack job slices per tick; installed blades still supply the actual capacity. Zero pauses execution without deleting work.")
+            .defineInRange("rackMaxJobsPerTick", 64, 0, 64);
+    private static final ForgeConfigSpec.IntValue RACK_MAX_SERVICES = BUILDER
+            .comment("Maximum new service definitions per rack. Existing definitions survive lower limits.")
+            .defineInRange("rackMaxServices", 32, 0, 32);
+    private static final ForgeConfigSpec.IntValue RACK_MAX_SERVICES_PER_OWNER = BUILDER
+            .comment("Maximum service definitions per owner per rack.")
+            .defineInRange("rackMaxServicesPerOwner", 8, 0, 8);
+    private static final ForgeConfigSpec.IntValue RACK_MINIMUM_SERVICE_INTERVAL = BUILDER
+            .comment("Minimum game ticks between recurring service runs, including existing definitions.")
+            .defineInRange("rackMinimumServiceInterval", 1, 1, 12096000);
+    private static final ForgeConfigSpec.BooleanValue RACK_REMOTE_SHELL_ENABLED = BUILDER
+            .comment("Server-wide permission to use rack remote shells. Each rack still defaults off and requires owner authorization.")
+            .define("rackRemoteShellEnabled", true);
+    private static final ForgeConfigSpec.IntValue RACK_REMOTE_OUTPUT_CHARACTERS = BUILDER
+            .comment("Maximum characters returned by each remote shell command. Truncation is reported.")
+            .defineInRange("rackRemoteOutputCharacters", 4096, 32, 4096);
+
     static final ForgeConfigSpec SPEC = BUILDER.build();
+    private static volatile com.malice.terminalcraft.server.RackResourcePolicy rackPolicy = com.malice.terminalcraft.server.RackResourcePolicy.DEFAULT;
+    public static com.malice.terminalcraft.server.RackResourcePolicy rackResourcePolicy() { return rackPolicy; }
 
     public static int maxHistoryLines = 200;
     public static boolean showWelcomeBanner = true;
@@ -81,6 +108,7 @@ public final class Config {
 
     @SubscribeEvent
     static void onLoad(final ModConfigEvent event) {
+        if (event.getConfig().getSpec() != SPEC) return;
         maxHistoryLines = MAX_HISTORY_LINES.get();
         showWelcomeBanner = SHOW_WELCOME_BANNER.get();
         maxCommandLength = MAX_COMMAND_LENGTH.get();
@@ -92,5 +120,9 @@ public final class Config {
         terminalChunkLoading = TERMINAL_CHUNK_LOADING.get();
         maxTerminalChunkTicketsPerDimension = MAX_TERMINAL_CHUNK_TICKETS_PER_DIMENSION.get();
         maxTerminalChunkTicketsPerServer = MAX_TERMINAL_CHUNK_TICKETS_PER_SERVER.get();
+        rackPolicy = new com.malice.terminalcraft.server.RackResourcePolicy(
+                RACK_MAX_JOBS.get(), RACK_MAX_JOBS_PER_OWNER.get(), RACK_MAX_JOBS_PER_TICK.get(),
+                RACK_MAX_SERVICES.get(), RACK_MAX_SERVICES_PER_OWNER.get(), RACK_MINIMUM_SERVICE_INTERVAL.get(),
+                RACK_REMOTE_SHELL_ENABLED.get(), RACK_REMOTE_OUTPUT_CHARACTERS.get());
     }
 }

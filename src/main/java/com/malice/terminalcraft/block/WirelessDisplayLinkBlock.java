@@ -23,6 +23,21 @@ import org.jetbrains.annotations.Nullable;
 
 /** Wireless display endpoint. Sneak-right-click source then receiver to pair them. */
 public class WirelessDisplayLinkBlock extends BaseEntityBlock {
+    private static final net.minecraft.world.phys.shapes.VoxelShape MODEL_SHAPE = net.minecraft.world.phys.shapes.Shapes.or(
+            net.minecraft.world.level.block.Block.box(0, 0, 0, 16, 1, 16),
+            net.minecraft.world.level.block.Block.box(2, 1, 2, 14, 4, 14),
+            net.minecraft.world.level.block.Block.box(4, 4, 4, 12, 8, 12),
+            net.minecraft.world.level.block.Block.box(5, 8, 5, 11, 12, 11),
+            net.minecraft.world.level.block.Block.box(6, 12, 6, 10, 14, 10),
+            net.minecraft.world.level.block.Block.box(7, 14, 7, 9, 15, 9),
+            net.minecraft.world.level.block.Block.box(6, 15, 6, 10, 16, 10));
+
+    @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return MODEL_SHAPE;
+    }
+
     public WirelessDisplayLinkBlock() {
         super(BlockBehaviour.Properties.of().mapColor(net.minecraft.world.level.material.MapColor.COLOR_LIGHT_BLUE)
                 .strength(1.5f, 3.0f).requiresCorrectToolForDrops().noOcclusion());

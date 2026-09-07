@@ -1,22 +1,47 @@
 {
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
   "textures": {
-    "face": "terminalcraft:block/terminal_front_custom"
+    "particle": "#casing",
+    "casing": "terminalcraft:block/terminal_side",
+    "front": "terminalcraft:block/terminal_front_custom"
   },
   "elements": [
     {
       "from": [
         1,
         9,
-        -0.5
+        0.25
       ],
       "to": [
         15,
         15,
-        0.5
+        1
       ],
       "faces": {
+        "down": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
         "north": {
-          "texture": "#face"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
+        },
+        "south": {
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "east": {
+          "texture": "#casing"
         }
       }
     }

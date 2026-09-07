@@ -30,6 +30,14 @@ import com.malice.terminalcraft.registry.ModRegistries;
  */
 public class MonitorBlock extends BaseEntityBlock {
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
+    private static final net.minecraft.world.phys.shapes.VoxelShape NORTH_SHAPE =
+            net.minecraft.world.phys.shapes.Shapes.or(Block.box(0, 0, 0, 16, 16, 3), Block.box(1, 1, 3, 15, 15, 4));
+    private static final net.minecraft.world.phys.shapes.VoxelShape SOUTH_SHAPE =
+            net.minecraft.world.phys.shapes.Shapes.or(Block.box(0, 0, 13, 16, 16, 16), Block.box(1, 1, 12, 15, 15, 13));
+    private static final net.minecraft.world.phys.shapes.VoxelShape EAST_SHAPE =
+            net.minecraft.world.phys.shapes.Shapes.or(Block.box(13, 0, 0, 16, 16, 16), Block.box(12, 1, 1, 13, 15, 15));
+    private static final net.minecraft.world.phys.shapes.VoxelShape WEST_SHAPE =
+            net.minecraft.world.phys.shapes.Shapes.or(Block.box(0, 0, 0, 3, 16, 16), Block.box(3, 1, 1, 4, 15, 15));
 
     public MonitorBlock() {
         super(BlockBehaviour.Properties.of()
@@ -53,6 +61,28 @@ public class MonitorBlock extends BaseEntityBlock {
     @Override
     public RenderShape getRenderShape(BlockState state) {
         return RenderShape.MODEL;
+    }
+
+    @Override
+    public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return switch (state.getValue(FACING)) {
+            case SOUTH -> SOUTH_SHAPE;
+            case EAST -> EAST_SHAPE;
+            case WEST -> WEST_SHAPE;
+            default -> NORTH_SHAPE;
+        };
+    }
+
+    @Override
+    public BlockState rotate(BlockState state, net.minecraft.world.level.block.Rotation rotation) {
+        return state.setValue(FACING, rotation.rotate(state.getValue(FACING)));
+    }
+
+    @Override
+    public BlockState mirror(BlockState state, net.minecraft.world.level.block.Mirror mirror) {
+        return state.rotate(mirror.getRotation(state.getValue(FACING)));
     }
 
     @Nullable

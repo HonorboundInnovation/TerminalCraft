@@ -34,7 +34,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 import java.util.UUID;
 
-/** Handheld bash computer with shell state and a built-in wireless modem stored on item NBT. */
+/** Handheld computer with world-backed files and item-backed label/modem settings. */
 public class PocketTerminalItem extends Item {
     public static final String TAG_SHELL = "Shell";
     public static final String TAG_LABEL = "Label";
@@ -89,6 +89,9 @@ public class PocketTerminalItem extends Item {
     }
 
     public static BashShell loadShell(ItemStack stack) {
+        if (stack.getTag() != null && stack.getTag().contains(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)) {
+            throw new IllegalStateException("World-backed pocket files require server-world lookup");
+        }
         BashShell shell = new BashShell();
         CompoundTag tag = stack.getTag();
         if (tag != null && tag.contains(TAG_SHELL, CompoundTag.TAG_COMPOUND)) {
@@ -98,6 +101,9 @@ public class PocketTerminalItem extends Item {
     }
 
     public static void saveShell(ItemStack stack, BashShell shell) {
+        if (stack.getTag() != null && stack.getTag().contains(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)) {
+            throw new IllegalStateException("World-backed pocket files must be saved through the server host");
+        }
         CompoundTag tag = stack.getOrCreateTag();
         PersistedDataVersions.stampCurrent(tag);
         tag.put(TAG_SHELL, shell.save());
@@ -139,13 +145,18 @@ public class PocketTerminalItem extends Item {
     }
 
     private static void openTerminal(ServerPlayer serverPlayer, InteractionHand hand, BlockPos boundSensor) {
+        PocketShellComputer computer = new PocketShellComputer(serverPlayer, hand, boundSensor);
+        if (computer.storageError() != null) {
+            serverPlayer.sendSystemMessage(Component.literal("Pocket: " + computer.storageError()));
+            return;
+        }
         MenuProvider provider = new MenuProvider() {
             @Override public Component getDisplayName() {
                 return Component.translatable("item.terminalcraft.pocket_terminal");
             }
 
             @Override public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player p) {
-                return new TerminalMenu(containerId, inventory, new PocketShellComputer(p, hand, boundSensor));
+                return new TerminalMenu(containerId, inventory, computer);
             }
         };
 
@@ -155,6 +166,9 @@ public class PocketTerminalItem extends Item {
             buf.writeBoolean(boundSensor != null);
             if (boundSensor != null) buf.writeBlockPos(boundSensor);
         });
+        if (serverPlayer.containerMenu instanceof TerminalMenu menu && menu.getComputer() == computer) {
+            com.malice.terminalcraft.network.ModNetwork.syncShellTo(serverPlayer, computer.getShell());
+        }
     }
 
     @Override
@@ -162,6 +176,12 @@ public class PocketTerminalItem extends Item {
         tooltip.add(Component.literal("Label: " + getLabel(stack)));
         tooltip.add(Component.literal("Built-in wireless modem: " + getOpenChannels(stack).size() + " channel(s) open"));
         tooltip.add(Component.literal("Right-click to open bash"));
+        if (stack.getTag() != null && stack.getTag().contains(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)) {
+            tooltip.add(Component.literal("Files stored in this world; include world data in backups"));
+            if (flag.isAdvanced() && stack.getTag().hasUUID(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)) {
+                tooltip.add(Component.literal("Computer: " + stack.getTag().getUUID(com.malice.terminalcraft.persistence.PocketStorage.IDENTITY)));
+            }
+        }
         tooltip.add(Component.literal("Shift-right-click a sensor to configure or calibrate it"));
     }
 

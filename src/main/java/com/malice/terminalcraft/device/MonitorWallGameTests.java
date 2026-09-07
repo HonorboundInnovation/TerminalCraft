@@ -135,7 +135,8 @@ public final class MonitorWallGameTests {
                             && anchor.terminalSurface().characterAt(39, 0) == 'B'
                             && second.terminalSurface().characterAt(0, 0) == 'C'
                             && second.terminalSurface().characterAt(1, 0) == 'D',
-                    "wall blit must write global cells into the two persisted tile surfaces");
+                    "wall blit must write global cells into the two persisted tile surfaces: anchor="
+                            + anchor.terminalSurface().line(1) + "; second=" + second.terminalSurface().line(1));
             DeviceValue.MapValue delta = (DeviceValue.MapValue) access.call(anchor.getDeviceId(), "term.delta",
                     List.of(DeviceValue.of(before), DeviceValue.of(128))).value().orElseThrow();
             helper.assertTrue(!((DeviceValue.BooleanValue) delta.values().get("complete")).value()
@@ -182,7 +183,9 @@ public final class MonitorWallGameTests {
             DeviceAccess access = ServerDeviceManager.access(level.getServer(), DeviceCallContext.readOnly("wall-lifecycle"));
             MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
             UUID leftId = left.getDeviceId();
-            helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().containsKey("surface_revision"),
+            MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+            UUID initialAnchor = left.wallRenderState().anchor() ? leftId : right.getDeviceId();
+            helper.assertTrue(access.descriptor(initialAnchor).orElseThrow().properties().containsKey("surface_revision"),
                     "initial wall endpoint must expose its surface metadata");
             helper.setBlock(RIGHT, Blocks.AIR);
             helper.runAfterDelay(6, () -> {
@@ -191,7 +194,9 @@ public final class MonitorWallGameTests {
                         "removing a tile must rebuild the surviving endpoint to one tile");
                 helper.setBlock(RIGHT, ModRegistries.MONITOR_BLOCK.get());
                 helper.runAfterDelay(6, () -> {
-                    helper.assertTrue(access.descriptor(leftId).orElseThrow().properties().get("columns")
+                    MonitorBlockEntity replacement = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
+                    UUID currentAnchor = left.wallRenderState().anchor() ? leftId : replacement.getDeviceId();
+                    helper.assertTrue(access.descriptor(currentAnchor).orElseThrow().properties().get("columns")
                                     .equals(DeviceValue.of(80)),
                             "reforming a tile must rebuild the endpoint to the current wall width");
                     helper.succeed();
@@ -214,9 +219,8 @@ public final class MonitorWallGameTests {
             MonitorBlockEntity right = (MonitorBlockEntity) helper.getBlockEntity(RIGHT);
             MonitorBlockEntity left = (MonitorBlockEntity) helper.getBlockEntity(LEFT);
             MonitorBlockEntity anchor = left.wallRenderState().anchor() ? left : right;
-            right.publishTouch(new Vec3(helper.absolutePos(RIGHT).getX() + 0.5,
-                    helper.absolutePos(RIGHT).getY() + 0.5,
-                    helper.absolutePos(RIGHT).getZ() + 0.5), helper.makeMockPlayer());
+            MonitorBlockEntity second = anchor == left ? right : left;
+            second.publishTouch(Vec3.atCenterOf(second.getBlockPos()), helper.makeMockPlayer());
             DeviceEvent touch = registry.pollSubscription(reader, subscriptionId, 1).events().stream()
                     .findFirst().orElseThrow();
             helper.assertTrue(touch.sourceDeviceId().equals(anchor.getDeviceId()),

@@ -123,7 +123,7 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
         return SurfaceCableRouting.hasPort(route(face, lane), direction);
     }
 
-    /** Maximum is only a blockstate compatibility projection; runs remain electrically isolated. */
+    /** Diagnostic aggregate; actual output remains scoped to each electrically isolated run. */
     public int maximumPower() {
         int maximum = 0;
         for (Run run : runs()) maximum = Math.max(maximum, run.power());
@@ -292,7 +292,8 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
             colors[index(face, 0)] = SurfaceCableSupport.boundedColor(color);
             shielded[index(face, 0)] = true;
             routes[index(face, 0)] = SurfaceCableRouting.planeMask(face);
-            power[index(face, 0)] = getBlockState().getValue(RedAlloyWireBlock.POWER);
+            // No valid run payload: fail unpowered until onLoad recomputes the circuit.
+            power[index(face, 0)] = 0;
         }
         collapseToSingleRuns();
     }

@@ -3,6 +3,8 @@ package com.malice.terminalcraft.shell;
 import com.malice.terminalcraft.persistence.PersistedDataLimits;
 import com.malice.terminalcraft.persistence.PersistedDataVersions;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 
 import java.util.ArrayList;
@@ -140,7 +142,8 @@ public class VirtualFileSystem {
         if (nodes.containsKey(mount)) {
             return false;
         }
-        mkdirs(mount);
+        Map<String, Node> pending = new HashMap<>(nodes);
+        if (!stageDirectories(pending, mount)) return false;
         VirtualFileSystem tmp = new VirtualFileSystem();
         tmp.clearAll();
         tmp.load(media);
@@ -152,13 +155,13 @@ public class VirtualFileSystem {
             String dest = mount + src;
             Node n = e.getValue();
             if (n.directory) {
-                mkdirs(dest);
+                if (!stageDirectories(pending, dest)) return false;
             } else {
-                ensureParent(dest);
-                nodes.put(normalize(dest), Node.file(n.content));
+                if (!stageDirectories(pending, parentOf(dest))) return false;
+                pending.put(normalize(dest), Node.file(n.content));
             }
         }
-        return true;
+        return commitIfWithinLimits(pending);
     }
 
     /** Remove a mount point and all nested nodes. */
@@ -288,13 +291,17 @@ public class VirtualFileSystem {
         if ("/".equals(path)) {
             return false;
         }
-        ensureParent(path);
         Node n = nodes.get(path);
         if (n != null && n.directory) {
             return false;
         }
-        nodes.put(path, Node.file(content == null ? "" : content));
-        return true;
+        String data = content == null ? "" : content;
+        if (data.length() > PersistedDataLimits.MAX_VFS_FILE_CHARS
+                || path.length() > PersistedDataLimits.MAX_PATH_CHARS) return false;
+        Map<String, Node> pending = new HashMap<>(nodes);
+        if (!stageDirectories(pending, parentOf(path))) return false;
+        pending.put(path, Node.file(data));
+        return commitIfWithinLimits(pending);
     }
 
     public boolean touch(String path) {
@@ -317,14 +324,22 @@ public class VirtualFileSystem {
                 return false;
             }
         }
-        nodes.put(path, Node.dir());
-        return true;
+        Map<String, Node> pending = new HashMap<>(nodes);
+        pending.put(path, Node.dir());
+        return commitIfWithinLimits(pending);
     }
 
     public boolean mkdirs(String path) {
         path = normalize(path);
+        Map<String, Node> pending = new HashMap<>(nodes);
+        return stageDirectories(pending, path) && commitIfWithinLimits(pending);
+    }
+
+    private boolean stageDirectories(Map<String, Node> pending, String path) {
+        if (path.length() > PersistedDataLimits.MAX_PATH_CHARS) return false;
         if ("/".equals(path)) {
-            return true;
+            Node root = pending.get("/");
+            return root != null && root.directory;
         }
         String[] parts = path.split("/");
         StringBuilder cur = new StringBuilder();
@@ -334,13 +349,36 @@ public class VirtualFileSystem {
             }
             cur.append('/').append(part);
             String p = cur.toString();
-            Node n = nodes.get(p);
+            Node n = pending.get(p);
             if (n == null) {
-                nodes.put(p, Node.dir());
+                pending.put(p, Node.dir());
             } else if (!n.directory) {
                 return false;
             }
         }
+        return true;
+    }
+
+    private static String parentOf(String path) {
+        int index = path.lastIndexOf('/');
+        return index <= 0 ? "/" : path.substring(0, index);
+    }
+
+    /** Publish the whole operation only when every node can survive persistence. */
+    private boolean commitIfWithinLimits(Map<String, Node> pending) {
+        if (pending.size() > PersistedDataLimits.MAX_VFS_NODES) return false;
+        long total = 0;
+        for (Map.Entry<String, Node> entry : pending.entrySet()) {
+            if (entry.getKey().length() > PersistedDataLimits.MAX_PATH_CHARS) return false;
+            Node node = entry.getValue();
+            if (!node.directory) {
+                if (node.content.length() > PersistedDataLimits.MAX_VFS_FILE_CHARS) return false;
+                total += node.content.length();
+                if (total > PersistedDataLimits.MAX_VFS_TOTAL_CHARS) return false;
+            }
+        }
+        nodes.clear();
+        nodes.putAll(pending);
         return true;
     }
 
@@ -385,21 +423,6 @@ public class VirtualFileSystem {
         return true;
     }
 
-    private void ensureParent(String path) {
-        int idx = path.lastIndexOf('/');
-        if (idx <= 0) {
-            mkdirRaw("/");
-            return;
-        }
-        String parent = path.substring(0, idx);
-        if (parent.isEmpty()) {
-            parent = "/";
-        }
-        if (!nodes.containsKey(parent)) {
-            mkdirs(parent);
-        }
-    }
-
     private void mkdirRaw(String path) {
         nodes.put(normalize(path), Node.dir());
     }
@@ -409,14 +432,14 @@ public class VirtualFileSystem {
     }
 
     private void writeRawIfMissing(String path, String content) {
-        nodes.putIfAbsent(normalize(path), Node.file(content));
+        if (!nodes.containsKey(normalize(path))) writeFile(path, content);
     }
 
     private void installOrUpgradeBundledProgram(String path, String content, String legacyMarker) {
         String normalized = normalize(path);
         Node existing = nodes.get(normalized);
         if (existing == null || (!existing.directory && existing.content.contains(legacyMarker))) {
-            nodes.put(normalized, Node.file(content));
+            writeFile(normalized, content);
         }
     }
 
@@ -435,11 +458,11 @@ public class VirtualFileSystem {
             n.putBoolean("Dir", node.directory);
             if (!node.directory) {
                 int remaining = PersistedDataLimits.MAX_VFS_TOTAL_CHARS - totalChars;
-                if (remaining <= 0) continue;
+                if (remaining <= 0 && !node.content.isEmpty()) continue;
                 String data = PersistedDataLimits.truncate(node.content,
                         Math.min(PersistedDataLimits.MAX_VFS_FILE_CHARS, remaining));
                 totalChars += data.length();
-                n.putString("Data", data);
+                writeFileData(n, data);
             }
             tag.put(key, n);
             nodeCount++;
@@ -465,9 +488,9 @@ public class VirtualFileSystem {
                 nodes.putIfAbsent(key, Node.dir());
             } else if (n.contains("Data", Tag.TAG_STRING)) {
                 int remaining = PersistedDataLimits.MAX_VFS_TOTAL_CHARS - totalChars;
-                if (remaining <= 0) continue;
-                String data = PersistedDataLimits.readString(n, "Data",
-                        Math.min(PersistedDataLimits.MAX_VFS_FILE_CHARS, remaining), "");
+                String data = readFileData(n, Math.min(PersistedDataLimits.MAX_VFS_FILE_CHARS, remaining));
+                if (remaining <= 0 && (!n.getString("Data").isEmpty()
+                        || !n.getList("DataParts", Tag.TAG_STRING).isEmpty())) continue;
                 totalChars += data.length();
                 nodes.putIfAbsent(key, Node.file(data));
             }
@@ -475,6 +498,40 @@ public class VirtualFileSystem {
         if (!nodes.containsKey("/")) {
             resetDefaults();
         }
+    }
+
+    // NBT strings use modified UTF-8 with an unsigned-short byte length. A Java
+    // character costs at most three bytes; chunks keep even NUL/surrogates safe.
+    private static final int FILE_CHUNK_CHARS = 21_845;
+
+    private static void writeFileData(CompoundTag tag, String data) {
+        int encodedBytes = 0;
+        for (int i = 0; i < data.length(); i++) {
+            char c = data.charAt(i);
+            encodedBytes += c >= 1 && c <= 127 ? 1 : c <= 2047 ? 2 : 3;
+        }
+        if (encodedBytes <= 65_535) {
+            tag.putString("Data", data);
+            return;
+        }
+        tag.putString("Data", data.substring(0, FILE_CHUNK_CHARS));
+        ListTag parts = new ListTag();
+        for (int start = FILE_CHUNK_CHARS; start < data.length(); start += FILE_CHUNK_CHARS) {
+            parts.add(StringTag.valueOf(data.substring(start, Math.min(data.length(), start + FILE_CHUNK_CHARS))));
+        }
+        tag.put("DataParts", parts);
+        tag.putInt("ContentEncoding", 2);
+    }
+
+    private static String readFileData(CompoundTag tag, int limit) {
+        StringBuilder data = new StringBuilder(PersistedDataLimits.readString(tag, "Data", limit, ""));
+        if (tag.getInt("ContentEncoding") == 2) {
+            ListTag parts = tag.getList("DataParts", Tag.TAG_STRING);
+            for (int i = 0; i < Math.min(parts.size(), 3) && data.length() < limit; i++) {
+                data.append(PersistedDataLimits.truncate(parts.getString(i), limit - data.length()));
+            }
+        }
+        return data.toString();
     }
 
     private static final class Node {

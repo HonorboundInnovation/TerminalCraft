@@ -32,13 +32,17 @@ final class NasStorage implements GenericCapabilityDevice {
     private static final int MAX_ITEM_ENTRIES = 128;
     private static final int MAX_FLUID_ENTRIES = 16;
     private final Runnable changed;
+    private final java.util.function.BooleanSupplier available;
     private final ItemStackHandler drives = new ItemStackHandler(DRIVE_SLOTS) {
         @Override public boolean isItemValid(int slot, @NotNull ItemStack stack) { return SolidStateDriveItem.tier(stack) != null; }
         @Override public int getSlotLimit(int slot) { return 1; }
         @Override protected void onContentsChanged(int slot) { changed.run(); }
     };
 
-    NasStorage(Runnable changed) { this.changed = changed; }
+    NasStorage(Runnable changed, java.util.function.BooleanSupplier available) {
+        this.changed = changed;
+        this.available = available;
+    }
 
     ItemStack drive(int slot) { return slot < 0 || slot >= DRIVE_SLOTS ? ItemStack.EMPTY : drives.getStackInSlot(slot); }
     int installedDrives() { int n = 0; for (int i = 0; i < DRIVE_SLOTS; i++) if (tier(i) != null) n++; return n; }
@@ -47,6 +51,7 @@ final class NasStorage implements GenericCapabilityDevice {
     private SolidStateDriveTier tier(int slot) { return SolidStateDriveItem.tier(drive(slot)); }
 
     boolean insertDrive(ItemStack stack) {
+        if (!available.getAsBoolean()) return false;
         if (SolidStateDriveItem.tier(stack) == null) return false;
         for (int slot = 0; slot < DRIVE_SLOTS; slot++) if (drives.getStackInSlot(slot).isEmpty()) {
             ItemStack copy = stack.copy(); copy.setCount(1); drives.setStackInSlot(slot, copy); return true;
@@ -55,6 +60,7 @@ final class NasStorage implements GenericCapabilityDevice {
     }
 
     ItemStack ejectLastDrive() {
+        if (!available.getAsBoolean()) return ItemStack.EMPTY;
         for (int slot = DRIVE_SLOTS - 1; slot >= 0; slot--) {
             ItemStack stack = drive(slot);
             if (!stack.isEmpty()) { ItemStack result = stack.copy(); drives.setStackInSlot(slot, ItemStack.EMPTY); return result; }
@@ -89,8 +95,22 @@ final class NasStorage implements GenericCapabilityDevice {
     IFluidHandler fluidHandler() { return new StorageFluids(); }
 
     void save(CompoundTag tag) { tag.put("Drives", drives.serializeNBT()); }
-    void load(CompoundTag tag) { if (tag.contains("Drives", Tag.TAG_COMPOUND)) drives.deserializeNBT(tag.getCompound("Drives")); }
+    void load(CompoundTag tag) {
+        // The physical controller always has eight slots; never trust serialized Size.
+        for (int slot = 0; slot < DRIVE_SLOTS; slot++) drives.setStackInSlot(slot, ItemStack.EMPTY);
+        if (!tag.contains("Drives", Tag.TAG_COMPOUND)) return;
+        var entries = tag.getCompound("Drives").getList("Items", Tag.TAG_COMPOUND);
+        for (int index = 0; index < Math.min(entries.size(), 128); index++) {
+            CompoundTag entry = entries.getCompound(index);
+            int slot = entry.getInt("Slot");
+            if (slot < 0 || slot >= DRIVE_SLOTS || !drive(slot).isEmpty()) continue;
+            ItemStack stack = ItemStack.of(entry);
+            if (SolidStateDriveItem.tier(stack) == null || stack.isEmpty()) continue;
+            drives.setStackInSlot(slot, stack.copyWithCount(1));
+        }
+    }
     void drop(net.minecraft.world.level.Level level, net.minecraft.core.BlockPos pos) {
+        if (!available.getAsBoolean()) return;
         for (int slot = 0; slot < DRIVE_SLOTS; slot++) if (!drive(slot).isEmpty())
             net.minecraft.world.Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), drive(slot));
         for (int slot = 0; slot < DRIVE_SLOTS; slot++) drives.setStackInSlot(slot, ItemStack.EMPTY);
@@ -147,6 +167,7 @@ final class NasStorage implements GenericCapabilityDevice {
     @Override public TransferOutcome drainFluid(String resourceId, int amount) { net.minecraft.world.level.material.Fluid f = fluid(resourceId); if (f == null) return TransferOutcome.none(amount); int s = drain(new FluidStack(f, amount), IFluidHandler.FluidAction.SIMULATE).getAmount(), e = drain(new FluidStack(f, s), IFluidHandler.FluidAction.EXECUTE).getAmount(); return new TransferOutcome(amount, s, e); }
 
     private int insert(ItemStack requested, boolean simulate) {
+        if (!available.getAsBoolean()) return 0;
         if (requested.isEmpty() || installedDrives() == 0) return 0;
         int remaining = requested.getCount(), inserted = 0;
         for (int slot = 0; slot < DRIVE_SLOTS && remaining > 0; slot++) {
@@ -167,13 +188,17 @@ final class NasStorage implements GenericCapabilityDevice {
     }
 
     private ItemStack extract(ItemStack requested, int amount, boolean simulate) {
+        if (!available.getAsBoolean()) return ItemStack.EMPTY;
         if (requested.isEmpty() || amount < 1) return ItemStack.EMPTY;
         int remaining = amount; ItemStack result = ItemStack.EMPTY;
         for (int slot = 0; slot < DRIVE_SLOTS && remaining > 0; slot++) {
             if (tier(slot) == null) continue; List<ItemStack> entries = readItems(slot); boolean changed = false;
             for (int i = entries.size() - 1; i >= 0 && remaining > 0; i--) {
                 ItemStack entry = entries.get(i); if (!ItemStack.isSameItemSameTags(entry, requested)) continue;
-                int removed = Math.min(remaining, entry.getCount()); if (result.isEmpty()) result = entry.copy(); result.setCount(result.getCount() + removed); remaining -= removed; changed = true;
+                int removed = Math.min(remaining, entry.getCount());
+                if (result.isEmpty()) result = entry.copyWithCount(removed);
+                else result.grow(removed);
+                remaining -= removed; changed = true;
                 if (!simulate) { entry.shrink(removed); if (entry.isEmpty()) entries.remove(i); }
             }
             if (!simulate && changed) writeItems(slot, entries);
@@ -182,6 +207,7 @@ final class NasStorage implements GenericCapabilityDevice {
     }
 
     private int fill(FluidStack requested, IFluidHandler.FluidAction action) {
+        if (!available.getAsBoolean()) return 0;
         if (requested.isEmpty() || installedDrives() == 0) return 0;
         int remaining = requested.getAmount(), filled = 0;
         for (int slot = 0; slot < DRIVE_SLOTS && remaining > 0; slot++) {
@@ -202,13 +228,17 @@ final class NasStorage implements GenericCapabilityDevice {
     }
 
     private FluidStack drain(FluidStack requested, IFluidHandler.FluidAction action) {
+        if (!available.getAsBoolean()) return FluidStack.EMPTY;
         if (requested.isEmpty()) return FluidStack.EMPTY;
         int remaining = requested.getAmount(); FluidStack result = FluidStack.EMPTY;
         for (int slot = 0; slot < DRIVE_SLOTS && remaining > 0; slot++) {
             if (tier(slot) == null) continue; List<FluidStack> entries = readFluids(slot); boolean changed = false;
             for (int i = entries.size() - 1; i >= 0 && remaining > 0; i--) {
                 FluidStack entry = entries.get(i); if (!entry.isFluidEqual(requested)) continue;
-                int removed = Math.min(remaining, entry.getAmount()); if (result.isEmpty()) result = entry.copy(); result.setAmount(result.getAmount() + removed); remaining -= removed; changed = true;
+                int removed = Math.min(remaining, entry.getAmount());
+                if (result.isEmpty()) { result = entry.copy(); result.setAmount(removed); }
+                else result.grow(removed);
+                remaining -= removed; changed = true;
                 if (action.execute()) { entry.shrink(removed); if (entry.isEmpty()) entries.remove(i); }
             }
             if (action.execute() && changed) writeFluids(slot, entries);
@@ -219,17 +249,36 @@ final class NasStorage implements GenericCapabilityDevice {
     private List<ItemStack> readItems(int slot) {
         ItemStack drive = drive(slot); if (tier(slot) == null || !drive.hasTag() || !drive.getTag().contains(SolidStateDriveItem.TAG_ITEMS, Tag.TAG_LIST)) return new ArrayList<>();
         ListTag saved = drive.getTag().getList(SolidStateDriveItem.TAG_ITEMS, Tag.TAG_COMPOUND); List<ItemStack> result = new ArrayList<>();
-        for (int i = 0; i < Math.min(saved.size(), MAX_ITEM_ENTRIES); i++) { ItemStack stack = ItemStack.of(saved.getCompound(i)); if (!stack.isEmpty() && stack.getCount() > 0) result.add(stack); }
+        int remaining = tier(slot).itemCapacity();
+        for (int i = 0; i < Math.min(saved.size(), Math.min(MAX_ITEM_ENTRIES, tier(slot).itemEntries())) && remaining > 0; i++) {
+            CompoundTag entry = saved.getCompound(i);
+            ItemStack stack = ItemStack.of(entry);
+            if (stack.isEmpty()) continue;
+            int count = entry.contains("NasCount", Tag.TAG_INT) ? entry.getInt("NasCount") : stack.getCount();
+            count = Math.min(remaining, Math.max(0, count));
+            if (count == 0) continue;
+            stack.setCount(count); result.add(stack); remaining -= count;
+        }
         return result;
     }
     private void writeItems(int slot, List<ItemStack> entries) {
-        ItemStack drive = drive(slot).copy(); ListTag saved = new ListTag(); for (ItemStack stack : entries) if (!stack.isEmpty()) saved.add(stack.save(new CompoundTag()));
+        ItemStack drive = drive(slot).copy(); ListTag saved = new ListTag();
+        for (ItemStack stack : entries) if (!stack.isEmpty()) {
+            CompoundTag entry = stack.copyWithCount(1).save(new CompoundTag());
+            entry.putInt("NasCount", stack.getCount()); saved.add(entry);
+        }
         CompoundTag tag = drive.getOrCreateTag(); if (saved.isEmpty()) tag.remove(SolidStateDriveItem.TAG_ITEMS); else tag.put(SolidStateDriveItem.TAG_ITEMS, saved); drives.setStackInSlot(slot, drive);
     }
     private List<FluidStack> readFluids(int slot) {
         ItemStack drive = drive(slot); if (tier(slot) == null || !drive.hasTag() || !drive.getTag().contains(SolidStateDriveItem.TAG_FLUIDS, Tag.TAG_LIST)) return new ArrayList<>();
         ListTag saved = drive.getTag().getList(SolidStateDriveItem.TAG_FLUIDS, Tag.TAG_COMPOUND); List<FluidStack> result = new ArrayList<>();
-        for (int i = 0; i < Math.min(saved.size(), MAX_FLUID_ENTRIES); i++) { FluidStack stack = FluidStack.loadFluidStackFromNBT(saved.getCompound(i)); if (!stack.isEmpty() && stack.getAmount() > 0) result.add(stack); }
+        int remaining = tier(slot).fluidCapacityMb();
+        for (int i = 0; i < Math.min(saved.size(), Math.min(MAX_FLUID_ENTRIES, tier(slot).fluidEntries())) && remaining > 0; i++) {
+            FluidStack stack = FluidStack.loadFluidStackFromNBT(saved.getCompound(i));
+            if (stack.isEmpty() || stack.getAmount() <= 0) continue;
+            int amount = Math.min(remaining, stack.getAmount());
+            stack.setAmount(amount); result.add(stack); remaining -= amount;
+        }
         return result;
     }
     private void writeFluids(int slot, List<FluidStack> entries) {
@@ -252,7 +301,14 @@ final class NasStorage implements GenericCapabilityDevice {
         @Override public boolean isFluidValid(int tank, FluidStack stack) { return !stack.isEmpty(); }
         @Override public int fill(FluidStack resource, FluidAction action) { return NasStorage.this.fill(resource, action); }
         @Override public FluidStack drain(FluidStack resource, FluidAction action) { return NasStorage.this.drain(resource, action); }
-        @Override public FluidStack drain(int amount, FluidAction action) { List<FluidStack> entries = fluidEntries(); return entries.isEmpty() ? FluidStack.EMPTY : NasStorage.this.drain(new FluidStack(entries.get(0).getFluid(), amount), action); }
+        @Override public FluidStack drain(int amount, FluidAction action) {
+            if (amount <= 0) return FluidStack.EMPTY;
+            List<FluidStack> entries = fluidEntries();
+            if (entries.isEmpty()) return FluidStack.EMPTY;
+            FluidStack requested = entries.get(0).copy();
+            requested.setAmount(amount);
+            return NasStorage.this.drain(requested, action);
+        }
     }
 
     private static String itemId(ItemStack stack) { return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(); }

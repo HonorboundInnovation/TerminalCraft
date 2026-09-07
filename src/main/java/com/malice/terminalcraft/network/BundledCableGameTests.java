@@ -292,7 +292,6 @@ public final class BundledCableGameTests {
         helper.succeed();
     }
 
-    @GameTest(template = "empty", timeoutTicks = 60)
     private static net.minecraft.world.level.block.state.BlockState cable(Direction face) {
         return ModRegistries.BUNDLED_CABLE_BLOCK.get().defaultBlockState()
                 .setValue(BundledCableBlock.FACE, face);

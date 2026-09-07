@@ -1,1 +1,19 @@
-{"variants":{"":{"model":"terminalcraft:block/refined_storage_bridge"}}}
+{
+  "variants": {
+    "facing=north": {
+      "model": "terminalcraft:block/refined_storage_bridge"
+    },
+    "facing=east": {
+      "model": "terminalcraft:block/refined_storage_bridge",
+      "y": 90
+    },
+    "facing=south": {
+      "model": "terminalcraft:block/refined_storage_bridge",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "terminalcraft:block/refined_storage_bridge",
+      "y": 270
+    }
+  }
+}

@@ -10,6 +10,8 @@ final class ShellEditorState {
     final List<String> lines = new ArrayList<>();
     int cursor;
     boolean dirty;
+    boolean finalNewline;
+    boolean recoveryRequired;
 
     void close() {
         active = false;
@@ -17,6 +19,8 @@ final class ShellEditorState {
         lines.clear();
         cursor = 0;
         dirty = false;
+        finalNewline = false;
+        recoveryRequired = false;
     }
 
     void normalizeAfterLoad() {

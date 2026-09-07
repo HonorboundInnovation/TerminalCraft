@@ -48,17 +48,19 @@ public final class TextEditorBuffer {
         if (!selecting) anchor = cursor;
     }
 
-    public void insert(String value) {
+    /** Reject over-capacity edits atomically, including selection and undo history. */
+    public boolean insert(String value) {
         String safe = normalize(value);
-        if (safe.isEmpty() && !hasSelection()) return;
-        remember();
+        if (safe.isEmpty() && !hasSelection()) return true;
         int start = selectionStart();
         int end = selectionEnd();
         int room = MAX_LENGTH - (text.length() - (end - start));
-        if (safe.length() > room) safe = safe.substring(0, Math.max(0, room));
+        if (safe.length() > room) return false;
+        remember();
         text.replace(start, end, safe);
         cursor = anchor = start + safe.length();
         dirty = true;
+        return true;
     }
 
     public void backspace() {

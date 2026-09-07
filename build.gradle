@@ -41,10 +41,31 @@ def sophisticatedModsDir = providers.gradleProperty('terminalcraft.sophisticated
 def storageDrawersModsDir = providers.gradleProperty('terminalcraft.storageDrawersModsDir').orNull
 def refinedStorageModsDir = providers.gradleProperty('terminalcraft.refinedStorageModsDir').orNull
 def appliedEnergisticsModsDir = providers.gradleProperty('terminalcraft.appliedEnergisticsModsDir').orNull
+def createModsDir = providers.gradleProperty('terminalcraft.createModsDir').orNull
+def mekanismModsDir = providers.gradleProperty('terminalcraft.mekanismModsDir').orNull
+if (createModsDir != null && !createModsDir.isBlank()) {
+    minecraft.runs.configureEach {
+        property 'mixin.env.remapRefMap', 'true'
+        property 'mixin.env.refMapRemappingFile', project.file('build/createSrgToMcp/output.srg').absolutePath
+    }
+    tasks.matching { it.name in ['runGameTestServer', 'runClient', 'runServer'] }.configureEach {
+        dependsOn 'createSrgToMcp'
+    }
+}
 
 // Optional-mod GameTests link their public API types and are compiled only for the matching
 // focused profile. Production/minimal runtime remains free of test-class linkage to absent mods.
 sourceSets.main.java {
+    if (sophisticatedModsDir == null || sophisticatedModsDir.isBlank()
+            || storageDrawersModsDir == null || storageDrawersModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/StorageCoexistenceGameTests.java'
+    }
+    if (mekanismModsDir == null || mekanismModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/MekanismWorkflowGameTests.java'
+    }
+    if (createModsDir == null || createModsDir.isBlank()) {
+        exclude 'com/malice/terminalcraft/device/CreateWorkflowGameTests.java'
+    }
     if (sophisticatedModsDir == null || sophisticatedModsDir.isBlank()) {
         exclude 'com/malice/terminalcraft/device/SophisticatedGenericItemCapabilityGameTests.java'
     }
@@ -59,6 +80,12 @@ sourceSets.main.java {
     }
 }
 repositories {
+    if (mekanismModsDir != null && !mekanismModsDir.isBlank()) {
+        flatDir { dirs mekanismModsDir }
+    }
+    if (createModsDir != null && !createModsDir.isBlank()) {
+        flatDir { dirs createModsDir }
+    }
     maven { url = "https://cursemaven.com" }
     maven { url = "https://api.modrinth.com/maven" }
     maven { url = "https://maven.createmod.net" }
@@ -77,6 +104,20 @@ repositories {
 }
 
 dependencies {
+    if (mekanismModsDir != null && !mekanismModsDir.isBlank()) {
+        def matches = fileTree(mekanismModsDir) { include 'Mekanism-1.20.1-10.4.16.80.jar' }.files.toList()
+        if (matches.size() != 1) {
+            throw new GradleException("Expected exactly one Mekanism-1.20.1-10.4.16.80.jar in ${mekanismModsDir}")
+        }
+        runtimeOnly fg.deobf("terminalcraft.focused:Mekanism:1.20.1-10.4.16.80")
+    }
+    if (createModsDir != null && !createModsDir.isBlank()) {
+        def matches = fileTree(createModsDir) { include 'create-1.20.1-6.0.8.jar' }.files.toList()
+        if (matches.size() != 1) {
+            throw new GradleException("Expected exactly one create-1.20.1-6.0.8.jar in ${createModsDir}")
+        }
+        runtimeOnly fg.deobf("terminalcraft.focused:create-1.20.1:6.0.8")
+    }
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // Public compile-time APIs only; these mods remain optional and are never bundled.

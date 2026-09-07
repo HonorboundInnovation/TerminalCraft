@@ -2,12 +2,9 @@
   "parent": "minecraft:block/block",
   "ambientocclusion": true,
   "textures": {
-    "particle": "terminalcraft:block/wireless_display_link_custom",
-    "side": "terminalcraft:block/wireless_display_link_custom",
-    "top": "terminalcraft:block/wireless_display_link_custom",
-    "front": "terminalcraft:block/wireless_display_link_custom",
-    "signal": "terminalcraft:block/wireless_display_link_custom",
-    "ring": "terminalcraft:block/wireless_display_link_custom"
+    "particle": "#casing",
+    "casing": "terminalcraft:block/terminal_side",
+    "front": "terminalcraft:block/wireless_display_link_custom"
   },
   "elements": [
     {
@@ -22,30 +19,30 @@
         16
       ],
       "faces": {
-        "down": {
-          "texture": "#side"
-        },
-        "up": {
-          "texture": "#side"
-        },
         "north": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
-        },
-        "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
     {
       "from": [
         2,
-        0,
+        1,
         2
       ],
       "to": [
@@ -54,23 +51,23 @@
         14
       ],
       "faces": {
-        "down": {
-          "texture": "#side"
-        },
-        "up": {
-          "texture": "#top"
-        },
         "north": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
-        },
-        "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
@@ -86,23 +83,47 @@
         12
       ],
       "faces": {
-        "down": {
-          "texture": "#ring"
-        },
-        "up": {
-          "texture": "#ring"
-        },
         "north": {
-          "texture": "#ring"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
         },
         "south": {
-          "texture": "#ring"
-        },
-        "west": {
-          "texture": "#ring"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
         },
         "east": {
-          "texture": "#ring"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
+        },
+        "west": {
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
@@ -118,23 +139,23 @@
         11
       ],
       "faces": {
-        "down": {
-          "texture": "#side"
-        },
-        "up": {
-          "texture": "#top"
-        },
         "north": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
-        },
-        "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
@@ -150,23 +171,23 @@
         10
       ],
       "faces": {
-        "down": {
-          "texture": "#signal"
-        },
-        "up": {
-          "texture": "#signal"
-        },
         "north": {
-          "texture": "#signal"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#signal"
-        },
-        "west": {
-          "texture": "#signal"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#signal"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
@@ -178,27 +199,27 @@
       ],
       "to": [
         9,
-        16,
+        15,
         9
       ],
       "faces": {
-        "down": {
-          "texture": "#ring"
-        },
-        "up": {
-          "texture": "#ring"
-        },
         "north": {
-          "texture": "#ring"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#ring"
-        },
-        "west": {
-          "texture": "#ring"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#ring"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     },
@@ -214,23 +235,23 @@
         10
       ],
       "faces": {
-        "down": {
-          "texture": "#signal"
-        },
-        "up": {
-          "texture": "#signal"
-        },
         "north": {
-          "texture": "#signal"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#signal"
-        },
-        "west": {
-          "texture": "#signal"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#signal"
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "down": {
+          "texture": "#casing"
         }
       }
     }

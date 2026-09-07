@@ -31,6 +31,16 @@ import org.jetbrains.annotations.Nullable;
  * Mobile bash computer. Right-click opens the turtle shell GUI.
  */
 public class TurtleBlock extends BaseEntityBlock {
+    private static final net.minecraft.world.phys.shapes.VoxelShape MODEL_SHAPE = net.minecraft.world.phys.shapes.Shapes.or(
+            net.minecraft.world.level.block.Block.box(1, 0, 1, 15, 14, 15),
+            net.minecraft.world.level.block.Block.box(6, 14, 6, 10, 16, 10));
+
+    @Override public net.minecraft.world.phys.shapes.VoxelShape getShape(BlockState state,
+            net.minecraft.world.level.BlockGetter level, BlockPos pos,
+            net.minecraft.world.phys.shapes.CollisionContext context) {
+        return MODEL_SHAPE;
+    }
+
     public static final DirectionProperty FACING = HorizontalDirectionalBlock.FACING;
 
     public TurtleBlock() {
@@ -41,6 +51,11 @@ public class TurtleBlock extends BaseEntityBlock {
                 .noOcclusion()
                 .isRedstoneConductor((state, level, pos) -> false));
         this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
+    }
+
+    @Override public java.util.List<net.minecraft.world.item.ItemStack> getDrops(BlockState state,
+            net.minecraft.world.level.storage.loot.LootParams.Builder context) {
+        return com.malice.terminalcraft.item.ComputerBlockItem.preserveDrops(super.getDrops(state, context), context);
     }
 
     @Override
@@ -84,6 +99,12 @@ public class TurtleBlock extends BaseEntityBlock {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof TurtleBlockEntity turtle && player instanceof ServerPlayer serverPlayer) {
+            if (player.isShiftKeyDown()) {
+                NetworkHooks.openScreen(serverPlayer, new net.minecraft.world.SimpleMenuProvider(
+                        (id, inventory, owner) -> new com.malice.terminalcraft.menu.TurtleInventoryMenu(id, inventory, turtle),
+                        net.minecraft.network.chat.Component.literal("Turtle inventory")), pos);
+                return InteractionResult.CONSUME;
+            }
             NetworkHooks.openScreen(serverPlayer, turtle, buf -> {
                 buf.writeByte(com.malice.terminalcraft.menu.TerminalMenu.TYPE_BLOCK);
                 buf.writeBlockPos(pos);
@@ -119,6 +140,7 @@ public class TurtleBlock extends BaseEntityBlock {
     @SuppressWarnings("deprecation")
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
         if (!state.is(newState.getBlock())) {
+            if (level.getBlockEntity(pos) instanceof TurtleBlockEntity turtle) turtle.dropInventory();
             level.removeBlockEntity(pos);
             level.updateNeighborsAt(pos, this);
             for (Direction d : Direction.values()) {

@@ -41,7 +41,8 @@ import java.util.UUID;
  * Stores per-terminal shell state, redstone outputs, and acts as MenuProvider.
  */
 public class TerminalBlockEntity extends BlockEntity implements MenuProvider, TerminalHost, ShellComputer {
-    private final BashShell shell = new BashShell();
+   private final BashShell shell = new BashShell();
+    private net.minecraft.nbt.Tag invalidShellPayload;
     private final EnumMap<Direction, Integer> redstoneOut = new EnumMap<>(Direction.class);
     private UUID deviceId = DeviceIdentity.create();
     private String label = "terminal";
@@ -714,6 +715,11 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
         return drive == null ? null : drive.readMedia();
     }
 
+    @Override public String diskMediaToken() {
+        DiskDriveBlockEntity drive = findDiskDrive();
+        return drive == null ? "" : drive.mediaToken();
+    }
+
     @Override
     public boolean writeDiskMedia(CompoundTag vfsTag) {
         DiskDriveBlockEntity drive = findDiskDrive();
@@ -797,9 +803,14 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     @Override
     protected void saveAdditional(CompoundTag tag) {
         super.saveAdditional(tag);
+        saveComputerState(tag, false);
+    }
+
+    private void saveComputerState(CompoundTag tag, boolean clientView) {
         PersistedDataVersions.stampCurrent(tag);
         DeviceIdentity.save(tag, deviceId);
-        tag.put("Shell", shell.save());
+        tag.put("Shell", clientView ? shell.saveClientView()
+                : invalidShellPayload != null ? invalidShellPayload.copy() : shell.save());
         tag.putString("Label", label);
         CompoundTag rs = new CompoundTag();
         for (Map.Entry<Direction, Integer> e : redstoneOut.entrySet()) {
@@ -810,10 +821,26 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
 
     @Override
     public void load(CompoundTag tag) {
+        loadComputerState(tag, false);
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag) {
+        loadComputerState(tag, true);
+    }
+
+    private void loadComputerState(CompoundTag tag, boolean clientView) {
         super.load(tag);
         deviceId = DeviceIdentity.loadOrRetain(tag, deviceId);
         if (tag.contains("Shell", CompoundTag.TAG_COMPOUND)) {
-            shell.load(tag.getCompound("Shell"));
+            if (!clientView) invalidShellPayload = null;
+            if (clientView) shell.load(tag.getCompound("Shell"));
+            else com.malice.terminalcraft.persistence.ComputerShellPersistence.load(shell, tag.getCompound("Shell"));
+        } else if (!clientView && tag.contains("Shell")) {
+            invalidShellPayload = tag.get("Shell").copy();
+            CompoundTag retained = new CompoundTag();
+            retained.put("InvalidShellPayload", invalidShellPayload.copy());
+            shell.preserveUnreadableSnapshot(retained);
         }
         shell.setHost(this);
         if (tag.contains("Label", CompoundTag.TAG_STRING)) {
@@ -833,7 +860,7 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     @Override
     public CompoundTag getUpdateTag() {
         CompoundTag tag = super.getUpdateTag();
-        saveAdditional(tag);
+        saveComputerState(tag, true);
         if (tag.contains("Shell", CompoundTag.TAG_COMPOUND)
                 && !com.malice.terminalcraft.network.ShellSyncPolicy.isAdmissible(tag.getCompound("Shell"))) {
             tag.remove("Shell");
@@ -851,7 +878,7 @@ public class TerminalBlockEntity extends BlockEntity implements MenuProvider, Te
     public void onDataPacket(Connection net, ClientboundBlockEntityDataPacket pkt) {
         CompoundTag tag = pkt.getTag();
         if (tag != null) {
-            load(tag);
+            handleUpdateTag(tag);
         }
     }
 

@@ -2,12 +2,43 @@
   "parent": "minecraft:block/block",
   "ambientocclusion": true,
   "textures": {
-    "particle": "#side",
-    "side": "terminalcraft:block/refined_bridge_face_custom",
-    "front": "terminalcraft:block/refined_bridge_face_custom",
-    "port": "terminalcraft:block/network_cable_custom"
+    "particle": "#casing",
+    "casing": "terminalcraft:block/terminal_side",
+    "front": "terminalcraft:block/refined_bridge_face_custom"
   },
   "elements": [
+    {
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        1,
+        16
+      ],
+      "faces": {
+        "down": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "north": {
+          "texture": "#casing"
+        },
+        "south": {
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "east": {
+          "texture": "#casing"
+        }
+      }
+    },
     {
       "from": [
         1,
@@ -21,22 +52,22 @@
       ],
       "faces": {
         "down": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "up": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#side"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#side"
+          "texture": "#casing"
         }
       }
     },
@@ -44,33 +75,37 @@
       "from": [
         2,
         2,
-        0
+        0.25
       ],
       "to": [
         14,
         14,
-        2
-      ],
-      "faces": {
-        "north": {
-          "texture": "#front"
-        }
-      }
-    },
-    {
-      "from": [
-        6,
-        6,
-        0
-      ],
-      "to": [
-        10,
-        10,
         1
       ],
       "faces": {
+        "down": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
         "north": {
-          "texture": "#port"
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
+        },
+        "south": {
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "east": {
+          "texture": "#casing"
         }
       }
     },
@@ -86,20 +121,23 @@
         10
       ],
       "faces": {
+        "down": {
+          "texture": "#casing"
+        },
         "up": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "north": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "south": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "west": {
-          "texture": "#front"
+          "texture": "#casing"
         },
         "east": {
-          "texture": "#front"
+          "texture": "#casing"
         }
       }
     }

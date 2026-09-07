@@ -100,14 +100,16 @@ public final class TerminalCraftMod {
             // Chunk-load callbacks can run while the full-chunk future is still completing. Defer
             // topology discovery and use getChunkNow so diagnostics never recursively request the
             // same chunk from inside its own completion path.
-            level.getServer().execute(() -> {
+            // execute() runs inline when called on the server thread, including from a
+            // chunk's own completion callback. tell() always queues the work instead.
+            level.getServer().tell(new net.minecraft.server.TickTask(level.getServer().getTickCount(), () -> {
                 if (isStopping(level.getServer())) return;
                 net.minecraft.world.level.chunk.LevelChunk loaded =
                         level.getChunkSource().getChunkNow(position.x, position.z);
                 if (loaded != null) {
                     com.malice.terminalcraft.network.WiredNetworkTopology.loadChunk(level, loaded);
                 }
-            });
+            }));
         }
     }
 
@@ -165,6 +167,9 @@ public final class TerminalCraftMod {
         @net.minecraftforge.eventbus.api.SubscribeEvent
         public static void onClientSetup(final net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
             event.enqueueWork(() -> {
+                net.minecraft.client.gui.screens.MenuScreens.register(
+                        com.malice.terminalcraft.registry.ModRegistries.TURTLE_INVENTORY_MENU.get(),
+                        com.malice.terminalcraft.client.TurtleInventoryScreen::new);
                 net.minecraft.client.gui.screens.MenuScreens.register(
                         com.malice.terminalcraft.registry.ModRegistries.TERMINAL_MENU.get(),
                         com.malice.terminalcraft.client.TerminalScreen::new);

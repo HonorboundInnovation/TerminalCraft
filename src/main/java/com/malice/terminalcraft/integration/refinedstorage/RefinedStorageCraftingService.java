@@ -5,7 +5,6 @@ import com.malice.terminalcraft.device.DeviceCallContext;
 import com.malice.terminalcraft.device.DurableCraftingLedger;
 import com.malice.terminalcraft.device.GenericCraftingService;
 import com.malice.terminalcraft.device.PrincipalIdentity;
-import com.refinedmods.refinedstorage.api.autocrafting.ICraftingManager;
 import com.refinedmods.refinedstorage.api.autocrafting.task.ICraftingTask;
 import com.refinedmods.refinedstorage.api.network.INetwork;
 import com.refinedmods.refinedstorage.api.network.security.Permission;
@@ -152,6 +151,10 @@ final class RefinedStorageCraftingService implements GenericCraftingService {
 
     private DurableCraftingLedger.Entry reconcile(DurableCraftingLedger.Entry entry, NativeSession session) {
         if (entry.state().terminal() || entry.nativeTaskId() == null) return entry;
+        if (session.wasCancelled(entry.nativeTaskId())) {
+            return bridge.updateCrafting(entry.jobId(), State.CANCELLED, entry.completedWork(), entry.totalWork(),
+                    "cancelled", "", environment.now());
+        }
         Integer percentageValue = session.completionPercentage(entry.nativeTaskId());
         if (percentageValue == null) {
             return bridge.updateCrafting(entry.jobId(), State.UNKNOWN, entry.completedWork(),
@@ -174,6 +177,7 @@ final class RefinedStorageCraftingService implements GenericCraftingService {
     interface NativeSession {
         UUID requestAndStart(String resourceId, int amount);
         Integer completionPercentage(UUID nativeTaskId);
+        default boolean wasCancelled(UUID nativeTaskId) { return false; }
         void cancel(UUID nativeTaskId);
     }
 
@@ -232,15 +236,17 @@ final class RefinedStorageCraftingService implements GenericCraftingService {
         @Override public UUID requestAndStart(String resourceId, int amount) {
             ResourceLocation id = ResourceLocation.tryParse(resourceId);
             ItemStack stack = new ItemStack(BuiltInRegistries.ITEM.get(id));
-            ICraftingManager manager = network.getCraftingManager();
-            ICraftingTask task = manager.request(player, stack, amount);
-            if (task == null) return null;
-            manager.start(task);
-            return task.getId();
+            return NativeCraftingSubmission.createAndStart(network.getCraftingManager(), stack, amount,
+                    com.malice.terminalcraft.device.CraftingCompletionSavedData.get(player.serverLevel().getServer())::record);
         }
         @Override public Integer completionPercentage(UUID nativeTaskId) {
+            Boolean outcome = com.malice.terminalcraft.device.CraftingCompletionSavedData.get(player.serverLevel().getServer()).outcome(nativeTaskId);
+            if (Boolean.TRUE.equals(outcome)) return 100;
             ICraftingTask task = network.getCraftingManager().getTask(nativeTaskId);
-            return task == null ? null : task.getCompletionPercentage();
+            return task == null ? null : Math.min(99, task.getCompletionPercentage());
+        }
+        @Override public boolean wasCancelled(UUID nativeTaskId) {
+            return Boolean.FALSE.equals(com.malice.terminalcraft.device.CraftingCompletionSavedData.get(player.serverLevel().getServer()).outcome(nativeTaskId));
         }
         @Override public void cancel(UUID nativeTaskId) {
             network.getCraftingManager().cancel(nativeTaskId);

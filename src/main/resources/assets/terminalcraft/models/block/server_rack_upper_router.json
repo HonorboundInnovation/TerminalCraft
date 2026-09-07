@@ -1,20 +1,48 @@
 {
+  "parent": "minecraft:block/block",
+  "ambientocclusion": true,
   "textures": {
-    "face": "terminalcraft:block/network_router_face_custom",
-    "casing": "terminalcraft:block/network_router_face_custom",
-    "particle": "terminalcraft:block/network_router_face_custom"
+    "particle": "#casing",
+    "casing": "terminalcraft:block/terminal_side",
+    "front": "terminalcraft:block/network_router_face_custom"
   },
   "elements": [
     {
-      "from": [1, 9, -0.75],
-      "to": [15, 15, 0.5],
+      "from": [
+        1,
+        9,
+        0.25
+      ],
+      "to": [
+        15,
+        15,
+        1
+      ],
       "faces": {
-        "north": { "uv": [0, 0, 16, 16], "texture": "#face" },
-        "south": { "texture": "#casing" },
-        "west": { "texture": "#casing" },
-        "east": { "texture": "#casing" },
-        "up": { "texture": "#casing" },
-        "down": { "texture": "#casing" }
+        "down": {
+          "texture": "#casing"
+        },
+        "up": {
+          "texture": "#casing"
+        },
+        "north": {
+          "texture": "#front",
+          "uv": [
+            0,
+            0,
+            16,
+            16
+          ]
+        },
+        "south": {
+          "texture": "#casing"
+        },
+        "west": {
+          "texture": "#casing"
+        },
+        "east": {
+          "texture": "#casing"
+        }
       }
     }
   ]

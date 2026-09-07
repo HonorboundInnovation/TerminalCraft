@@ -534,7 +534,11 @@ public class NetworkCableBlock extends BaseEntityBlock implements WiredNetworkNo
                     && level.getBlockEntity(adjacent) instanceof NetworkCableBlockEntity neighbor
                     && neighbor.runs().stream().anyMatch(candidate -> candidate.face() == node.face());
             boolean device = !(state.getBlock() instanceof NetworkCableBlock)
-                    && (state.getBlock() instanceof WiredNetworkNode || state.getBlock() instanceof ModemBlock);
+                    && (state.getBlock() instanceof WiredNetworkNode || state.getBlock() instanceof ModemBlock
+                    || state.getBlock() instanceof TerminalBlock
+                    || state.getBlock() instanceof ProgrammableLogicControllerBlock
+                    || state.getBlock() instanceof SensorArrayBlock
+                    || state.getBlock() instanceof StandaloneSensorBlock);
             if (bundle || breakout || device) result.add(adjacent.immutable());
         }
         return result;

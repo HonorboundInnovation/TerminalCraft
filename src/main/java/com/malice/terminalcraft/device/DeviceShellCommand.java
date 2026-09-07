@@ -63,15 +63,26 @@ public final class DeviceShellCommand {
     }
 
     private static Outcome list(DeviceAccess access, List<String> args) {
-        if (args.size() > 1) return usage();
-        List<DeviceDescriptor> descriptors = access.descriptors(LIST_LIMIT);
-        if (descriptors.isEmpty()) return success("(no devices)");
+        if (args.size() > 2) return usage();
+        String filter = args.size() == 2 ? args.get(1).toLowerCase(java.util.Locale.ROOT) : "";
+        List<DeviceDescriptor> candidates = access.descriptors(DeviceRegistry.MAX_ENUMERATION_RESULTS);
+        List<DeviceDescriptor> matches = candidates.stream().filter(descriptor -> filter.isEmpty()
+                || (descriptor.deviceId() + " " + descriptor.typeName() + " " + descriptor.displayName()
+                + " " + descriptor.address() + " " + descriptor.capabilities())
+                .toLowerCase(java.util.Locale.ROOT).contains(filter)).toList();
+        List<DeviceDescriptor> descriptors = matches.stream().limit(LIST_LIMIT).toList();
         List<String> lines = new ArrayList<>(descriptors.size());
+        if (descriptors.isEmpty()) lines.add("(no devices)");
         for (DeviceDescriptor descriptor : descriptors) {
             lines.add(descriptor.deviceId() + "  " + descriptor.typeName() + "  "
                     + status(descriptor) + "  " + descriptor.address() + "  "
                     + descriptor.displayName());
         }
+        if (matches.size() > LIST_LIMIT) lines.add("device: showing first " + LIST_LIMIT
+                + " matches; narrow with device list <type|name|uuid|address>");
+        if (candidates.size() >= DeviceRegistry.MAX_ENUMERATION_RESULTS) lines.add(
+                "device: discovery reached its " + DeviceRegistry.MAX_ENUMERATION_RESULTS
+                        + "-device scan limit; use device info <known-uuid> for direct lookup");
         return new Outcome(0, lines);
     }
 
@@ -356,7 +367,7 @@ public final class DeviceShellCommand {
     }
 
     private static Outcome usage() {
-        return failure("device: usage: device list | dns ... | events [limit] | info <name|uuid> | call <name|uuid> <method> [args...] | transfer <operation-uuid> <source-uuid> <destination-uuid> <item-id> <count> | fluid-transfer <operation-uuid> <source-uuid> <destination-uuid> <fluid-id> <amount-mB> | escrow list|recover ... | fluid-escrow list|recover ...");
+        return failure("device: usage: device list [filter] | dns ... | events [limit] | info <name|uuid> | call <name|uuid> <method> [args...] | transfer <operation-uuid> <source-uuid> <destination-uuid> <item-id> <count> | fluid-transfer <operation-uuid> <source-uuid> <destination-uuid> <fluid-id> <amount-mB> | escrow list|recover ... | fluid-escrow list|recover ...");
     }
 
     private static Outcome success(String line) {

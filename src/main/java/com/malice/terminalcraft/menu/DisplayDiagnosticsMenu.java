@@ -2,6 +2,7 @@ package com.malice.terminalcraft.menu;
 
 import com.malice.terminalcraft.blockentity.VideoCableBlockEntity;
 import com.malice.terminalcraft.blockentity.WirelessDisplayLinkBlockEntity;
+import com.malice.terminalcraft.blockentity.MonitorBlockEntity;
 import com.malice.terminalcraft.registry.ModRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
@@ -14,6 +15,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 public final class DisplayDiagnosticsMenu extends AbstractContainerMenu {
     public static final byte TYPE_LINK = 0;
     public static final byte TYPE_CABLE = 1;
+    public static final byte TYPE_MONITOR = 2;
 
     private final BlockPos targetPosition;
     private final byte targetType;
@@ -26,6 +28,11 @@ public final class DisplayDiagnosticsMenu extends AbstractContainerMenu {
     public DisplayDiagnosticsMenu(int containerId, Inventory inventory,
                                   VideoCableBlockEntity cable) {
         this(containerId, inventory, cable.getBlockPos(), TYPE_CABLE);
+    }
+
+    public DisplayDiagnosticsMenu(int containerId, Inventory inventory,
+                                  MonitorBlockEntity monitor) {
+        this(containerId, inventory, monitor.getBlockPos(), TYPE_MONITOR);
     }
 
     private DisplayDiagnosticsMenu(int containerId, Inventory inventory, BlockPos position, byte type) {
@@ -43,6 +50,7 @@ public final class DisplayDiagnosticsMenu extends AbstractContainerMenu {
     public BlockPos targetPosition() { return targetPosition; }
     public boolean isLink() { return targetType == TYPE_LINK; }
     public boolean isCable() { return targetType == TYPE_CABLE; }
+    public boolean isMonitor() { return targetType == TYPE_MONITOR; }
 
     @Override
     public boolean clickMenuButton(Player player, int buttonId) {
@@ -86,6 +94,18 @@ public final class DisplayDiagnosticsMenu extends AbstractContainerMenu {
         return true;
     }
 
+    /** Applies one validated, wall-wide monitor appearance edit from the wrench screen. */
+    public boolean configureMonitor(Player player, double textScale, int foreground) {
+        if (!stillValid(player) || !isMonitor()) return false;
+        if (!(player.level().getBlockEntity(targetPosition) instanceof MonitorBlockEntity monitor)) return false;
+        try {
+            monitor.configureWallAppearance(textScale, foreground);
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false;
+        }
+    }
+
     @Override public net.minecraft.world.item.ItemStack quickMoveStack(Player player, int index) {
         return net.minecraft.world.item.ItemStack.EMPTY;
     }
@@ -98,7 +118,8 @@ public final class DisplayDiagnosticsMenu extends AbstractContainerMenu {
         if (player.distanceToSqr(targetPosition.getX() + 0.5, targetPosition.getY() + 0.5,
                 targetPosition.getZ() + 0.5) > 64.0) return false;
         BlockEntity entity = player.level().getBlockEntity(targetPosition);
-        return isLink() ? entity instanceof WirelessDisplayLinkBlockEntity
-                : entity instanceof VideoCableBlockEntity;
+        if (isLink()) return entity instanceof WirelessDisplayLinkBlockEntity;
+        if (isCable()) return entity instanceof VideoCableBlockEntity;
+        return isMonitor() && entity instanceof MonitorBlockEntity;
     }
 }

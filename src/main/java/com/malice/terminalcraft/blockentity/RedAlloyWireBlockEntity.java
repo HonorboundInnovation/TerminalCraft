@@ -192,13 +192,15 @@ public final class RedAlloyWireBlockEntity extends BlockEntity {
         return removed;
     }
 
-    public void setPower(Direction face, int lane, int value) {
+    /** Updates one run's cached signal and reports whether its electrical output changed. */
+    public boolean setPower(Direction face, int lane, int value) {
         int index = index(face, lane);
-        if (colors[index] < 0) return;
+        if (colors[index] < 0) return false;
         int bounded = Math.max(0, Math.min(15, value));
-        if (power[index] == bounded) return;
+        if (power[index] == bounded) return false;
         power[index] = bounded;
         changedAndSync();
+        return true;
     }
 
     private void changedAndSync() {

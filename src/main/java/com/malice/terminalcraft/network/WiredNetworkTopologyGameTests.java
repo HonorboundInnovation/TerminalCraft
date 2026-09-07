@@ -126,6 +126,92 @@ public final class WiredNetworkTopologyGameTests {
         helper.succeed();
     }
 
+    @GameTest(template = "empty", timeoutTicks = 60)
+    public static void coloredNetworkCableTargetsOnlyBundlesAndWiredDevices(GameTestHelper helper) {
+        int channel = net.minecraft.world.item.DyeColor.LIGHT_BLUE.getId();
+        BlockPos cablePos = new BlockPos(3, 2, 3);
+        BlockPos bundlePos = cablePos.north();
+        BlockPos externalBundlePos = cablePos.south().below();
+        BlockPos wiredTerminal = cablePos.west();
+        BlockPos ordinarySolid = cablePos.east();
+        helper.setBlock(cablePos.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(bundlePos.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(cablePos, ModRegistries.NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP)
+                .setValue(NetworkCableBlock.COLOR, channel));
+        helper.setBlock(bundlePos, ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP));
+        helper.setBlock(externalBundlePos, ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.SOUTH));
+        helper.setBlock(wiredTerminal, ModRegistries.TERMINAL_BLOCK.get());
+        helper.setBlock(ordinarySolid, net.minecraft.world.level.block.Blocks.STONE);
+
+        net.minecraft.world.level.block.state.BlockState cable = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(cablePos), Direction.UP);
+        net.minecraft.world.level.block.state.BlockState bundle = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(bundlePos), Direction.UP);
+        java.util.Set<BlockPos> neighbors = NetworkCableBlock.networkNeighbors(
+                helper.getLevel(), helper.absolutePos(cablePos));
+        helper.assertTrue(NetworkCableBlock.isConnected(cable, Direction.NORTH)
+                        && NetworkCableBlock.isConnected(cable, Direction.WEST)
+                        && !NetworkCableBlock.isConnected(cable, Direction.EAST)
+                        && !NetworkCableBlock.isConnected(cable, Direction.SOUTH)
+                        && NetworkCableBlock.isConnected(bundle, Direction.SOUTH)
+                        && neighbors.contains(helper.absolutePos(bundlePos))
+                        && neighbors.contains(helper.absolutePos(wiredTerminal))
+                        && !neighbors.contains(helper.absolutePos(externalBundlePos))
+                        && !neighbors.contains(helper.absolutePos(ordinarySolid)),
+                "colored network cable must route reciprocally only to its bundle and real wired endpoint");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void bundledNetworkTrunkRoutesAcrossExternalCorner(GameTestHelper helper) {
+        int channel = net.minecraft.world.item.DyeColor.LIGHT_BLUE.getId();
+        BlockPos support = new BlockPos(3, 1, 3);
+        BlockPos floorCable = support.above();
+        BlockPos wallCable = support.east();
+        BlockPos bendVolume = floorCable.east();
+        BlockPos firstModem = floorCable.west();
+        BlockPos secondModem = wallCable.north();
+        helper.setBlock(support, net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(firstModem, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(secondModem, ModRegistries.MODEM_BLOCK.get());
+        helper.setBlock(floorCable, ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP));
+        helper.setBlock(wallCable, ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.EAST));
+        ((ModemBlockEntity) helper.getBlockEntity(firstModem)).setWireless(false);
+        ((ModemBlockEntity) helper.getBlockEntity(secondModem)).setWireless(false);
+
+        net.minecraft.world.level.block.state.BlockState floorRendered = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(floorCable), Direction.UP);
+        net.minecraft.world.level.block.state.BlockState wallRendered = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(wallCable), Direction.EAST);
+        helper.assertTrue(NetworkCableBlock.isConnected(floorRendered, Direction.EAST)
+                        && NetworkCableBlock.isConnected(floorRendered, Direction.WEST)
+                        && !NetworkCableBlock.isConnected(floorRendered, Direction.NORTH)
+                        && !NetworkCableBlock.isConnected(floorRendered, Direction.SOUTH)
+                        && NetworkCableBlock.isConnected(wallRendered, Direction.UP)
+                        && NetworkCableBlock.isConnected(wallRendered, Direction.NORTH)
+                        && !NetworkCableBlock.isConnected(wallRendered, Direction.DOWN)
+                        && !NetworkCableBlock.isConnected(wallRendered, Direction.SOUTH),
+                "bundled network trunks must render exactly the Red Alloy arms for their corner and endpoints");
+        helper.assertTrue(WiredNetworkTopology.route(helper.getLevel(), helper.absolutePos(firstModem),
+                        helper.absolutePos(secondModem), channel).reachable(),
+                "all bundled channels must traverse an unobstructed external corner");
+
+        helper.setBlock(bendVolume, net.minecraft.world.level.block.Blocks.STONE);
+        helper.assertTrue(!WiredNetworkTopology.route(helper.getLevel(), helper.absolutePos(firstModem),
+                        helper.absolutePos(secondModem), channel).reachable()
+                        && !NetworkCableBlock.isConnected(NetworkCableBlock.renderState(helper.getLevel(),
+                        helper.absolutePos(floorCable), Direction.UP), Direction.EAST)
+                        && !NetworkCableBlock.isConnected(NetworkCableBlock.renderState(helper.getLevel(),
+                        helper.absolutePos(wallCable), Direction.EAST), Direction.UP),
+                "a solid bend obstruction must cut bundled topology and retract both Red Alloy-style arms");
+        helper.succeed();
+    }
+
     @GameTest(template = "empty", timeoutTicks = 100)
     public static void bundledNetworkTrunkKeepsColoredChannelsPhysicallyIsolated(GameTestHelper helper) {
         int lightBlue = net.minecraft.world.item.DyeColor.LIGHT_BLUE.getId();
@@ -200,6 +286,36 @@ public final class WiredNetworkTopologyGameTests {
                         NetworkCableBlock.renderState(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
                         Direction.DOWN),
                 "multipart network-cable faces must form the same internal corner as Red Alloy Wire");
+        BlockPos worldPos = helper.absolutePos(space);
+        net.minecraft.world.phys.Vec3 center = net.minecraft.world.phys.Vec3.atCenterOf(worldPos);
+        helper.assertTrue(NetworkCableBlock.targetedFace(helper.getLevel(), worldPos,
+                        center.add(0.0D, 2.0D, 0.0D), center.add(0.0D, -2.0D, 0.0D)) == Direction.UP
+                        && NetworkCableBlock.targetedFace(helper.getLevel(), worldPos,
+                        center.add(2.0D, 0.0D, 0.0D), center.add(-2.0D, 0.0D, 0.0D)) == Direction.EAST,
+                "network cable targeting must follow rendered runs instead of overlapping half-block volumes");
+        helper.succeed();
+    }
+
+    @GameTest(template = "empty", timeoutTicks = 80)
+    public static void bundledNetworkMultipartRoutesLikeBundledRedAlloy(GameTestHelper helper) {
+        BlockPos space = new BlockPos(3, 2, 3);
+        helper.setBlock(space.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(space.west(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(space, ModRegistries.BUNDLED_NETWORK_CABLE_BLOCK.get().defaultBlockState()
+                .setValue(NetworkCableBlock.FACE, Direction.UP));
+        helper.assertTrue(NetworkCableBlock.addRun(helper.getLevel(), helper.absolutePos(space),
+                        Direction.EAST, 0, 0),
+                "bundled network cable must allow the same multipart placement as bundled Red Alloy");
+
+        net.minecraft.world.level.block.state.BlockState floorRendered = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(space), Direction.UP);
+        net.minecraft.world.level.block.state.BlockState wallRendered = NetworkCableBlock.renderState(
+                helper.getLevel(), helper.absolutePos(space), Direction.EAST);
+        helper.assertTrue(NetworkCableBlock.isConnected(floorRendered, Direction.WEST)
+                        && NetworkCableBlock.isConnected(wallRendered, Direction.DOWN)
+                        && NetworkCableBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.UP)
+                        && NetworkCableBlock.hasFace(helper.getLevel(), helper.absolutePos(space), Direction.EAST),
+                "bundled network multipart faces must form the same internal corner as bundled Red Alloy");
         helper.succeed();
     }
 
@@ -1344,6 +1460,12 @@ public final class WiredNetworkTopologyGameTests {
         return ModRegistries.NETWORK_CABLE_BLOCK.get().defaultBlockState()
                 .setValue(NetworkCableBlock.FACE, Direction.UP)
                 .setValue(NetworkCableBlock.COLOR, channel);
+    }
+
+    /** Builds the default floor-mounted cable fixture with the solid support it requires. */
+    private static void setSupportedCable(GameTestHelper helper, BlockPos position) {
+        helper.setBlock(position.below(), net.minecraft.world.level.block.Blocks.STONE);
+        helper.setBlock(position, ModRegistries.NETWORK_CABLE_BLOCK.get());
     }
 
     private static net.minecraft.world.level.block.state.BlockState bundledNetworkCable() {

@@ -40,6 +40,10 @@ final class PlcDashboard {
         int page = plc.dashboardPage();
         write(text, foreground, background, 0, 0,
                 "PLC OPERATIONS // " + safe(plc.getLabel(), 24), 1, 8);
+        if (width > MonitorBlockEntity.MAX_LINE_LEN) {
+            write(text, foreground, background, width / 2, 0,
+                    "WALL " + width + "x" + height, 7, 8);
+        }
         write(text, foreground, background, 0, 1,
                 "● " + state + "   SCAN " + plc.dashboardScanCount()
                         + "   CYCLE " + program.scanIntervalTicks() + "t  PAGE " + (page + 1) + "/4",
@@ -51,8 +55,13 @@ final class PlcDashboard {
         button(text, foreground, background, 29, 2, "<", 7, 0);
         button(text, foreground, background, 35, 2, ">", 7, 0);
         write(text, foreground, background, 0, 3,
-                "────────────────────────────────────────",
+                "─".repeat(width),
                 plc.alarmLatched() ? 14 : 7, 15);
+        if (height > 4) {
+            // A persistent lower frame edge makes vertical walls one intentional canvas instead
+            // of leaving every tile below the first row visually indistinguishable from idle.
+            write(text, foreground, background, 0, height - 1, "─".repeat(width), 7, 15);
+        }
 
         if (page == 1) {
             renderWatch(text, foreground, background, plc, width, height);
@@ -88,7 +97,7 @@ final class PlcDashboard {
                     value ? 2 : 8, 15);
         }
 
-        int programColumn = Math.min(width / 2, 24);
+        int programColumn = Math.max(24, width / 2);
         int programRow = 4;
         if (programColumn + 12 < width) {
             write(text, foreground, background, programColumn, programRow++, "CONTROL LOGIC", 13, 15);
@@ -149,7 +158,7 @@ final class PlcDashboard {
             write(text, foreground, background, 0, row++, fit(output.name(), 15) + " "
                     + bar(strength, 8) + marker, value ? 2 : 8, 15);
         }
-        int right = Math.min(width / 2, 22);
+        int right = Math.max(22, width / 2);
         int rightRow = 4;
         write(text, foreground, background, right, rightRow++, "RUNTIME", 13, 15);
         for (Map.Entry<String, Integer> timer : plc.dashboardTimerElapsed().entrySet()) {
@@ -239,7 +248,7 @@ final class PlcDashboard {
     }
 
     private static int stateColor(String state) { return "RUNNING".equals(state) ? 2 : "FAULT".equals(state) ? 14 : 3; }
-    private static char digit(int value) { return (char) ('0' + Math.max(0, Math.min(15, value))); }
+    private static char digit(int value) { return Character.forDigit(Math.max(0, Math.min(15, value)), 16); }
     private static String safe(String value, int max) { return fit(value == null ? "PLC" : value, max); }
     private static String fit(String value, int max) {
         String safe = value == null ? "" : value.replace('\n', ' ').replace('\r', ' ');

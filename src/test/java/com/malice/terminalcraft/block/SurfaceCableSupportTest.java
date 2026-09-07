@@ -143,10 +143,15 @@ public final class SurfaceCableSupportTest {
         require(creativeSource.contains("event.accept(com.malice.terminalcraft.registry.ModRegistries."
                         + "RED_ALLOY_WIRE_ITEM.get());"),
                 "the unshielded Red Alloy stack must remain visible alongside all colored variants");
-        String geometryRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
-                + "SurfaceCableGeometryRenderer.java"));
-        require(geometryRenderer.contains("VoxelShape") && geometryRenderer.contains("TextureAtlasSprite"),
-                "placed cables must render the same route geometry used for selection and previews");
+        String redRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
+                + "RedAlloyWireBlockEntityRenderer.java"));
+        String networkRenderer = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/client/"
+                + "NetworkCableBlockEntityRenderer.java"));
+        require(redRenderer.contains("renderSingleBlock(")
+                        && networkRenderer.contains("renderSingleBlock(")
+                        && !redRenderer.contains("SurfaceCableGeometryRenderer")
+                        && !networkRenderer.contains("SurfaceCableGeometryRenderer"),
+                "placed cables must use baked route models instead of overlapping textured boxes");
         String redBlockSource = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/block/"
                 + "RedAlloyWireBlock.java"));
         String networkBlockSource = Files.readString(Path.of("src/main/java/com/malice/terminalcraft/block/"
@@ -155,6 +160,8 @@ public final class SurfaceCableSupportTest {
                 + "BundledCableBlock.java"));
         require(!redBlockSource.contains("IntegerProperty.create(\"point\", 0, 15)")
                         && !networkBlockSource.contains("IntegerProperty.create(\"point\", 0, 15)")
+                        && !redBlockSource.contains("IntegerProperty.create(\"lane\"")
+                        && !networkBlockSource.contains("IntegerProperty.create(\"lane\"")
                         && !redBlockSource.contains("pointForHit")
                         && !networkBlockSource.contains("pointForHit")
                         && redBlockSource.contains("centeredRunShape")

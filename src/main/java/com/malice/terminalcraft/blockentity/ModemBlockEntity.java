@@ -543,6 +543,11 @@ public class ModemBlockEntity extends BlockEntity implements ModemDevice {
         if (RednetAutoConfiguration.isDefaultChannel(channel)) automaticSetup = true;
         if (level != null && !level.isClientSide) {
             RednetNetwork.open(level, modemId, channel, worldPosition, wireless, range);
+            // closeAll removes runtime aliases but intentionally retains the configured hostname.
+            // Reopening a channel must therefore republish that identity before directed traffic
+            // can reach this modem again.
+            if (!hostname.isBlank()) RednetNetwork.registerHost(level, modemId, hostname);
+            else if (automaticSetup) RednetNetwork.ensureAutomaticHost(level, modemId);
         }
         setChanged();
         return true;

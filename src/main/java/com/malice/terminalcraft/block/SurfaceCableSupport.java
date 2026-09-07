@@ -7,7 +7,6 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.Shapes;
 
@@ -69,27 +68,14 @@ public final class SurfaceCableSupport {
         return "R" + (pointV(point) + 1) + "C" + (pointU(point) + 1);
     }
 
-    /**
-     * Projects a point into existing compatibility state fields without adding a 0..15 property.
-     * LANE stores the column; the two face-normal connection bits (unused by surface geometry) store
-     * the row. This prevents a sixteen-fold explosion in Minecraft's precomputed block-state table.
-     */
+    /** Legacy matrix compatibility: the restored one-cable model collapses every point to center. */
     public static BlockState withPoint(BlockState state, Direction face, int point) {
-        int checked = requirePoint(point);
-        int row = pointV(checked);
-        IntegerProperty lane = state.hasProperty(NetworkCableBlock.LANE)
-                ? NetworkCableBlock.LANE : RedAlloyWireBlock.LANE;
-        return state.setValue(lane, pointU(checked))
-                .setValue(CableShapeSupport.property(face), (row & 1) != 0)
-                .setValue(CableShapeSupport.property(face.getOpposite()), (row & 2) != 0);
+        requirePoint(point);
+        return state;
     }
 
     public static int pointFromState(BlockState state, Direction face) {
-        IntegerProperty lane = state.hasProperty(NetworkCableBlock.LANE)
-                ? NetworkCableBlock.LANE : RedAlloyWireBlock.LANE;
-        int row = (state.getValue(CableShapeSupport.property(face)) ? 1 : 0)
-                | (state.getValue(CableShapeSupport.property(face.getOpposite())) ? 2 : 0);
-        return point(state.getValue(lane), row);
+        return 0;
     }
 
     public static int pointPortMask(Direction face, int point) {

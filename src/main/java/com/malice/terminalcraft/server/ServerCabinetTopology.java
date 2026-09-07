@@ -4,8 +4,13 @@ import com.malice.terminalcraft.block.ServerRackBlock;
 import com.malice.terminalcraft.blockentity.ServerRackBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,7 +48,8 @@ public final class ServerCabinetTopology {
 
     public static Cabinet resolve(LevelReader level, BlockPos member) {
         if (level == null || member == null) return new Cabinet(List.of(), 0, 0);
-        BlockState origin = level.getBlockState(member);
+        BlockState origin = loadedState(level, member);
+        if (origin == null) return new Cabinet(List.of(), 0, 0);
         if (!(origin.getBlock() instanceof ServerRackBlock)) return new Cabinet(List.of(), 0, 0);
 
         Direction facing = origin.getValue(ServerRackBlock.FACING);
@@ -61,7 +67,7 @@ public final class ServerCabinetTopology {
             BlockPos pos = bottom.above(i);
             if (!isAlignedRack(level, pos, facing)) break;
             racks.add(pos.immutable());
-            if (level.getBlockEntity(pos) instanceof ServerRackBlockEntity rack) {
+            if (loadedBlockEntity(level, pos) instanceof ServerRackBlockEntity rack) {
                 for (int bay = 0; bay < ServerRackBlockEntity.BAY_COUNT; bay++) {
                     RackModuleType type = rack.moduleType(bay);
                     if (type == RackModuleType.SERVER) servers++;
@@ -73,8 +79,31 @@ public final class ServerCabinetTopology {
     }
 
     private static boolean isAlignedRack(LevelReader level, BlockPos pos, Direction facing) {
-        BlockState state = level.getBlockState(pos);
-        return state.getBlock() instanceof ServerRackBlock
+        BlockState state = loadedState(level, pos);
+        return state != null && state.getBlock() instanceof ServerRackBlock
                 && state.getValue(ServerRackBlock.FACING) == facing;
+    }
+
+    /**
+     * Chunk-load indexing must never turn a state read back into a blocking chunk request. A
+     * ServerLevel can expose a chunk that is already present through getChunkNow even while its
+     * completion callback is still running; use that same chunk directly throughout resolution.
+     */
+    @Nullable
+    private static BlockState loadedState(LevelReader level, BlockPos pos) {
+        if (level instanceof ServerLevel serverLevel) {
+            LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+            return chunk == null ? null : chunk.getBlockState(pos);
+        }
+        return level.getBlockState(pos);
+    }
+
+    @Nullable
+    private static BlockEntity loadedBlockEntity(LevelReader level, BlockPos pos) {
+        if (level instanceof ServerLevel serverLevel) {
+            LevelChunk chunk = serverLevel.getChunkSource().getChunkNow(pos.getX() >> 4, pos.getZ() >> 4);
+            return chunk == null ? null : chunk.getBlockEntity(pos);
+        }
+        return level.getBlockEntity(pos);
     }
 }

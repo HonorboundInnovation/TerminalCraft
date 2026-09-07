@@ -16,6 +16,10 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.network.Connection;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.server.level.ServerLevel;
@@ -31,7 +35,7 @@ import java.util.UUID;
 /**
  * Multi-line text display peripheral. Written by adjacent terminals via shell.
  */
-public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
+public class MonitorBlockEntity extends BlockEntity implements MonitorDevice, MenuProvider {
     public static final int MAX_LINES = 20;
     public static final int MAX_LINE_LEN = 40;
 
@@ -91,6 +95,17 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
         return title;
     }
 
+    @Override
+    public Component getDisplayName() {
+        return Component.literal("Monitor Configuration");
+    }
+
+    @Nullable
+    @Override
+    public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+        return new com.malice.terminalcraft.menu.DisplayDiagnosticsMenu(containerId, inventory, this);
+    }
+
     /**
      * Client render snapshot for the complete connected wall. Only the visual top-left tile is
      * marked as the anchor, allowing the block-entity renderer to paint one seamless canvas.
@@ -119,6 +134,37 @@ public class MonitorBlockEntity extends BlockEntity implements MonitorDevice {
     /** Stable top-left owner shared by optional integrations and the wall renderer. */
     public MonitorBlockEntity wallAnchor() {
         return MonitorGroupDevice.discover(this).anchor();
+    }
+
+    /** Current visual text scale shared by every tile in the connected wall. */
+    public double wallTextScale() {
+        return MonitorGroupDevice.discover(this).anchor().terminalSurface().textScale();
+    }
+
+    /** Current default text color shared by every tile in the connected wall. */
+    public int wallForegroundColor() {
+        return MonitorGroupDevice.discover(this).anchor().foregroundColor();
+    }
+
+    /**
+     * Applies one persisted, synchronized appearance setting to the complete connected wall.
+     * Keeping a copy on every tile means the setting survives wall splits and anchor changes.
+     */
+    public void configureWallAppearance(double textScale, int foreground) {
+        if (!Double.isFinite(textScale) || textScale < 0.5 || textScale > 5.0
+                || textScale * 2 != Math.rint(textScale * 2)) {
+            throw new IllegalArgumentException("text scale must be from 0.5 to 5.0 in increments of 0.5");
+        }
+        if (foreground < 0 || foreground > 0xFFFFFF) {
+            throw new IllegalArgumentException("foreground color must be a 24-bit RGB value");
+        }
+        MonitorGroupDevice.Group group = MonitorGroupDevice.discover(this);
+        for (MonitorBlockEntity tile : group.tiles()) {
+            tile.terminalSurface.setTextScale(textScale);
+            tile.foregroundColor = foreground;
+            tile.syncLegacyPaletteToSurface();
+            tile.setChangedAndSync();
+        }
     }
 
     /** Writes one zero-based row across the complete connected wall. */

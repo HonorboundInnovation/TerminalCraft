@@ -178,4 +178,25 @@ public final class PlcRedstoneGameTests {
             });
         });
     }
+
+    @GameTest(template = "empty", timeoutTicks = 40)
+    public static void terminalShellFindsAdjacentPlcOnEverySide(GameTestHelper helper) {
+        BlockPos terminalPos = new BlockPos(3, 3, 3);
+        helper.setBlock(terminalPos, ModRegistries.TERMINAL_BLOCK.get());
+        TerminalBlockEntity terminal = (TerminalBlockEntity) helper.getBlockEntity(terminalPos);
+
+        for (Direction direction : Direction.values()) {
+            BlockPos plcPos = terminalPos.relative(direction);
+            helper.setBlock(plcPos, ModRegistries.PROGRAMMABLE_LOGIC_CONTROLLER_BLOCK.get());
+            com.malice.terminalcraft.shell.ShellCommandResult result =
+                    terminal.getShell().executeForResult("plc status");
+            helper.assertTrue(result.exitCode() == 0
+                            && result.outputLines().size() == 1
+                            && result.outputLines().get(0).startsWith("state=STOP"),
+                    "terminal must resolve a directly adjacent PLC on its "
+                            + direction.getName() + " side: " + result.outputLines());
+            helper.destroyBlock(plcPos);
+        }
+        helper.succeed();
+    }
 }

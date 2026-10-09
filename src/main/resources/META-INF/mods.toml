@@ -67,14 +67,14 @@ description='''${mod_description}'''
 [[dependencies.${mod_id}]]
     modId="sophisticatedstorage"
     mandatory=false
-    versionRange="[1.4.32,1.5)"
+    versionRange="[1.4.32,2)"
     ordering="AFTER"
     side="BOTH"
 
 [[dependencies.${mod_id}]]
     modId="sophisticatedbackpacks"
     mandatory=false
-    versionRange="[3.24.31,3.25)"
+    versionRange="[3.24.31,4)"
     ordering="AFTER"
     side="BOTH"
 

@@ -14,6 +14,10 @@ public final class ShellSyncPolicyTest {
         assertEquals(2, ModNetwork.EDITOR_ACTION_PACKET_ID, "editor action packet ID");
         assertEquals(3, ModNetwork.EDITOR_RESULT_PACKET_ID, "editor result packet ID");
         assertEquals(7, ModNetwork.CONTROL_CENTER_ACTION_PACKET_ID, "control center action packet ID");
+        assertTrue(ModNetwork.MONITOR_CONFIG_PACKET_ID != RemoteCompletionPackets.REQUEST_ID,
+                "monitor config packet ID must not collide with completion requests");
+        assertTrue(ModNetwork.MONITOR_CONFIG_PACKET_ID != RemoteCompletionPackets.RESPONSE_ID,
+                "monitor config packet ID must not collide with completion responses");
 
         assertTrue(!ShellSyncPolicy.isAdmissible(null), "null snapshot rejected");
         assertTrue(ShellSyncPolicy.isAdmissible(new CompoundTag()), "empty snapshot accepted");

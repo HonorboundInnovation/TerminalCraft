@@ -57,7 +57,10 @@ public final class ModNetwork {
     static final int PLC_ACTION_PACKET_ID = 5;
     static final int PLC_RESULT_PACKET_ID = 6;
     static final int CONTROL_CENTER_ACTION_PACKET_ID = 7;
-    static final int MONITOR_CONFIG_PACKET_ID = 8;
+    // Completion requests/responses occupy IDs 8 and 9. Keep monitor configuration on its
+    // own ID; reusing 8 makes a terminal Tab request decode as a monitor packet and disconnect
+    // the player when the mismatched decoder overruns the payload.
+    static final int MONITOR_CONFIG_PACKET_ID = 10;
 
     private static final int MAX_COMMAND_PACKET_LENGTH = 4096;
     private static final CommandSubmissionGuard COMMAND_GUARD = new CommandSubmissionGuard();

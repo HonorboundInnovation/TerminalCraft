@@ -121,9 +121,9 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // Public compile-time APIs only; these mods remain optional and are never bundled.
-    compileOnly fg.deobf("curse.maven:sophisticated-core-618298:7870062")
+    compileOnly fg.deobf("curse.maven:sophisticated-core-618298:8985880")
     compileOnly fg.deobf("curse.maven:sophisticated-storage-619320:7865058")
-    compileOnly fg.deobf("curse.maven:sophisticated-backpacks-422301:7853013")
+    compileOnly fg.deobf("curse.maven:sophisticated-backpacks-422301:9003542")
     compileOnly fg.deobf("curse.maven:storage-drawers-223852:6994481")
     compileOnly fg.deobf("maven.modrinth:refined-storage:1.12.4")
     compileOnly fg.deobf("curse.maven:create-328085:7178761")
